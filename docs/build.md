@@ -1,12 +1,30 @@
-# Build (Draft)
+# Build
 
-This repo is a Rust workspace.
+This repo is a Rust workspace (server + CLI) with a planned Tauri desktop app.
+
+## Prerequisites
+
+- Rust (stable)
+- `rustfmt` + `clippy` (installed via `rustup component add rustfmt clippy`)
 
 ## Server
 
-- Run: `cargo run -p filedock-server`
-- Health: `GET http://localhost:8787/health`
+```bash
+cargo run -p filedock-server
+```
+
+Health:
+
+```bash
+curl -sS http://localhost:8787/health
+```
 
 ## CLI
 
-- Run: `cargo run -p filedock -- health-sample`
+```bash
+cargo run -p filedock -- health-sample
+```
+
+## CI
+
+GitHub Actions runs `fmt`, `clippy`, and `test` on pushes and PRs.
