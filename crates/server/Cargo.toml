@@ -12,3 +12,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 filedock-protocol = { path = "../protocol" }
+filedock-storage = { path = "../storage" }
+bytes = "1"
