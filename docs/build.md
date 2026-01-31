@@ -31,6 +31,12 @@ cargo run -p filedock -- health-sample
 cargo run -p filedock -- push-file --server http://127.0.0.1:8787 --file ./path/to/file
 ```
 
+### Push a Folder (snapshot + manifest MVP)
+
+```bash
+cargo run -p filedock -- push-folder --server http://127.0.0.1:8787 --device my-laptop --folder ./some/folder
+```
+
 ## CI
 
 GitHub Actions runs `fmt`, `clippy`, and `test` on pushes and PRs.

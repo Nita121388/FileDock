@@ -10,5 +10,6 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 blake3 = "1"
 bytes = "1"
+walkdir = "2"
 
 filedock-protocol = { path = "../protocol" }

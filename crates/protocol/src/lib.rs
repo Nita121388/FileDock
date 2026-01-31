@@ -10,6 +10,18 @@ pub fn is_valid_chunk_hash(s: &str) -> bool {
     s.as_bytes().iter().all(|b| b.is_ascii_hexdigit())
 }
 
+/// Manifest paths are stored as relative POSIX paths (no leading slash).
+pub fn is_valid_rel_path(p: &str) -> bool {
+    if p.is_empty() {
+        return false;
+    }
+    if p.starts_with('/') || p.starts_with('\\') {
+        return false;
+    }
+    // Disallow parent traversal. (We keep this strict for MVP.)
+    !p.split('/').any(|seg| seg == ".." || seg.is_empty())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
     pub id: String,
@@ -31,4 +43,33 @@ pub struct ChunkPresenceRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkPresenceResponse {
     pub missing: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotCreateRequest {
+    pub device_name: String,
+    pub root_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotCreateResponse {
+    pub snapshot_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestFileEntry {
+    /// Relative path from the snapshot root (POSIX style).
+    pub path: String,
+    pub size: u64,
+    /// Seconds since UNIX epoch (UTC).
+    pub mtime_unix: i64,
+    /// For MVP we store a single chunk hash per file.
+    pub chunk_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotManifest {
+    pub snapshot_id: String,
+    pub created_unix: i64,
+    pub files: Vec<ManifestFileEntry>,
 }

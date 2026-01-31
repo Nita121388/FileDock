@@ -32,6 +32,12 @@ MVP: versioned HTTP JSON API.
 - `POST /v1/jobs/{job_id}/snapshots` (start snapshot)
 - `GET /v1/snapshots/{snapshot_id}`
 
+MVP (current implementation):
+
+- `POST /v1/snapshots` (create snapshot id)
+- `PUT /v1/snapshots/{snapshot_id}/manifest`
+- `GET /v1/snapshots/{snapshot_id}/manifest`
+
 ### Browse
 
 - `GET /v1/snapshots/{snapshot_id}/tree?path=/...`
