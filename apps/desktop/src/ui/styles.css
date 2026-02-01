@@ -508,6 +508,28 @@ a {
   overflow: auto;
 }
 
+.db-reg {
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.db-input {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg0);
+  border-radius: 10px;
+  padding: 8px 10px;
+  outline: none;
+  min-width: 0;
+}
+
+.db-input:focus {
+  border-color: rgba(59, 228, 200, 0.55);
+}
+
 .db-item {
   text-align: left;
   border: 1px solid rgba(255, 255, 255, 0.08);

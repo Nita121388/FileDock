@@ -1,13 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PaneTab } from "../../../model/layout";
 import type { Settings } from "../../../model/settings";
-import { apiGetBytes, getTree, listSnapshots, type SnapshotMeta, type TreeEntry } from "../../../api/client";
+import {
+  apiGetBytes,
+  getTree,
+  listDevices,
+  listSnapshots,
+  registerDevice,
+  type DeviceInfo,
+  type SnapshotMeta,
+  type TreeEntry
+} from "../../../api/client";
 
 type DeviceTab = Extract<PaneTab, { pane: "deviceBrowser" }>;
 
 function fmtUnix(ts: number): string {
   const d = new Date(ts * 1000);
   return d.toISOString().replace("T", " ").slice(0, 16);
+}
+
+function detectOs(): string {
+  const ua = navigator.userAgent || "";
+  if (/Windows/i.test(ua)) return "Windows";
+  if (/Mac OS X|Macintosh/i.test(ua)) return "macOS";
+  if (/Linux/i.test(ua)) return "Linux";
+  return "unknown";
 }
 
 export default function DeviceBrowserPane(props: {
@@ -21,6 +38,7 @@ export default function DeviceBrowserPane(props: {
   const [status, setStatus] = useState<string>("");
   const [loading, setLoading] = useState(false);
 
+  const [devicesApi, setDevicesApi] = useState<DeviceInfo[]>([]);
   const [snapshots, setSnapshots] = useState<SnapshotMeta[]>([]);
   const [entries, setEntries] = useState<TreeEntry[]>([]);
   const [loadedKey, setLoadedKey] = useState<string>("");
@@ -29,13 +47,37 @@ export default function DeviceBrowserPane(props: {
   const snapshotId = tab.state.snapshotId;
   const path = tab.state.path;
 
-  const devices = useMemo(() => {
+  const [regName, setRegName] = useState<string>("");
+  const [regOs, setRegOs] = useState<string>(() => detectOs());
+
+  const deviceNames = useMemo(() => {
+    // Prefer registered devices; fall back to snapshot-derived names.
+    const fromApi = devicesApi.map((d) => d.name).filter((x) => x);
+    if (fromApi.length > 0) return Array.from(new Set(fromApi)).sort();
     return Array.from(new Set(snapshots.map((s) => s.device_name))).sort();
-  }, [snapshots]);
+  }, [devicesApi, snapshots]);
+
+  const deviceByName = useMemo(() => {
+    const m = new Map<string, DeviceInfo>();
+    for (const d of devicesApi) m.set(d.name, d);
+    return m;
+  }, [devicesApi]);
 
   const filtered = useMemo(() => {
     return snapshots.filter((s) => (deviceName ? s.device_name === deviceName : true));
   }, [snapshots, deviceName]);
+
+  const refreshDevices = useCallback(async () => {
+    try {
+      const ds = await listDevices(settings);
+      setDevicesApi(ds);
+      setStatus((prev) => prev || `devices: ${ds.length}`);
+    } catch (e: any) {
+      // Device registry may be unused; keep it non-fatal.
+      setDevicesApi([]);
+      setStatus(String(e?.message ?? e));
+    }
+  }, [settings]);
 
   const refreshSnapshots = useCallback(async () => {
     setLoading(true);
@@ -72,24 +114,25 @@ export default function DeviceBrowserPane(props: {
 
   useEffect(() => {
     // Keep device selection valid if the device list changes.
-    if (devices.length === 0) {
+    if (deviceNames.length === 0) {
       if (deviceName) onTabChange({ ...tab, state: { ...tab.state, deviceName: "" } });
       return;
     }
     if (!deviceName) {
-      onTabChange({ ...tab, state: { ...tab.state, deviceName: devices[0]! } });
+      onTabChange({ ...tab, state: { ...tab.state, deviceName: deviceNames[0]! } });
       return;
     }
-    if (!devices.includes(deviceName)) {
-      onTabChange({ ...tab, state: { ...tab.state, deviceName: devices[0]! } });
+    if (!deviceNames.includes(deviceName)) {
+      onTabChange({ ...tab, state: { ...tab.state, deviceName: deviceNames[0]! } });
     }
-  }, [devices, deviceName, onTabChange, tab]);
+  }, [deviceNames, deviceName, onTabChange, tab]);
 
   useEffect(() => {
+    refreshDevices();
     refreshSnapshots();
     // If we already have a selected snapshot, try to refresh the tree too.
     if (snapshotId) refreshTree(snapshotId, path);
-  }, [path, refreshSnapshots, refreshTree, settings.serverBaseUrl, settings.token, snapshotId]);
+  }, [path, refreshDevices, refreshSnapshots, refreshTree, settings.serverBaseUrl, settings.token, snapshotId]);
 
   useEffect(() => {
     // When switching pane tabs, sync the tree view to the tab state.
@@ -111,13 +154,50 @@ export default function DeviceBrowserPane(props: {
         <div className="db-head">
           Devices
           <span className="db-head-right">
+            <button className="db-mini" onClick={refreshDevices} disabled={loading} title="Refresh devices">
+              Devices
+            </button>
             <button className="db-mini" onClick={refreshSnapshots} disabled={loading} title="Refresh snapshots">
               Refresh
             </button>
           </span>
         </div>
+        <div className="db-reg">
+          <input
+            className="db-input"
+            value={regName}
+            onChange={(e) => setRegName(e.target.value)}
+            placeholder="device name"
+          />
+          <input
+            className="db-input"
+            value={regOs}
+            onChange={(e) => setRegOs(e.target.value)}
+            placeholder="os"
+          />
+          <button
+            className="db-mini"
+            disabled={loading || !regName.trim() || !regOs.trim()}
+            onClick={async () => {
+              setLoading(true);
+              try {
+                const resp = await registerDevice(settings, { device_name: regName.trim(), os: regOs.trim() });
+                setStatus(`registered ${regName.trim()} (id=${resp.device_id}) token=${resp.device_token}`);
+                await refreshDevices();
+                onTabChange({ ...tab, state: { ...tab.state, deviceName: regName.trim() } });
+              } catch (e: any) {
+                setStatus(String(e?.message ?? e));
+              } finally {
+                setLoading(false);
+              }
+            }}
+            title="Register device"
+          >
+            Register
+          </button>
+        </div>
         <div className="db-list">
-          {devices.map((name) => (
+          {deviceNames.map((name) => (
             <button
               key={name}
               className={name === deviceName ? "db-item active" : "db-item"}
@@ -127,10 +207,13 @@ export default function DeviceBrowserPane(props: {
               }}
             >
               <div className="db-title">{name}</div>
-              <div className="db-sub">{filtered.filter((s) => s.device_name === name).length} snapshots</div>
+              <div className="db-sub">
+                {deviceByName.get(name)?.os ? `${deviceByName.get(name)!.os} · ` : ""}
+                {snapshots.filter((s) => s.device_name === name).length} snapshots
+              </div>
             </button>
           ))}
-          {devices.length === 0 ? <div className="db-empty">No devices (no snapshots)</div> : null}
+          {deviceNames.length === 0 ? <div className="db-empty">No devices</div> : null}
         </div>
       </div>
 

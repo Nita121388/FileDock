@@ -1,5 +1,21 @@
 import type { Settings } from "../model/settings";
 
+export type DeviceInfo = {
+  id: string;
+  name: string;
+  os: string;
+};
+
+export type DeviceRegisterRequest = {
+  device_name: string;
+  os: string;
+};
+
+export type DeviceRegisterResponse = {
+  device_id: string;
+  device_token: string;
+};
+
 export type SnapshotMeta = {
   snapshot_id: string;
   device_name: string;
@@ -26,6 +42,25 @@ function headers(settings: Settings): HeadersInit {
   };
   if (settings.token.trim()) h["x-filedock-token"] = settings.token.trim();
   return h;
+}
+
+async function apiPostJson<T>(
+  settings: Settings,
+  path: string,
+  body: unknown
+): Promise<T> {
+  const base = settings.serverBaseUrl.replace(/\/+$/, "");
+  const url = base + path;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: headers(settings),
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`POST ${path} failed: ${resp.status} ${text}`.trim());
+  }
+  return (await resp.json()) as T;
 }
 
 export async function apiGetJson<T>(settings: Settings, path: string, query?: Record<string, string>): Promise<T> {
@@ -70,3 +105,10 @@ export async function getTree(settings: Settings, snapshotId: string, path: stri
   return apiGetJson<TreeResponse>(settings, `/v1/snapshots/${encodeURIComponent(snapshotId)}/tree`, { path });
 }
 
+export async function listDevices(settings: Settings): Promise<DeviceInfo[]> {
+  return apiGetJson<DeviceInfo[]>(settings, "/v1/devices");
+}
+
+export async function registerDevice(settings: Settings, req: DeviceRegisterRequest): Promise<DeviceRegisterResponse> {
+  return apiPostJson<DeviceRegisterResponse>(settings, "/v1/auth/device/register", req);
+}
