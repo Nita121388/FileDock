@@ -7,7 +7,7 @@ Goals:
 - Browse backups per-device and per-snapshot.
 - Wave-terminal-like multi-pane UI for fast cross-device file move/copy.
 
-Status: pre-MVP (scaffolding).
+Status: active development (MVP features working; still evolving).
 
 ## Repository Layout
 
@@ -18,6 +18,7 @@ Status: pre-MVP (scaffolding).
 
 ## Quick Links
 
+- Quickstart: `docs/quickstart.md`
 - Architecture: `docs/architecture.md`
 - Roadmap: `docs/roadmap.md`
 - Development: `docs/development.md`
