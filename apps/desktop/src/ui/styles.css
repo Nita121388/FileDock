@@ -586,6 +586,10 @@ a {
   color: var(--fg1);
 }
 
+.db-row-main.file:active {
+  cursor: grabbing;
+}
+
 .db-icon {
   color: var(--fg2);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;

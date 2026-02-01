@@ -29,6 +29,7 @@ export function PaneView(props: {
       return (
         <TransferQueuePane
           transfers={props.transfers}
+          onEnqueueDownload={props.onEnqueueDownload}
           onRemove={props.onRemoveTransfer}
           onDownload={props.onDownloadTransfer}
         />

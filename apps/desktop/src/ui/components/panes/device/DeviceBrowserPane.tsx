@@ -186,10 +186,19 @@ export default function DeviceBrowserPane(props: {
                 <div key={`${e.kind}:${e.name}`} className="db-row">
                   <button
                     className={e.kind === "dir" ? "db-row-main dir" : "db-row-main file"}
+                    draggable={e.kind === "file"}
                     onClick={() => {
                       if (e.kind !== "dir") return;
                       const next = path ? `${path}/${e.name}` : e.name;
                       refreshTree(snapshotId, next);
+                    }}
+                    onDragStart={(ev) => {
+                      if (e.kind !== "file") return;
+                      const filePath = path ? `${path}/${e.name}` : e.name;
+                      const payload = JSON.stringify({ snapshotId, path: filePath, name: e.name });
+                      ev.dataTransfer.effectAllowed = "copy";
+                      ev.dataTransfer.setData("application/x-filedock-file", payload);
+                      ev.dataTransfer.setData("text/plain", filePath);
                     }}
                     title={e.name}
                   >

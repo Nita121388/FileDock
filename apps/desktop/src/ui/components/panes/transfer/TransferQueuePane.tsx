@@ -2,13 +2,34 @@ import type { TransferJob } from "../../../model/transfers";
 
 export default function TransferQueuePane(props: {
   transfers: TransferJob[];
+  onEnqueueDownload: (snapshotId: string, path: string) => void;
   onRemove: (id: string) => void;
   onDownload: (id: string) => Promise<void>;
 }) {
-  const { transfers, onRemove, onDownload } = props;
+  const { transfers, onEnqueueDownload, onRemove, onDownload } = props;
 
   return (
-    <div className="queue">
+    <div
+      className="queue"
+      onDragOver={(e) => {
+        // Accept file items dragged from Device Browser.
+        const t = Array.from(e.dataTransfer.types);
+        if (t.includes("application/x-filedock-file")) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        const raw = e.dataTransfer.getData("application/x-filedock-file");
+        if (!raw) return;
+        e.preventDefault();
+        try {
+          const parsed = JSON.parse(raw) as { snapshotId: string; path: string };
+          if (parsed.snapshotId && parsed.path) {
+            onEnqueueDownload(parsed.snapshotId, parsed.path);
+          }
+        } catch {
+          // ignore
+        }
+      }}
+    >
       {transfers.length === 0 ? (
         <div className="db-empty">No transfers yet. Queue a file from Device Browser (+Q).</div>
       ) : null}
@@ -50,4 +71,3 @@ export default function TransferQueuePane(props: {
     </div>
   );
 }
-
