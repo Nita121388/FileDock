@@ -906,16 +906,25 @@ export default function App() {
 
       let contigNext = nextIndex;
       const completed = new Set<number>();
+      let filesDoneCount = contigNext;
+      const markCompletedLocked = (i: number) => {
+        if (i < contigNext) return;
+        if (completed.has(i)) return;
+        completed.add(i);
+        filesDoneCount++;
+        while (completed.has(contigNext)) {
+          completed.delete(contigNext);
+          contigNext++;
+        }
+        patchTransfer(id, (x) => ({ ...(x as any), nextIndex: contigNext }));
+      };
       const markCompleted = async (i: number) => {
         await withManifestLock(async () => {
-          completed.add(i);
-          while (completed.has(contigNext)) {
-            completed.delete(contigNext);
-            contigNext++;
-          }
-          patchTransfer(id, (x) => ({ ...(x as any), nextIndex: contigNext }));
+          markCompletedLocked(i);
         });
       };
+
+      const phasePrefix = () => (total > 0 ? `[${Math.min(filesDoneCount, total)}/${total}] ` : "");
 
       const writeManifestNow = async () => {
         await putManifest(
@@ -960,7 +969,7 @@ export default function App() {
 
         if (plan.kind === "skip") {
           const pct = total > 0 ? Math.floor(((i + 1) / total) * 100) : 0;
-          setTransferProgress(id, { phase: `skipping ${plan.dstFilePath}`, pct });
+          setTransferProgress(id, { phase: `${phasePrefix()}skipping ${plan.dstFilePath}`, pct });
           await markCompleted(i);
           return;
         }
@@ -972,7 +981,7 @@ export default function App() {
           // Chunk-level copy: download missing chunks by hash and upload to destination.
           const hashes = srcMeta.chunks.map((c) => c.hash);
           setTransferProgress(id, {
-            phase: `checking chunks ${srcFilePath}`,
+            phase: `${phasePrefix()}checking chunks ${srcFilePath}`,
             pct: total > 0 ? Math.floor((i / total) * 100) : 0
           });
           const missing = new Set(await ensureMissingOnDest(hashes));
@@ -994,7 +1003,7 @@ export default function App() {
                 const frac = missingBytesTotal > 0 ? missingBytesDone / missingBytesTotal : 1;
                 const pct = total > 0 ? Math.floor(((i + frac) / total) * 100) : 0;
                 setTransferProgress(id, {
-                  phase: `copying chunks (${Math.min(idx, toCopy.length)}/${toCopy.length}) (${srcFilePath})`,
+                  phase: `${phasePrefix()}copying chunks (${Math.min(idx, toCopy.length)}/${toCopy.length}) (${srcFilePath})`,
                   doneBytes: missingBytesDone,
                   totalBytes: missingBytesTotal,
                   pct
@@ -1016,7 +1025,7 @@ export default function App() {
                 const frac2 = missingBytesTotal > 0 ? missingBytesDone / missingBytesTotal : 1;
                 const pct2 = total > 0 ? Math.floor(((i + frac2) / total) * 100) : 0;
                 setTransferProgress(id, {
-                  phase: `copying chunks (${Math.min(idx, toCopy.length)}/${toCopy.length}) (${srcFilePath})`,
+                  phase: `${phasePrefix()}copying chunks (${Math.min(idx, toCopy.length)}/${toCopy.length}) (${srcFilePath})`,
                   doneBytes: missingBytesDone,
                   totalBytes: missingBytesTotal,
                   pct: pct2
@@ -1034,12 +1043,7 @@ export default function App() {
               chunks: srcMeta.chunks
             });
             await writeManifestNow();
-            completed.add(i);
-            while (completed.has(contigNext)) {
-              completed.delete(contigNext);
-              contigNext++;
-            }
-            patchTransfer(id, (x) => ({ ...(x as any), nextIndex: contigNext }));
+            markCompletedLocked(i);
           });
           return;
         }
@@ -1054,7 +1058,7 @@ export default function App() {
               const frac = totalBytes && totalBytes > 0 ? done / totalBytes : 0;
               const pct = total > 0 ? Math.floor(((i + frac) / total) * 100) : 0;
               setTransferProgress(id, {
-                phase: `downloading ${srcFilePath}`,
+                phase: `${phasePrefix()}downloading ${srcFilePath}`,
                 doneBytes: done,
                 totalBytes: totalBytes ?? undefined,
                 pct
@@ -1066,7 +1070,7 @@ export default function App() {
         });
 
         setTransferProgress(id, {
-          phase: `hashing ${srcFilePath}`,
+          phase: `${phasePrefix()}hashing ${srcFilePath}`,
           pct: total > 0 ? Math.floor(((i + 0.5) / total) * 100) : 0
         });
         const refs = chunkBytes(buf);
@@ -1091,7 +1095,7 @@ export default function App() {
           offset = end;
           if (ulLimiter) await ulLimiter(offset);
           const pct = total > 0 ? Math.floor(((i + offset / Math.max(1, buf.length)) / total) * 100) : 0;
-          setTransferProgress(id, { phase: `uploading ${srcFilePath} (${uploaded}/${missing.size} chunks)`, pct });
+          setTransferProgress(id, { phase: `${phasePrefix()}uploading ${srcFilePath} (${uploaded}/${missing.size} chunks)`, pct });
         }
 
         // Serialize manifest update + write so we don't race with other files.
@@ -1104,12 +1108,7 @@ export default function App() {
             chunks: manifestChunks
           });
           await writeManifestNow();
-          completed.add(i);
-          while (completed.has(contigNext)) {
-            completed.delete(contigNext);
-            contigNext++;
-          }
-          patchTransfer(id, (x) => ({ ...(x as any), nextIndex: contigNext }));
+          markCompletedLocked(i);
         });
       };
 
