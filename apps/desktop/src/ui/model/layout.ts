@@ -7,6 +7,11 @@ export type DropZone = "center" | "left" | "right" | "top" | "bottom";
 export type LayoutNode = SplitNode | LeafNode;
 
 export type DeviceBrowserTabState = {
+  // Per-tab connection override. Empty strings mean "use global settings".
+  serverBaseUrl: string;
+  token: string;
+  deviceId: string;
+  deviceToken: string;
   deviceName: string;
   snapshotId: string;
   path: string;
@@ -57,7 +62,20 @@ export function uid(prefix: string): string {
 export function makeTab(pane: PaneKind, title?: string): PaneTab {
   const id = uid("tab");
   if (pane === "deviceBrowser") {
-    return { id, pane, title, state: { deviceName: "", snapshotId: "", path: "" } };
+    return {
+      id,
+      pane,
+      title,
+      state: {
+        serverBaseUrl: "",
+        token: "",
+        deviceId: "",
+        deviceToken: "",
+        deviceName: "",
+        snapshotId: "",
+        path: ""
+      }
+    };
   }
   return { id, pane: pane as any, title } as PaneTab;
 }
@@ -132,6 +150,10 @@ export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
             pane,
             title,
             state: {
+              serverBaseUrl: typeof st?.serverBaseUrl === "string" ? st.serverBaseUrl : "",
+              token: typeof st?.token === "string" ? st.token : "",
+              deviceId: typeof st?.deviceId === "string" ? st.deviceId : "",
+              deviceToken: typeof st?.deviceToken === "string" ? st.deviceToken : "",
               deviceName: typeof st?.deviceName === "string" ? st.deviceName : "",
               snapshotId: typeof st?.snapshotId === "string" ? st.snapshotId : "",
               path: typeof st?.path === "string" ? st.path : ""
@@ -198,7 +220,15 @@ export function setLeafPane(node: LayoutNode, leafId: string, pane: PaneKind): L
         if (t.id !== a.id) return t;
         const title = (t as any).title as string | undefined;
         if (pane === "deviceBrowser") {
-          const prev = t.pane === "deviceBrowser" ? t.state : { deviceName: "", snapshotId: "", path: "" };
+          const prev = t.pane === "deviceBrowser" ? t.state : {
+            serverBaseUrl: "",
+            token: "",
+            deviceId: "",
+            deviceToken: "",
+            deviceName: "",
+            snapshotId: "",
+            path: ""
+          };
           return { id: t.id, pane, title, state: { ...prev } };
         }
         if (pane === "transferQueue") return { id: t.id, pane, title };

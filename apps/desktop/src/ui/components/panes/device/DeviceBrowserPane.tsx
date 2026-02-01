@@ -48,6 +48,27 @@ export default function DeviceBrowserPane(props: {
   const snapshotId = tab.state.snapshotId;
   const path = tab.state.path;
 
+  const effSettings: Settings = useMemo(() => {
+    // Per-tab overrides let one window browse multiple servers/devices at once.
+    const sUrl = tab.state.serverBaseUrl.trim() || settings.serverBaseUrl;
+    const tok = tab.state.token || settings.token;
+    const devId = tab.state.deviceId || settings.deviceId;
+    const devTok = tab.state.deviceToken || settings.deviceToken;
+    return {
+      ...settings,
+      serverBaseUrl: sUrl,
+      token: tok,
+      deviceId: devId,
+      deviceToken: devTok
+    };
+  }, [
+    settings,
+    tab.state.serverBaseUrl,
+    tab.state.token,
+    tab.state.deviceId,
+    tab.state.deviceToken
+  ]);
+
   const [regName, setRegName] = useState<string>("");
   const [regOs, setRegOs] = useState<string>(() => detectOs());
 
@@ -70,7 +91,7 @@ export default function DeviceBrowserPane(props: {
 
   const refreshDevices = useCallback(async () => {
     try {
-      const ds = await listDevices(settings);
+      const ds = await listDevices(effSettings);
       setDevicesApi(ds);
       setStatus((prev) => prev || `devices: ${ds.length}`);
     } catch (e: any) {
@@ -78,12 +99,12 @@ export default function DeviceBrowserPane(props: {
       setDevicesApi([]);
       setStatus(String(e?.message ?? e));
     }
-  }, [settings]);
+  }, [effSettings]);
 
   const refreshSnapshots = useCallback(async () => {
     setLoading(true);
     try {
-      const s = await listSnapshots(settings);
+      const s = await listSnapshots(effSettings);
       setSnapshots(s);
       if (!deviceName && s.length > 0) {
         onTabChange({ ...tab, state: { ...tab.state, deviceName: s[0]!.device_name } });
@@ -94,12 +115,12 @@ export default function DeviceBrowserPane(props: {
     } finally {
       setLoading(false);
     }
-  }, [deviceName, onTabChange, settings, tab]);
+  }, [deviceName, effSettings, onTabChange, tab]);
 
   const refreshTree = useCallback(async (nextSnapshotId: string, nextPath: string) => {
     setLoading(true);
     try {
-      const tr = await getTree(settings, nextSnapshotId, nextPath);
+      const tr = await getTree(effSettings, nextSnapshotId, nextPath);
       setEntries(tr.entries);
       setLoadedKey(`${nextSnapshotId}::${tr.path}`);
       if (tab.state.snapshotId !== nextSnapshotId || tab.state.path !== tr.path) {
@@ -111,7 +132,7 @@ export default function DeviceBrowserPane(props: {
     } finally {
       setLoading(false);
     }
-  }, [onTabChange, settings, tab]);
+  }, [effSettings, onTabChange, tab]);
 
   useEffect(() => {
     // Keep device selection valid if the device list changes.
@@ -133,7 +154,7 @@ export default function DeviceBrowserPane(props: {
     refreshSnapshots();
     // If we already have a selected snapshot, try to refresh the tree too.
     if (snapshotId) refreshTree(snapshotId, path);
-  }, [path, refreshDevices, refreshSnapshots, refreshTree, settings.serverBaseUrl, settings.token, snapshotId]);
+  }, [path, refreshDevices, refreshSnapshots, refreshTree, effSettings.serverBaseUrl, effSettings.token, effSettings.deviceId, effSettings.deviceToken, snapshotId]);
 
   useEffect(() => {
     // When switching pane tabs, sync the tree view to the tab state.
@@ -166,6 +187,55 @@ export default function DeviceBrowserPane(props: {
         <div className="db-reg">
           <input
             className="db-input"
+            value={tab.state.serverBaseUrl}
+            onChange={(e) => onTabChange({ ...tab, state: { ...tab.state, serverBaseUrl: e.target.value } })}
+            placeholder="server url (optional)"
+            title="Override server URL for this pane tab"
+          />
+          <input
+            className="db-input"
+            value={tab.state.token}
+            onChange={(e) => onTabChange({ ...tab, state: { ...tab.state, token: e.target.value } })}
+            placeholder="server token (optional)"
+            title="Override X-FileDock-Token for this pane tab"
+          />
+          <button
+            className="db-mini"
+            onClick={() => onTabChange({
+              ...tab,
+              state: {
+                ...tab.state,
+                serverBaseUrl: "",
+                token: "",
+                deviceId: "",
+                deviceToken: ""
+              }
+            })}
+            title="Clear per-tab connection override"
+          >
+            Clear
+          </button>
+        </div>
+        <div className="db-reg">
+          <input
+            className="db-input"
+            value={tab.state.deviceId}
+            onChange={(e) => onTabChange({ ...tab, state: { ...tab.state, deviceId: e.target.value } })}
+            placeholder="device id (optional)"
+            title="Override X-FileDock-Device-Id for this pane tab"
+          />
+          <input
+            className="db-input"
+            value={tab.state.deviceToken}
+            onChange={(e) => onTabChange({ ...tab, state: { ...tab.state, deviceToken: e.target.value } })}
+            placeholder="device token (optional)"
+            title="Override X-FileDock-Device-Token for this pane tab"
+          />
+          <span />
+        </div>
+        <div className="db-reg">
+          <input
+            className="db-input"
             value={regName}
             onChange={(e) => setRegName(e.target.value)}
             placeholder="device name"
@@ -182,12 +252,20 @@ export default function DeviceBrowserPane(props: {
             onClick={async () => {
               setLoading(true);
               try {
-                const resp = await registerDevice(settings, { device_name: regName.trim(), os: regOs.trim() });
+                const resp = await registerDevice(effSettings, { device_name: regName.trim(), os: regOs.trim() });
                 setStatus(`registered ${regName.trim()} (id=${resp.device_id})`);
                 // Make it easy to switch to device-auth without exposing FILEDOCK_TOKEN.
+                onTabChange({
+                  ...tab,
+                  state: {
+                    ...tab.state,
+                    deviceId: resp.device_id,
+                    deviceToken: resp.device_token,
+                    deviceName: regName.trim()
+                  }
+                });
                 onSetDeviceAuth(resp.device_id, resp.device_token);
                 await refreshDevices();
-                onTabChange({ ...tab, state: { ...tab.state, deviceName: regName.trim() } });
               } catch (e: any) {
                 setStatus(String(e?.message ?? e));
               } finally {
@@ -319,7 +397,7 @@ export default function DeviceBrowserPane(props: {
                           const filePath = path ? `${path}/${e.name}` : e.name;
                           try {
                             const blob = await apiGetBytes(
-                              settings,
+                              effSettings,
                               `/v1/snapshots/${encodeURIComponent(snapshotId)}/file`,
                               { path: filePath }
                             );
