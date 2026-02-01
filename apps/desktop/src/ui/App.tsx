@@ -123,6 +123,8 @@ export default function App() {
     dstDeviceName: string;
     dstDeviceId?: string;
     dstPath: string;
+    dstBaseSnapshotId?: string;
+    conflictPolicy?: "overwrite" | "skip" | "rename";
   }) => {
     const job: TransferJob = {
       id: uid("xfer"),
@@ -135,7 +137,9 @@ export default function App() {
       srcPath: req.srcPath,
       dstDeviceName: req.dstDeviceName,
       dstDeviceId: req.dstDeviceId,
-      dstPath: req.dstPath
+      dstPath: req.dstPath,
+      dstBaseSnapshotId: req.dstBaseSnapshotId,
+      conflictPolicy: req.conflictPolicy ?? "overwrite"
     };
     setTransfers((xs) => [job, ...xs]);
   };
@@ -148,6 +152,8 @@ export default function App() {
     dstDeviceName: string;
     dstDeviceId?: string;
     dstDirPath: string;
+    dstBaseSnapshotId?: string;
+    conflictPolicy?: "overwrite" | "skip" | "rename";
   }) => {
     const job: TransferJob = {
       id: uid("xfer"),
@@ -161,6 +167,8 @@ export default function App() {
       dstDeviceName: req.dstDeviceName,
       dstDeviceId: req.dstDeviceId,
       dstDirPath: req.dstDirPath,
+      dstBaseSnapshotId: req.dstBaseSnapshotId,
+      conflictPolicy: req.conflictPolicy ?? "overwrite",
       nextIndex: 0,
       filePaths: undefined
     } as any;
@@ -305,6 +313,27 @@ export default function App() {
     const dstSettings = connToSettings(job.dst);
 
     try {
+      // Optional: base the destination on an existing snapshot manifest (copy-on-write into a new snapshot).
+      const baseFiles: { path: string; size: number; mtime_unix: number; chunks: { hash: string; size: number }[] }[] =
+        [];
+      if (job.dstBaseSnapshotId) {
+        setTransferProgress(id, { phase: "loading destination base", pct: 0 });
+        try {
+          const base = await getManifest(dstSettings, job.dstBaseSnapshotId, ac.signal);
+          for (const f of base.files ?? []) {
+            if (!f?.path || !Array.isArray(f.chunks)) continue;
+            baseFiles.push({
+              path: f.path,
+              size: f.size,
+              mtime_unix: f.mtime_unix,
+              chunks: (f.chunks ?? []).map((c) => ({ hash: c.hash, size: c.size }))
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       // 1) Download bytes from source server.
       setTransferProgress(id, { phase: "downloading", pct: 0 });
       const dlLimiter = makeLimiter(getRateLimitBytesPerSec());
@@ -363,27 +392,59 @@ export default function App() {
       const snap = await createSnapshot(
         dstSettings,
         {
-        device_name: job.dstDeviceName,
-        device_id: job.dstDeviceId ?? null,
-        root_path: "(transfer)"
+          device_name: job.dstDeviceName,
+          device_id: job.dstDeviceId ?? null,
+          root_path: job.dstBaseSnapshotId ? `(transfer from ${job.dstBaseSnapshotId})` : "(transfer)"
         },
         ac.signal
       );
+
+      const fileMap = new Map<
+        string,
+        { path: string; size: number; mtime_unix: number; chunks: { hash: string; size: number }[] }
+      >();
+      for (const f of baseFiles) fileMap.set(f.path, f);
+
+      const pol = job.conflictPolicy ?? "overwrite";
+      const choosePath = (p: string): string | null => {
+        if (!fileMap.has(p)) return p;
+        if (pol === "skip") return null;
+        if (pol === "overwrite") return p;
+        // rename
+        const dot = p.lastIndexOf(".");
+        const base = dot > 0 ? p.slice(0, dot) : p;
+        const ext = dot > 0 ? p.slice(dot) : "";
+        for (let i = 2; i < 1000; i++) {
+          const cand = `${base} (${i})${ext}`;
+          if (!fileMap.has(cand)) return cand;
+        }
+        return p;
+      };
+
+      const finalPath = choosePath(job.dstPath);
+      if (finalPath !== null) {
+        fileMap.set(finalPath, {
+          path: finalPath,
+          size: buf.length,
+          mtime_unix: now,
+          chunks: manifestChunks
+        });
+      }
+
+      const files = Array.from(fileMap.values()).sort((a, b) => a.path.localeCompare(b.path));
       await putManifest(
         dstSettings,
         snap.snapshot_id,
         {
-        snapshot_id: snap.snapshot_id,
-        created_unix: now,
-        files: [
-          {
-            path: job.dstPath,
-            size: buf.length,
-            mtime_unix: now,
+          snapshot_id: snap.snapshot_id,
+          created_unix: now,
+          files: files.map((f) => ({
+            path: f.path,
+            size: f.size,
+            mtime_unix: f.mtime_unix,
             chunk_hash: null,
-            chunks: manifestChunks
-          }
-        ]
+            chunks: f.chunks
+          }))
         },
         ac.signal
       );
@@ -434,7 +495,7 @@ export default function App() {
           {
             device_name: job.dstDeviceName,
             device_id: job.dstDeviceId ?? null,
-            root_path: "(transfer-folder)"
+            root_path: job.dstBaseSnapshotId ? `(transfer-folder from ${job.dstBaseSnapshotId})` : "(transfer-folder)"
           },
           ac.signal
         );
@@ -458,7 +519,55 @@ export default function App() {
         // Manifest may not exist yet; treat as empty.
         manifestFiles = [];
       }
+
+      // If this job is based on another snapshot and the destination snapshot is empty, seed it now.
+      if (manifestFiles.length === 0 && job.dstBaseSnapshotId) {
+        setTransferProgress(id, { phase: "seeding base manifest", pct: 0 });
+        try {
+          const base = await getManifest(dstSettings, job.dstBaseSnapshotId, ac.signal);
+          manifestFiles = (base.files ?? [])
+            .filter((f) => f && typeof f.path === "string" && Array.isArray(f.chunks))
+            .map((f) => ({
+              path: f.path,
+              size: f.size,
+              mtime_unix: f.mtime_unix,
+              chunks: (f.chunks ?? []).map((c) => ({ hash: c.hash, size: c.size }))
+            }));
+          await putManifest(
+            dstSettings,
+            dstSnapshotId!,
+            {
+              snapshot_id: dstSnapshotId!,
+              created_unix: Math.floor(Date.now() / 1000),
+              files: manifestFiles.map((f) => ({
+                path: f.path,
+                size: f.size,
+                mtime_unix: f.mtime_unix,
+                chunk_hash: null,
+                chunks: f.chunks
+              }))
+            },
+            ac.signal
+          );
+        } catch {
+          // ignore
+        }
+      }
+
       const doneSet = new Set(manifestFiles.map((f) => f.path));
+      const pol = job.conflictPolicy ?? "overwrite";
+
+      const uniquePath = (p: string): string => {
+        if (!doneSet.has(p)) return p;
+        const dot = p.lastIndexOf(".");
+        const base = dot > 0 ? p.slice(0, dot) : p;
+        const ext = dot > 0 ? p.slice(dot) : "";
+        for (let i = 2; i < 1000; i++) {
+          const cand = `${base} (${i})${ext}`;
+          if (!doneSet.has(cand)) return cand;
+        }
+        return p;
+      };
 
       // 2) Enumerate all files under the source directory (once; persist for resume).
       if (!filesList || filesList.length === 0) {
@@ -489,14 +598,23 @@ export default function App() {
       for (let i = nextIndex; i < total; i++) {
         const srcFilePath = filesList[i]!;
         const rel = job.srcDirPath ? srcFilePath.slice(job.srcDirPath.length + 1) : srcFilePath;
-        const dstFilePath = job.dstDirPath ? `${job.dstDirPath}/${rel}` : rel;
+        let dstFilePath = job.dstDirPath ? `${job.dstDirPath}/${rel}` : rel;
 
-        // Already present in destination manifest: skip (resume-friendly).
         if (doneSet.has(dstFilePath)) {
-          const pct = total > 0 ? Math.floor(((i + 1) / total) * 100) : 0;
-          setTransferProgress(id, { phase: `skipping ${dstFilePath}`, pct });
-          patchTransfer(id, (x) => ({ ...(x as any), nextIndex: i + 1 }));
-          continue;
+          if (pol === "skip") {
+            const pct = total > 0 ? Math.floor(((i + 1) / total) * 100) : 0;
+            setTransferProgress(id, { phase: `skipping ${dstFilePath}`, pct });
+            patchTransfer(id, (x) => ({ ...(x as any), nextIndex: i + 1 }));
+            continue;
+          }
+          if (pol === "rename") {
+            dstFilePath = uniquePath(dstFilePath);
+          }
+          if (pol === "overwrite") {
+            // Remove existing entry before rewriting.
+            manifestFiles = manifestFiles.filter((f) => f.path !== dstFilePath);
+            doneSet.delete(dstFilePath);
+          }
         }
 
         const dlLimiter = makeLimiter(bytesPerSec);

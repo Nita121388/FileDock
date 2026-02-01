@@ -20,6 +20,8 @@ export function PaneView(props: {
     dstDeviceName: string;
     dstDeviceId?: string;
     dstPath: string;
+    dstBaseSnapshotId?: string;
+    conflictPolicy?: "overwrite" | "skip" | "rename";
   }) => void;
   onEnqueueCopyFolder: (job: {
     src: import("../../model/transfers").Conn;
@@ -29,6 +31,8 @@ export function PaneView(props: {
     dstDeviceName: string;
     dstDeviceId?: string;
     dstDirPath: string;
+    dstBaseSnapshotId?: string;
+    conflictPolicy?: "overwrite" | "skip" | "rename";
   }) => void;
   onRemoveTransfer: (id: string) => void;
   onRunTransfer: (id: string) => Promise<void>;

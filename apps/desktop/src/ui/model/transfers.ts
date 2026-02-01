@@ -40,6 +40,9 @@ export type CopyJob = {
   dstDeviceName: string;
   dstDeviceId?: string;
   dstPath: string;
+  // If set, destination manifest is based on this snapshot (copy-on-write via a new snapshot).
+  dstBaseSnapshotId?: string;
+  conflictPolicy?: "overwrite" | "skip" | "rename";
   error?: string;
   progress?: TransferProgress;
 };
@@ -64,6 +67,8 @@ export type CopyFolderJob = {
   dstDeviceName: string;
   dstDeviceId?: string;
   dstDirPath: string; // destination dir ("" means root)
+  dstBaseSnapshotId?: string;
+  conflictPolicy?: "overwrite" | "skip" | "rename";
   dstSnapshotId?: string;
   // Persisted resume state.
   filePaths?: string[];

@@ -48,6 +48,7 @@ export default function DeviceBrowserPane(props: {
     dstDeviceName: string;
     dstDeviceId?: string;
     dstPath: string;
+    dstBaseSnapshotId?: string;
   }) => void;
   onEnqueueCopyFolder: (job: {
     src: Conn;
@@ -57,6 +58,7 @@ export default function DeviceBrowserPane(props: {
     dstDeviceName: string;
     dstDeviceId?: string;
     dstDirPath: string;
+    dstBaseSnapshotId?: string;
   }) => void;
 }) {
   const { settings, tab, onTabChange, onEnqueueDownload, onSetDeviceAuth, onEnqueueCopy, onEnqueueCopyFolder } =
@@ -561,7 +563,8 @@ export default function DeviceBrowserPane(props: {
                         dst: effConn,
                         dstDeviceName: deviceName || "device",
                         dstDeviceId: tab.state.deviceId || undefined,
-                        dstDirPath
+                        dstDirPath,
+                        dstBaseSnapshotId: snapshotId || undefined
                       });
                       dirs++;
                     } else {
@@ -573,7 +576,8 @@ export default function DeviceBrowserPane(props: {
                         dst: effConn,
                         dstDeviceName: deviceName || "device",
                         dstDeviceId: tab.state.deviceId || undefined,
-                        dstPath
+                        dstPath,
+                        dstBaseSnapshotId: snapshotId || undefined
                       });
                       files++;
                     }
@@ -592,7 +596,8 @@ export default function DeviceBrowserPane(props: {
                     dst: effConn,
                     dstDeviceName: deviceName || "device",
                     dstDeviceId: tab.state.deviceId || undefined,
-                    dstDirPath
+                    dstDirPath,
+                    dstBaseSnapshotId: snapshotId || undefined
                   });
                   setStatus(`queued copy dir: ${parsed.path} -> ${dstDirPath}`);
                 } else {
@@ -607,7 +612,8 @@ export default function DeviceBrowserPane(props: {
                     dst: effConn,
                     dstDeviceName: deviceName || "device",
                     dstDeviceId: tab.state.deviceId || undefined,
-                    dstPath
+                    dstPath,
+                    dstBaseSnapshotId: snapshotId || undefined
                   });
                   setStatus(`queued copy: ${parsed.path} -> ${dstPath}`);
                 }
