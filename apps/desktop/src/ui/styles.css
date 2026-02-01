@@ -219,6 +219,7 @@ a {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: calc(var(--radius) - 2px);
   margin: 10px;
@@ -233,6 +234,24 @@ a {
   padding: 10px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(20, 26, 35, 0.85), rgba(20, 26, 35, 0.55));
+}
+
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg2);
+  cursor: grab;
+  user-select: none;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 .pane-title {
@@ -278,6 +297,70 @@ a {
   min-height: 0;
   padding: 10px;
   overflow: auto;
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 44px 8px 8px 8px;
+  border-radius: 12px;
+  pointer-events: none;
+}
+
+.drop-zone {
+  position: absolute;
+  border: 1px dashed rgba(59, 228, 200, 0.35);
+  background: rgba(59, 228, 200, 0.08);
+  border-radius: 12px;
+  pointer-events: auto;
+  opacity: 0.0;
+  transition: opacity 120ms ease;
+}
+
+.pane:hover .drop-zone {
+  opacity: 0.55;
+}
+
+.drop-zone:hover {
+  opacity: 0.95;
+  background: rgba(59, 228, 200, 0.14);
+}
+
+.drop-left {
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 22%;
+}
+
+.drop-right {
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 22%;
+}
+
+.drop-top {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 22%;
+}
+
+.drop-bottom {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 22%;
+}
+
+.drop-center {
+  left: 22%;
+  right: 22%;
+  top: 22%;
+  bottom: 22%;
+  border-style: solid;
+  border-color: rgba(255, 176, 32, 0.35);
+  background: rgba(255, 176, 32, 0.07);
 }
 
 .accent {

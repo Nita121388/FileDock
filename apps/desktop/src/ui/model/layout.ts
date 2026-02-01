@@ -2,6 +2,8 @@ export type SplitDir = "row" | "col";
 
 export type PaneKind = "deviceBrowser" | "transferQueue" | "notes";
 
+export type DropZone = "center" | "left" | "right" | "top" | "bottom";
+
 export type LayoutNode = SplitNode | LeafNode;
 
 export interface SplitNode {
@@ -111,4 +113,92 @@ export function closeLeaf(node: LayoutNode, leafId: string): LayoutNode {
   const r = remove(node);
   // Keep at least one pane alive.
   return r.node ?? { kind: "leaf", id: uid("pane"), pane: "notes" };
+}
+
+export function moveLeaf(root: LayoutNode, sourceLeafId: string, targetLeafId: string, zone: DropZone): LayoutNode {
+  if (sourceLeafId === targetLeafId) return root;
+  if (zone === "center") return swapLeafPanes(root, sourceLeafId, targetLeafId);
+
+  const extracted = extractLeaf(root, sourceLeafId);
+  if (!extracted.leaf) return root;
+  return insertLeaf(extracted.root, targetLeafId, zone, extracted.leaf);
+}
+
+function getLeafPane(root: LayoutNode, leafId: string): PaneKind | null {
+  const l = findLeaf(root, leafId);
+  return l ? l.pane : null;
+}
+
+function swapLeafPanes(root: LayoutNode, aId: string, bId: string): LayoutNode {
+  const a = getLeafPane(root, aId);
+  const b = getLeafPane(root, bId);
+  if (!a || !b) return root;
+  return mapNode(root, (n) => {
+    if (n.kind !== "leaf") return n;
+    if (n.id === aId) return { ...n, pane: b };
+    if (n.id === bId) return { ...n, pane: a };
+    return n;
+  });
+}
+
+function extractLeaf(root: LayoutNode, leafId: string): { root: LayoutNode; leaf: LeafNode | null } {
+  function remove(n: LayoutNode): { node: LayoutNode | null; extracted: LeafNode | null } {
+    if (n.kind === "leaf") {
+      if (n.id === leafId) return { node: null, extracted: n };
+      return { node: n, extracted: null };
+    }
+
+    const ra = remove(n.a);
+    if (ra.extracted) {
+      if (ra.node === null) return { node: n.b, extracted: ra.extracted };
+      return { node: { ...n, a: ra.node }, extracted: ra.extracted };
+    }
+
+    const rb = remove(n.b);
+    if (rb.extracted) {
+      if (rb.node === null) return { node: n.a, extracted: rb.extracted };
+      return { node: { ...n, b: rb.node }, extracted: rb.extracted };
+    }
+
+    return { node: n, extracted: null };
+  }
+
+  const r = remove(root);
+  const nextRoot = r.node ?? { kind: "leaf", id: uid("pane"), pane: "notes" };
+  return { root: nextRoot, leaf: r.extracted };
+}
+
+function insertLeaf(root: LayoutNode, targetLeafId: string, zone: DropZone, leaf: LeafNode): LayoutNode {
+  function go(n: LayoutNode): { node: LayoutNode; inserted: boolean } {
+    if (n.kind === "leaf") {
+      if (n.id !== targetLeafId) return { node: n, inserted: false };
+
+      if (zone === "center") return { node: leaf, inserted: true };
+
+      const dir: SplitDir = zone === "left" || zone === "right" ? "row" : "col";
+      const before = zone === "left" || zone === "top";
+      const a = before ? leaf : n;
+      const b = before ? n : leaf;
+      return {
+        node: {
+          kind: "split",
+          id: uid("split"),
+          dir,
+          ratio: 0.5,
+          a,
+          b
+        },
+        inserted: true
+      };
+    }
+
+    const ra = go(n.a);
+    if (ra.inserted) return { node: { ...n, a: ra.node }, inserted: true };
+    const rb = go(n.b);
+    if (rb.inserted) return { node: { ...n, b: rb.node }, inserted: true };
+    return { node: n, inserted: false };
+  }
+
+  const r = go(root);
+  return r.node;
 }
