@@ -383,12 +383,14 @@ export default function DeviceBrowserPane(props: {
                 src: Conn;
                 snapshotId: string;
                 path: string;
+                name?: string;
               };
               if (!parsed?.src?.serverBaseUrl || !parsed.snapshotId || !parsed.path) return;
 
               // Drop means: copy file from source server into this destination server/device context.
               // For MVP we create a new snapshot on destination (one-file manifest) under this device.
-              const dstPath = parsed.path; // keep relative path same
+              const fileName = parsed.name || parsed.path.split("/").pop() || "file";
+              const dstPath = path ? `${path}/${fileName}` : fileName;
               onEnqueueCopy({
                 src: parsed.src,
                 srcSnapshotId: parsed.snapshotId,
@@ -398,7 +400,7 @@ export default function DeviceBrowserPane(props: {
                 dstDeviceId: tab.state.deviceId || undefined,
                 dstPath
               });
-              setStatus(`queued copy: ${parsed.path}`);
+              setStatus(`queued copy: ${parsed.path} -> ${dstPath}`);
             } catch {
               // ignore
             }
