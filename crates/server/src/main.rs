@@ -16,7 +16,7 @@ use filedock_protocol::{
     SnapshotDeleteResponse, SnapshotPruneRequest, SnapshotPruneResponse,
     ChunkGcRequest, ChunkGcResponse,
 };
-use filedock_storage::{DiskStorage, PutOpts, Storage};
+use filedock_storage::{DiskStorage, PutOpts, Storage, S3Storage, S3StorageConfig};
 use std::{net::SocketAddr, sync::Arc};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
@@ -33,9 +33,33 @@ struct Opt {
     #[arg(long, env = "FILEDOCK_LISTEN", default_value = "0.0.0.0:8787")]
     listen: String,
 
+    /// Storage backend: "disk" (default) or "s3" (S3-compatible object storage).
+    #[arg(long, env = "FILEDOCK_STORAGE_BACKEND", default_value = "disk")]
+    storage_backend: String,
+
     /// Storage directory (DiskStorage root).
     #[arg(long, env = "FILEDOCK_STORAGE_DIR", default_value = "./filedock-data")]
     storage_dir: String,
+
+    /// S3 bucket name (required when backend is "s3").
+    #[arg(long, env = "FILEDOCK_S3_BUCKET")]
+    s3_bucket: Option<String>,
+
+    /// S3 region (required when backend is "s3"). For S3-compatible services, "us-east-1" is usually fine.
+    #[arg(long, env = "FILEDOCK_S3_REGION", default_value = "us-east-1")]
+    s3_region: String,
+
+    /// Optional S3-compatible endpoint URL (e.g. http://127.0.0.1:9000 for MinIO, or https://<account>.r2.cloudflarestorage.com for R2).
+    #[arg(long, env = "FILEDOCK_S3_ENDPOINT")]
+    s3_endpoint: Option<String>,
+
+    /// Optional prefix under which FileDock stores all keys (e.g. "filedock/").
+    #[arg(long, env = "FILEDOCK_S3_PREFIX")]
+    s3_prefix: Option<String>,
+
+    /// Force S3 path-style addressing (useful for MinIO).
+    #[arg(long, env = "FILEDOCK_S3_FORCE_PATH_STYLE", default_value_t = false)]
+    s3_force_path_style: bool,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -903,8 +927,37 @@ async fn main() {
 
     let opt = Opt::parse();
 
-    // Disk storage root for MVP.
-    let storage: Arc<dyn Storage> = Arc::new(DiskStorage::new(opt.storage_dir));
+    let storage: Arc<dyn Storage> = match opt.storage_backend.trim() {
+        "disk" => Arc::new(DiskStorage::new(opt.storage_dir)),
+        "s3" => {
+            let bucket = opt
+                .s3_bucket
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| {
+                    eprintln!("missing FILEDOCK_S3_BUCKET (required when FILEDOCK_STORAGE_BACKEND=s3)");
+                    std::process::exit(2);
+                });
+
+            let cfg = S3StorageConfig {
+                bucket,
+                region: opt.s3_region.clone(),
+                endpoint: opt.s3_endpoint.clone(),
+                prefix: opt.s3_prefix.clone(),
+                force_path_style: opt.s3_force_path_style,
+            };
+
+            Arc::new(
+                S3Storage::new(cfg)
+                    .await
+                    .unwrap_or_else(|e| panic!("failed to init s3 storage: {e}")),
+            )
+        }
+        other => {
+            eprintln!("invalid FILEDOCK_STORAGE_BACKEND: {other} (expected: disk|s3)");
+            std::process::exit(2);
+        }
+    };
 
     let token = std::env::var("FILEDOCK_TOKEN").ok().filter(|s| !s.is_empty());
     if token.is_some() {
