@@ -27,6 +27,20 @@ cargo run -p filedock -- push-folder \
   --folder /home/you/Documents
 ```
 
+### 2b) Run as an agent (recommended)
+
+Copy the example config:
+
+```bash
+cp deploy/agent-config.example.toml ./agent.toml
+```
+
+Edit `agent.toml` (folder path, device name, auth), then run:
+
+```bash
+cargo run -p filedock -- agent --config ./agent.toml
+```
+
 Optional: add a `.filedockignore` file in the root folder (one glob per line, `#` comments):
 
 ```text
