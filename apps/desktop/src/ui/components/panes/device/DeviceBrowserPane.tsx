@@ -32,8 +32,9 @@ export default function DeviceBrowserPane(props: {
   tab: DeviceTab;
   onTabChange: (tab: DeviceTab) => void;
   onEnqueueDownload: (snapshotId: string, path: string) => void;
+  onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
 }) {
-  const { settings, tab, onTabChange, onEnqueueDownload } = props;
+  const { settings, tab, onTabChange, onEnqueueDownload, onSetDeviceAuth } = props;
 
   const [status, setStatus] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -182,7 +183,9 @@ export default function DeviceBrowserPane(props: {
               setLoading(true);
               try {
                 const resp = await registerDevice(settings, { device_name: regName.trim(), os: regOs.trim() });
-                setStatus(`registered ${regName.trim()} (id=${resp.device_id}) token=${resp.device_token}`);
+                setStatus(`registered ${regName.trim()} (id=${resp.device_id})`);
+                // Make it easy to switch to device-auth without exposing FILEDOCK_TOKEN.
+                onSetDeviceAuth(resp.device_id, resp.device_token);
                 await refreshDevices();
                 onTabChange({ ...tab, state: { ...tab.state, deviceName: regName.trim() } });
               } catch (e: any) {
@@ -194,6 +197,14 @@ export default function DeviceBrowserPane(props: {
             title="Register device"
           >
             Register
+          </button>
+          <button
+            className="db-mini"
+            disabled={!regName.trim() || !regOs.trim()}
+            onClick={() => setRegOs(detectOs())}
+            title="Auto-detect OS"
+          >
+            Detect
           </button>
         </div>
         <div className="db-list">

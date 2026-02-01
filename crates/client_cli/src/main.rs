@@ -12,6 +12,8 @@ use walkdir::WalkDir;
 const PRESENCE_BATCH: usize = 1000;
 const DEFAULT_CONCURRENCY: usize = 4;
 const TOKEN_HEADER: &str = "x-filedock-token";
+const DEVICE_ID_HEADER: &str = "x-filedock-device-id";
+const DEVICE_TOKEN_HEADER: &str = "x-filedock-device-token";
 
 fn build_client() -> Result<reqwest::Client, String> {
     // If FILEDOCK_TOKEN is set, attach it to all requests.
@@ -22,6 +24,26 @@ fn build_client() -> Result<reqwest::Client, String> {
             let name = reqwest::header::HeaderName::from_static(TOKEN_HEADER);
             let value = reqwest::header::HeaderValue::from_str(&token)
                 .map_err(|e| format!("invalid FILEDOCK_TOKEN: {e}"))?;
+            headers.insert(name, value);
+        }
+    }
+
+    // Optional device auth.
+    if let Ok(device_id) = std::env::var("FILEDOCK_DEVICE_ID") {
+        let device_id = device_id.trim().to_string();
+        if !device_id.is_empty() {
+            let name = reqwest::header::HeaderName::from_static(DEVICE_ID_HEADER);
+            let value = reqwest::header::HeaderValue::from_str(&device_id)
+                .map_err(|e| format!("invalid FILEDOCK_DEVICE_ID: {e}"))?;
+            headers.insert(name, value);
+        }
+    }
+    if let Ok(device_token) = std::env::var("FILEDOCK_DEVICE_TOKEN") {
+        let device_token = device_token.trim().to_string();
+        if !device_token.is_empty() {
+            let name = reqwest::header::HeaderName::from_static(DEVICE_TOKEN_HEADER);
+            let value = reqwest::header::HeaderValue::from_str(&device_token)
+                .map_err(|e| format!("invalid FILEDOCK_DEVICE_TOKEN: {e}"))?;
             headers.insert(name, value);
         }
     }

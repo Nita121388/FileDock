@@ -14,6 +14,7 @@ export function PaneView(props: {
   onEnqueueDownload: (snapshotId: string, path: string) => void;
   onRemoveTransfer: (id: string) => void;
   onDownloadTransfer: (id: string) => Promise<void>;
+  onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
 }) {
   switch (props.tab.pane) {
     case "deviceBrowser":
@@ -23,6 +24,7 @@ export function PaneView(props: {
           tab={props.tab}
           onTabChange={(next) => props.onUpdateTab(() => next)}
           onEnqueueDownload={props.onEnqueueDownload}
+          onSetDeviceAuth={props.onSetDeviceAuth}
         />
       );
     case "transferQueue":

@@ -38,6 +38,13 @@ If the server is started with `FILEDOCK_TOKEN`, set the same token for the CLI:
 export FILEDOCK_TOKEN="change-me"
 ```
 
+Optional device auth headers (if you registered a device and want to avoid sharing the server token):
+
+```bash
+export FILEDOCK_DEVICE_ID="<device_id>"
+export FILEDOCK_DEVICE_TOKEN="<device_token>"
+```
+
 ### Push a File (single-chunk MVP)
 
 ```bash
@@ -86,6 +93,13 @@ If the server is started with `FILEDOCK_TOKEN`, set the same token for the TUI:
 
 ```bash
 export FILEDOCK_TOKEN="change-me"
+```
+
+You can also use device auth headers:
+
+```bash
+export FILEDOCK_DEVICE_ID="<device_id>"
+export FILEDOCK_DEVICE_TOKEN="<device_token>"
 ```
 
 ## Desktop UI (Tauri)

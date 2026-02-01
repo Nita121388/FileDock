@@ -70,7 +70,7 @@ a {
 }
 
 .conn-input {
-  width: 240px;
+  width: 190px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.05);
   color: var(--fg0);

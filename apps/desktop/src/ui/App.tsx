@@ -116,6 +116,20 @@ export default function App() {
             placeholder="token (optional)"
             title="X-FileDock-Token (optional)"
           />
+          <input
+            className="conn-input"
+            value={settings.deviceId}
+            onChange={(e) => setSettings((s) => ({ ...s, deviceId: e.target.value }))}
+            placeholder="device id (optional)"
+            title="X-FileDock-Device-Id (optional)"
+          />
+          <input
+            className="conn-input"
+            value={settings.deviceToken}
+            onChange={(e) => setSettings((s) => ({ ...s, deviceToken: e.target.value }))}
+            placeholder="device token (optional)"
+            title="X-FileDock-Device-Token (optional)"
+          />
         </div>
 
         <div className="tabs" role="tablist" aria-label="Workspaces">
@@ -162,6 +176,9 @@ export default function App() {
           onEnqueueDownload={enqueueDownload}
           onRemoveTransfer={removeTransfer}
           onDownloadTransfer={downloadNow}
+          onSetDeviceAuth={(deviceId, deviceToken) =>
+            setSettings((s) => ({ ...s, deviceId, deviceToken }))
+          }
           onTabChange={(tab) => {
             setState((s) => ({
               ...s,

@@ -26,9 +26,19 @@ export function WorkspaceView(props: {
   onEnqueueDownload: (snapshotId: string, path: string) => void;
   onRemoveTransfer: (id: string) => void;
   onDownloadTransfer: (id: string) => Promise<void>;
+  onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
   onTabChange: (tab: TabState) => void;
 }) {
-  const { tab, settings, transfers, onEnqueueDownload, onRemoveTransfer, onDownloadTransfer, onTabChange } = props;
+  const {
+    tab,
+    settings,
+    transfers,
+    onEnqueueDownload,
+    onRemoveTransfer,
+    onDownloadTransfer,
+    onSetDeviceAuth,
+    onTabChange
+  } = props;
   const [draggingLeafId, setDraggingLeafId] = useState<string | null>(null);
 
   const onRootChange = (root: LayoutNode) => {
@@ -49,6 +59,7 @@ export function WorkspaceView(props: {
           onEnqueueDownload={onEnqueueDownload}
           onRemoveTransfer={onRemoveTransfer}
           onDownloadTransfer={onDownloadTransfer}
+          onSetDeviceAuth={onSetDeviceAuth}
           draggingLeafId={draggingLeafId}
           setDraggingLeafId={setDraggingLeafId}
           onDrop={onDrop}

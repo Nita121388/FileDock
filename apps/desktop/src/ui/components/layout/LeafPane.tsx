@@ -17,6 +17,7 @@ export default function LeafPane(props: {
   onEnqueueDownload: (snapshotId: string, path: string) => void;
   onRemoveTransfer: (id: string) => void;
   onDownloadTransfer: (id: string) => Promise<void>;
+  onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
   draggingLeafId: string | null;
   setDraggingLeafId: (id: string | null) => void;
   onDrop: (sourceLeafId: string, targetLeafId: string, zone: DropZone) => void;
@@ -35,6 +36,7 @@ export default function LeafPane(props: {
     onEnqueueDownload,
     onRemoveTransfer,
     onDownloadTransfer,
+    onSetDeviceAuth,
     draggingLeafId,
     setDraggingLeafId,
     onDrop,
@@ -155,6 +157,7 @@ export default function LeafPane(props: {
           onEnqueueDownload={onEnqueueDownload}
           onRemoveTransfer={onRemoveTransfer}
           onDownloadTransfer={onDownloadTransfer}
+          onSetDeviceAuth={onSetDeviceAuth}
         />
       </div>
     </div>

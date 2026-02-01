@@ -133,6 +133,7 @@ async fn auth(
         return Ok(next.run(req).await);
     }
 
+    // Server/admin token always works.
     let got = req
         .headers()
         .get("x-filedock-token")
@@ -140,7 +141,33 @@ async fn auth(
         .unwrap_or("");
 
     if got != expected {
-        return Err(StatusCode::UNAUTHORIZED);
+        // Device token is allowed for non-registration routes.
+        let path = req.uri().path();
+        if path == "/v1/auth/device/register" {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+
+        let dev_id = req
+            .headers()
+            .get("x-filedock-device-id")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        let dev_token = req
+            .headers()
+            .get("x-filedock-device-token")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+
+        if dev_id.is_empty() || dev_token.is_empty() {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+
+        let key = format!("devices/{dev_id}.json");
+        let data = state.storage.get(&key).await.map_err(|_| StatusCode::UNAUTHORIZED)?;
+        let rec: DeviceRecord = serde_json::from_slice(&data).map_err(|_| StatusCode::UNAUTHORIZED)?;
+        if rec.device_token != dev_token {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
     }
 
     Ok(next.run(req).await)

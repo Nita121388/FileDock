@@ -41,6 +41,8 @@ function headers(settings: Settings): HeadersInit {
     "content-type": "application/json"
   };
   if (settings.token.trim()) h["x-filedock-token"] = settings.token.trim();
+  if (settings.deviceId.trim()) h["x-filedock-device-id"] = settings.deviceId.trim();
+  if (settings.deviceToken.trim()) h["x-filedock-device-token"] = settings.deviceToken.trim();
   return h;
 }
 
@@ -88,7 +90,7 @@ export async function apiGetBytes(settings: Settings, path: string, query?: Reco
   }
   const resp = await fetch(url.toString(), {
     method: "GET",
-    headers: settings.token.trim() ? { "x-filedock-token": settings.token.trim() } : undefined
+    headers: headers(settings)
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");

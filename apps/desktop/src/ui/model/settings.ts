@@ -1,13 +1,17 @@
 export interface Settings {
   serverBaseUrl: string;
   token: string;
+  deviceId: string;
+  deviceToken: string;
 }
 
 const KEY = "filedock.desktop.settings.v1";
 
 export const DEFAULT_SETTINGS: Settings = {
   serverBaseUrl: "http://127.0.0.1:8787",
-  token: ""
+  token: "",
+  deviceId: "",
+  deviceToken: ""
 };
 
 export function loadSettings(): Settings {
@@ -19,7 +23,9 @@ export function loadSettings(): Settings {
       serverBaseUrl: typeof parsed.serverBaseUrl === "string" && parsed.serverBaseUrl.trim()
         ? parsed.serverBaseUrl.trim()
         : DEFAULT_SETTINGS.serverBaseUrl,
-      token: typeof parsed.token === "string" ? parsed.token : ""
+      token: typeof parsed.token === "string" ? parsed.token : "",
+      deviceId: typeof parsed.deviceId === "string" ? parsed.deviceId : "",
+      deviceToken: typeof parsed.deviceToken === "string" ? parsed.deviceToken : ""
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -33,4 +39,3 @@ export function saveSettings(s: Settings): void {
     // ignore
   }
 }
-

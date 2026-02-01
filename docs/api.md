@@ -8,6 +8,10 @@ MVP: versioned HTTP JSON API.
 - Auth (current MVP): optional static token
   - If the server is started with `FILEDOCK_TOKEN`, all endpoints except `/health` require:
     - Header: `X-FileDock-Token: <token>`
+- Auth (next step): optional device token
+  - Headers:
+    - `X-FileDock-Device-Id: <device_id>`
+    - `X-FileDock-Device-Token: <device_token>`
 - Responses: JSON
 
 ## Endpoints (Draft)
