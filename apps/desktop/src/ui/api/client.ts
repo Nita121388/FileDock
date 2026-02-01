@@ -146,7 +146,8 @@ export async function apiGetUint8Array(
   path: string,
   query?: Record<string, string>,
   onProgress?: (doneBytes: number, totalBytes: number | null) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onChunk?: (chunkBytes: number, doneBytes: number, totalBytes: number | null) => void | Promise<void>
 ): Promise<Uint8Array> {
   const base = settings.serverBaseUrl.replace(/\/+$/, "");
   const url = new URL(base + path);
@@ -189,6 +190,7 @@ export async function apiGetUint8Array(
     }
     done += chunk.byteLength;
     onProgress?.(done, total);
+    await onChunk?.(chunk.byteLength, done, total);
   }
 
   if (out) return out.subarray(0, done);

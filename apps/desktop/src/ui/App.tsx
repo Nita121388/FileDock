@@ -35,6 +35,31 @@ export default function App() {
   const [transfers, setTransfers] = useState<TransferJob[]>(() => loadTransfers());
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
 
+  const getRateLimitBytesPerSec = (): number => {
+    try {
+      const raw = localStorage.getItem("filedock.desktop.queue.v1");
+      if (!raw) return 0;
+      const parsed = JSON.parse(raw) as any;
+      const mbps = Number(parsed?.maxMBps);
+      if (!Number.isFinite(mbps) || mbps <= 0) return 0;
+      return mbps * 1024 * 1024;
+    } catch {
+      return 0;
+    }
+  };
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  const makeLimiter = (bytesPerSec: number) => {
+    if (!bytesPerSec || bytesPerSec <= 0) return null;
+    const start = performance.now();
+    return async (doneBytes: number) => {
+      const idealMs = (doneBytes / bytesPerSec) * 1000;
+      const elapsedMs = performance.now() - start;
+      if (idealMs > elapsedMs) await sleep(idealMs - elapsedMs);
+    };
+  };
+
   useEffect(() => {
     saveState(state);
   }, [state]);
@@ -191,6 +216,7 @@ export default function App() {
     setTransferError(id, undefined);
     try {
       const eff = job.conn ? connToSettings(job.conn) : settings;
+      const limiter = makeLimiter(getRateLimitBytesPerSec());
       setTransferProgress(id, { phase: "downloading", pct: 0 });
       const buf = await withRetry(async () => {
         return await apiGetUint8Array(
@@ -201,7 +227,8 @@ export default function App() {
             const pct = total && total > 0 ? Math.floor((done / total) * 100) : undefined;
             setTransferProgress(id, { phase: "downloading", doneBytes: done, totalBytes: total ?? undefined, pct });
           },
-          ac.signal
+          ac.signal,
+          limiter ? async (_chunkBytes, doneBytes) => limiter(doneBytes) : undefined
         );
       });
       setTransferProgress(id, { phase: "saving", pct: 100 });
@@ -247,6 +274,7 @@ export default function App() {
     try {
       // 1) Download bytes from source server.
       setTransferProgress(id, { phase: "downloading", pct: 0 });
+      const dlLimiter = makeLimiter(getRateLimitBytesPerSec());
       const buf = await withRetry(async () => {
         return await apiGetUint8Array(
           srcSettings,
@@ -256,7 +284,8 @@ export default function App() {
             const pct = total && total > 0 ? Math.floor((done / total) * 100) : undefined;
             setTransferProgress(id, { phase: "downloading", doneBytes: done, totalBytes: total ?? undefined, pct });
           },
-          ac.signal
+          ac.signal,
+          dlLimiter ? async (_chunkBytes, doneBytes) => dlLimiter(doneBytes) : undefined
         );
       });
 
@@ -278,6 +307,7 @@ export default function App() {
 
       // 4) Upload missing chunks.
       setTransferProgress(id, { phase: "uploading", pct: 0 });
+      const ulLimiter = makeLimiter(getRateLimitBytesPerSec());
       let offset = 0;
       let uploaded = 0;
       for (const c of refs) {
@@ -289,6 +319,7 @@ export default function App() {
           uploaded++;
         }
         offset = end;
+        if (ulLimiter) await ulLimiter(offset);
         const pct = refs.length > 0 ? Math.floor((offset / buf.length) * 100) : 100;
         setTransferProgress(id, { phase: `uploading (${uploaded}/${missing.size} chunks)`, pct });
       }
