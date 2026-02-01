@@ -51,6 +51,11 @@ function fmtUnix(ts: number): string {
   return d.toISOString().replace("T", " ").slice(0, 16);
 }
 
+function fmtLastSeen(ts?: number | null): string {
+  if (!ts) return "never";
+  return fmtUnix(ts);
+}
+
 function detectOs(): string {
   const ua = navigator.userAgent || "";
   if (/Windows/i.test(ua)) return "Windows";
@@ -485,6 +490,9 @@ export default function DeviceBrowserPane(props: {
               <div className="db-title">{name}</div>
               <div className="db-sub">
                 {deviceByName.get(name)?.os ? `${deviceByName.get(name)!.os} · ` : ""}
+                {deviceByName.get(name)?.last_seen_unix
+                  ? `seen ${fmtLastSeen(deviceByName.get(name)!.last_seen_unix)} · `
+                  : ""}
                 {snapshots.filter((s) => s.device_name === name).length} snapshots
               </div>
             </button>

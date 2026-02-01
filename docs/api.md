@@ -38,6 +38,7 @@ MVP (current implementation):
 MVP (current implementation):
 
 - `GET /v1/devices` (list registered devices)
+- `POST /v1/devices/{device_id}/heartbeat` (update device last_seen + store last heartbeat payload)
 
 ### Jobs & Snapshots
 

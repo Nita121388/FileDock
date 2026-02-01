@@ -39,6 +39,16 @@ export FILEDOCK_DEVICE_ID="..."
 export FILEDOCK_DEVICE_TOKEN="..."
 ```
 
+## Heartbeats (optional)
+
+Devices can send a heartbeat to update their "last seen" timestamp:
+
+```bash
+export FILEDOCK_DEVICE_ID="..."
+export FILEDOCK_DEVICE_TOKEN="..."
+filedock device-heartbeat --server http://127.0.0.1:8787 --status "online"
+```
+
 ## Linux (systemd) templates
 
 See:
@@ -58,4 +68,3 @@ See `deploy/launchd/com.filedock.backup.plist`.
 See `deploy/windows/backup.ps1`.
 
 Create a Task Scheduler entry that runs the script every N minutes.
-

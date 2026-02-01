@@ -27,6 +27,8 @@ pub struct DeviceInfo {
     pub id: String,
     pub name: String,
     pub os: String,
+    /// Optional last-seen timestamp (server set on heartbeat).
+    pub last_seen_unix: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +43,20 @@ pub struct DeviceRegisterResponse {
     /// MVP: returned once at registration time.
     /// Not yet used for request auth (server may still be protected by FILEDOCK_TOKEN).
     pub device_token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceHeartbeatRequest {
+    /// Agent/app version string (free-form).
+    pub agent_version: String,
+    /// Optional status string (free-form).
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceHeartbeatResponse {
+    pub device_id: String,
+    pub last_seen_unix: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

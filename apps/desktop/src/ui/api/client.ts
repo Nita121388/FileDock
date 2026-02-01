@@ -4,6 +4,7 @@ export type DeviceInfo = {
   id: string;
   name: string;
   os: string;
+  last_seen_unix?: number | null;
 };
 
 export type DeviceRegisterRequest = {

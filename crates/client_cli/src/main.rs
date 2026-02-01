@@ -4,6 +4,7 @@ use filedock_protocol::{
     ChunkRef, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, ManifestFileEntry,
     TreeResponse, SnapshotMeta, SnapshotDeleteResponse, SnapshotPruneRequest, SnapshotPruneResponse,
     ChunkGcRequest, ChunkGcResponse,
+    DeviceHeartbeatRequest, DeviceHeartbeatResponse,
 };
 use futures_util::stream::{self, StreamExt};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -252,6 +253,21 @@ enum Command {
         /// Cap the number of chunks deleted in one run (optional).
         #[arg(long)]
         max_delete: Option<u32>,
+    },
+
+    /// Send a device heartbeat (requires device auth when server runs with FILEDOCK_TOKEN).
+    DeviceHeartbeat {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
+
+        /// Device id (if omitted, uses FILEDOCK_DEVICE_ID).
+        #[arg(long)]
+        device_id: Option<String>,
+
+        /// Optional status string.
+        #[arg(long)]
+        status: Option<String>,
     },
 }
 
@@ -818,6 +834,45 @@ async fn main() -> Result<(), String> {
                 .json()
                 .await
                 .map_err(|e| format!("gc decode: {e}"))?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?
+            );
+        }
+
+        Command::DeviceHeartbeat {
+            server,
+            device_id,
+            status,
+        } => {
+            let client = build_client()?;
+            let dev_id = device_id
+                .or_else(|| std::env::var("FILEDOCK_DEVICE_ID").ok())
+                .unwrap_or_default();
+            if dev_id.trim().is_empty() {
+                return Err("device_id required (or set FILEDOCK_DEVICE_ID)".to_string());
+            }
+
+            let url = format!(
+                "{}/v1/devices/{}/heartbeat",
+                server.trim_end_matches('/'),
+                dev_id.trim()
+            );
+            let req = DeviceHeartbeatRequest {
+                agent_version: env!("CARGO_PKG_VERSION").to_string(),
+                status,
+            };
+            let resp: DeviceHeartbeatResponse = client
+                .post(url)
+                .json(&req)
+                .send()
+                .await
+                .map_err(|e| format!("heartbeat request: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("heartbeat response: {e}"))?
+                .json()
+                .await
+                .map_err(|e| format!("heartbeat decode: {e}"))?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?

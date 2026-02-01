@@ -10,7 +10,8 @@ use axum::{
 use bytes::Bytes;
 use filedock_protocol::{
     is_valid_chunk_hash, is_valid_rel_path, ChunkPresenceRequest, ChunkPresenceResponse, ChunkRef,
-    DeviceInfo, DeviceRegisterRequest, DeviceRegisterResponse, HealthResponse, SnapshotCreateRequest,
+    DeviceHeartbeatRequest, DeviceHeartbeatResponse, DeviceInfo, DeviceRegisterRequest,
+    DeviceRegisterResponse, HealthResponse, SnapshotCreateRequest,
     SnapshotCreateResponse, SnapshotManifest, TreeEntry, TreeResponse, SnapshotMeta,
     SnapshotDeleteResponse, SnapshotPruneRequest, SnapshotPruneResponse,
     ChunkGcRequest, ChunkGcResponse,
@@ -44,6 +45,7 @@ struct DeviceRecord {
     os: String,
     device_token: String,
     created_unix: i64,
+    last_seen_unix: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -79,6 +81,7 @@ async fn register_device(
         os: req.os,
         device_token: device_token.clone(),
         created_unix: now_unix(),
+        last_seen_unix: None,
     };
 
     let key = format!("devices/{device_id}.json");
@@ -126,11 +129,85 @@ async fn list_devices(
             id: rec.device_id,
             name: rec.device_name,
             os: rec.os,
+            last_seen_unix: rec.last_seen_unix,
         });
     }
 
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(Json(out))
+}
+
+async fn device_heartbeat(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    Json(req): Json<DeviceHeartbeatRequest>,
+) -> Result<Json<DeviceHeartbeatResponse>, (StatusCode, String)> {
+    if device_id.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "device_id required".to_string()));
+    }
+    if req.agent_version.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "agent_version required".to_string()));
+    }
+
+    // Load device record and update last_seen.
+    let key = format!("devices/{device_id}.json");
+    let data = state.storage.get(&key).await.map_err(|e| match e {
+        filedock_storage::StorageError::NotFound => (StatusCode::NOT_FOUND, "device not found".to_string()),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    })?;
+    let mut rec: DeviceRecord = serde_json::from_slice(&data)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let now = now_unix();
+    rec.last_seen_unix = Some(now);
+
+    let new_data = serde_json::to_vec(&rec)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state
+        .storage
+        .put(
+            &key,
+            Bytes::from(new_data),
+            PutOpts {
+                content_type: Some("application/json".to_string()),
+            },
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Store last heartbeat payload for debugging.
+    #[derive(serde::Serialize)]
+    struct HeartbeatRecord {
+        device_id: String,
+        agent_version: String,
+        status: Option<String>,
+        created_unix: i64,
+    }
+    let hb = HeartbeatRecord {
+        device_id: device_id.clone(),
+        agent_version: req.agent_version,
+        status: req.status,
+        created_unix: now,
+    };
+    let hb_key = format!("devices/{device_id}.heartbeat.json");
+    let hb_data = serde_json::to_vec(&hb)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state
+        .storage
+        .put(
+            &hb_key,
+            Bytes::from(hb_data),
+            PutOpts {
+                content_type: Some("application/json".to_string()),
+            },
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(DeviceHeartbeatResponse {
+        device_id,
+        last_seen_unix: now,
+    }))
 }
 
 async fn auth(
@@ -842,6 +919,7 @@ async fn main() {
         .route("/health", get(health))
         .route("/v1/auth/device/register", post(register_device))
         .route("/v1/devices", get(list_devices))
+        .route("/v1/devices/:device_id/heartbeat", post(device_heartbeat))
         .route("/v1/snapshots", post(create_snapshot).get(list_snapshots))
         .route("/v1/snapshots/prune", post(prune_snapshots))
         .route("/v1/snapshots/:snapshot_id", delete(delete_snapshot))
