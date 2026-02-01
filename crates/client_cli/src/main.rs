@@ -3,6 +3,7 @@ use filedock_protocol::{
     is_valid_chunk_hash, ChunkPresenceRequest, ChunkPresenceResponse, HealthResponse,
     ChunkRef, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, ManifestFileEntry,
     TreeResponse, SnapshotMeta, SnapshotDeleteResponse, SnapshotPruneRequest, SnapshotPruneResponse,
+    ChunkGcRequest, ChunkGcResponse,
 };
 use futures_util::stream::{self, StreamExt};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -236,6 +237,21 @@ enum Command {
         /// Compute what would be deleted, but don't delete anything.
         #[arg(long)]
         dry_run: bool,
+    },
+
+    /// Garbage-collect unreferenced chunks (admin token required).
+    GcChunks {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
+
+        /// If set, show what would be deleted but do not delete anything.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Cap the number of chunks deleted in one run (optional).
+        #[arg(long)]
+        max_delete: Option<u32>,
     },
 }
 
@@ -777,6 +793,31 @@ async fn main() -> Result<(), String> {
                 .json()
                 .await
                 .map_err(|e| format!("prune decode: {e}"))?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?
+            );
+        }
+
+        Command::GcChunks {
+            server,
+            dry_run,
+            max_delete,
+        } => {
+            let client = build_client()?;
+            let url = format!("{}/v1/admin/chunks/gc", server.trim_end_matches('/'));
+            let req = ChunkGcRequest { dry_run, max_delete };
+            let resp: ChunkGcResponse = client
+                .post(url)
+                .json(&req)
+                .send()
+                .await
+                .map_err(|e| format!("gc request: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("gc response: {e}"))?
+                .json()
+                .await
+                .map_err(|e| format!("gc decode: {e}"))?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?

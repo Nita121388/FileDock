@@ -81,6 +81,10 @@ Notes:
 
 - `PUT /chunks/{hash}` validates that the request body hashes to `{hash}` (integrity check).
 
+### Admin
+
+- `POST /v1/admin/chunks/gc` (garbage-collect unreferenced chunks; requires server token)
+
 ### Transfer
 
 - `POST /v1/transfers`

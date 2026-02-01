@@ -21,6 +21,7 @@ Status: active development (MVP features working; still evolving).
 - Quickstart: `docs/quickstart.md`
 - Scheduling / agent mode: `docs/agent.md`
 - Retention / prune: `docs/retention.md`
+- Chunk GC: `docs/gc.md`
 - Architecture: `docs/architecture.md`
 - Roadmap: `docs/roadmap.md`
 - Development: `docs/development.md`

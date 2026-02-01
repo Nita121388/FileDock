@@ -13,6 +13,7 @@ Common:
 - `scripts/smoke.sh` - end-to-end server+CLI smoke test (push-folder + pull-folder + hash compare)
 - `scripts/check.sh` - local "CI-like" checks (fmt/clippy/test + desktop build + smoke)
 - `scripts/prune.sh` - snapshot retention helper (calls `filedock prune-snapshots`)
+- `scripts/gc.sh` - chunk garbage-collection helper (calls `filedock gc-chunks`)
 - `scripts/docker-up.sh` - start server via docker compose
 - `scripts/fmt.sh` - rustfmt + prettier (if available)
 - `scripts/lint.sh` - clippy (if available)

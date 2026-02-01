@@ -13,6 +13,7 @@ use filedock_protocol::{
     DeviceInfo, DeviceRegisterRequest, DeviceRegisterResponse, HealthResponse, SnapshotCreateRequest,
     SnapshotCreateResponse, SnapshotManifest, TreeEntry, TreeResponse, SnapshotMeta,
     SnapshotDeleteResponse, SnapshotPruneRequest, SnapshotPruneResponse,
+    ChunkGcRequest, ChunkGcResponse,
 };
 use filedock_storage::{DiskStorage, PutOpts, Storage};
 use std::{net::SocketAddr, sync::Arc};
@@ -154,9 +155,18 @@ async fn auth(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
+    let path = req.uri().path();
+    let is_admin_route = path.starts_with("/v1/admin/")
+        || path == "/v1/snapshots/prune"
+        || (req.method() == axum::http::Method::DELETE && path.starts_with("/v1/snapshots/"));
+
     if got != expected {
+        // Admin routes require the server token (device tokens are not allowed).
+        if is_admin_route {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+
         // Device token is allowed for non-registration routes.
-        let path = req.uri().path();
         if path == "/v1/auth/device/register" {
             return Err(StatusCode::UNAUTHORIZED);
         }
@@ -466,6 +476,107 @@ async fn prune_snapshots(
     }))
 }
 
+async fn gc_chunks(
+    State(state): State<AppState>,
+    Json(req): Json<ChunkGcRequest>,
+) -> Result<Json<ChunkGcResponse>, (StatusCode, String)> {
+    // Gather referenced chunk hashes from all manifests.
+    let manifest_keys = state
+        .storage
+        .list_prefix("manifests/")
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let mut referenced = std::collections::HashSet::<String>::new();
+    for key in manifest_keys {
+        if !key.ends_with(".json") {
+            continue;
+        }
+        let data = state.storage.get(&key).await.map_err(|e| match e {
+            filedock_storage::StorageError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
+        let manifest: SnapshotManifest = serde_json::from_slice(&data)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("decode manifest {key}: {e}")))?;
+        for f in &manifest.files {
+            if f.size == 0 {
+                continue;
+            }
+            if let Some(chunks) = &f.chunks {
+                for c in chunks {
+                    referenced.insert(c.hash.clone());
+                }
+            } else if let Some(h) = &f.chunk_hash {
+                referenced.insert(h.clone());
+            }
+        }
+    }
+
+    // List all stored chunks.
+    let chunk_keys = state
+        .storage
+        .list_prefix("chunks/")
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let mut total_chunks = 0u64;
+    let mut unref = Vec::<String>::new();
+    for key in chunk_keys {
+        let Some(hash) = key.strip_prefix("chunks/") else { continue };
+        if hash.is_empty() {
+            continue;
+        }
+        if !is_valid_chunk_hash(hash) {
+            // Ignore unexpected keys.
+            continue;
+        }
+        total_chunks += 1;
+        if !referenced.contains(hash) {
+            unref.push(hash.to_string());
+        }
+    }
+
+    unref.sort();
+    let unreferenced_chunks = unref.len() as u64;
+    let referenced_chunks = total_chunks.saturating_sub(unreferenced_chunks);
+
+    let limit = req
+        .max_delete
+        .map(|n| std::cmp::min(n as usize, unref.len()))
+        .unwrap_or(unref.len());
+
+    let mut deleted = Vec::<String>::new();
+    if !req.dry_run {
+        for h in unref.into_iter().take(limit) {
+            let key = format!("chunks/{h}");
+            let did = state
+                .storage
+                .delete(&key)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            if did {
+                deleted.push(h);
+            }
+        }
+    } else {
+        deleted.extend(unref.into_iter().take(limit));
+    }
+
+    // Avoid giant payloads; still useful for debugging.
+    if deleted.len() > 1000 {
+        deleted.truncate(1000);
+    }
+
+    Ok(Json(ChunkGcResponse {
+        dry_run: req.dry_run,
+        total_chunks,
+        referenced_chunks,
+        unreferenced_chunks,
+        deleted_chunks: deleted.len() as u64,
+        deleted_chunk_hashes: deleted,
+    }))
+}
+
 async fn put_manifest(
     State(state): State<AppState>,
     Path(snapshot_id): Path<String>,
@@ -489,7 +600,7 @@ async fn put_manifest(
             }
         }
         if let Some(chunks) = &f.chunks {
-            if chunks.is_empty() {
+            if chunks.is_empty() && f.size != 0 {
                 return Err((StatusCode::BAD_REQUEST, "empty chunks".to_string()));
             }
             for ChunkRef { hash, size: _ } in chunks {
@@ -671,6 +782,10 @@ async fn get_file_stream(
         .find(|f| f.path == q.path)
         .ok_or((StatusCode::NOT_FOUND, "file not found".to_string()))?;
 
+    if entry.size == 0 {
+        return Ok(axum::body::Body::from(Bytes::new()));
+    }
+
     let chunks: Vec<ChunkRef> = if let Some(chunks) = &entry.chunks {
         chunks.clone()
     } else if let Some(hash) = &entry.chunk_hash {
@@ -730,6 +845,7 @@ async fn main() {
         .route("/v1/snapshots", post(create_snapshot).get(list_snapshots))
         .route("/v1/snapshots/prune", post(prune_snapshots))
         .route("/v1/snapshots/:snapshot_id", delete(delete_snapshot))
+        .route("/v1/admin/chunks/gc", post(gc_chunks))
         .route(
             "/v1/snapshots/:snapshot_id/manifest",
             put(put_manifest).get(get_manifest),

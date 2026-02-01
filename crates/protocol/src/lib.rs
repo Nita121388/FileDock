@@ -60,6 +60,26 @@ pub struct ChunkPresenceResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChunkGcRequest {
+    /// If true, compute what would be deleted but do not delete anything.
+    #[serde(default)]
+    pub dry_run: bool,
+
+    /// Maximum number of chunks to delete in one request.
+    pub max_delete: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChunkGcResponse {
+    pub dry_run: bool,
+    pub total_chunks: u64,
+    pub referenced_chunks: u64,
+    pub unreferenced_chunks: u64,
+    pub deleted_chunks: u64,
+    pub deleted_chunk_hashes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotCreateRequest {
     pub device_name: String,
     /// Optional stable id (from device registration).
