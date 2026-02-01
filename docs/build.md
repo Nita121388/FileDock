@@ -88,6 +88,31 @@ If the server is started with `FILEDOCK_TOKEN`, set the same token for the TUI:
 export FILEDOCK_TOKEN="change-me"
 ```
 
+## Desktop UI (Tauri)
+
+The desktop UI lives in `apps/desktop`.
+
+Prereqs (typical):
+
+- Node.js (LTS)
+- Rust toolchain (stable)
+- Platform-specific Tauri deps (webview toolchain)
+
+Run in dev:
+
+```bash
+cd apps/desktop
+npm install
+npm run tauri dev
+```
+
+Build:
+
+```bash
+cd apps/desktop
+npm run tauri build
+```
+
 ## CI
 
 GitHub Actions runs `fmt`, `clippy`, and `test` on pushes and PRs.

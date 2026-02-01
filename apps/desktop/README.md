@@ -1,7 +1,16 @@
-# FileDock Desktop (Planned)
+# FileDock Desktop (MVP UI Shell)
 
-This folder will contain the Tauri desktop application.
+Goal: a cross-platform desktop UI (Windows/macOS/Linux) with:
 
-MVP UI goals:
-- Multi-pane file browser (per device / per snapshot)
-- Transfer queue
+- tabs (workspaces)
+- dockable/splittable panes
+- drag-resizable split gutters
+- persisted layouts (per tab)
+
+This folder contains the frontend UI and a minimal Tauri wrapper skeleton.
+
+Notes:
+
+- The UI intentionally starts “offline-first”: it focuses on layout + navigation scaffolding.
+- Server integration (snapshots/tree/transfer queue) is layered on later.
+
