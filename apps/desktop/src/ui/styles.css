@@ -63,6 +63,26 @@ a {
   backdrop-filter: blur(10px);
 }
 
+.conn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conn-input {
+  width: 240px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg0);
+  border-radius: 10px;
+  padding: 8px 10px;
+  outline: none;
+}
+
+.conn-input:focus {
+  border-color: rgba(59, 228, 200, 0.55);
+}
+
 .brand {
   display: flex;
   align-items: baseline;
@@ -443,6 +463,41 @@ a {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.db-head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.db-mini {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg1);
+  border-radius: 10px;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.db-mini:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.db-path {
+  color: var(--fg2);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
 }
 
 .db-list {
@@ -488,6 +543,91 @@ a {
   padding: 10px;
   overflow: auto;
   min-height: 0;
+}
+
+.db-tree-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.db-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.db-row-main {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg1);
+  border-radius: 12px;
+  padding: 10px;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+}
+
+.db-row-main:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  color: var(--fg0);
+}
+
+.db-row-main.file {
+  cursor: default;
+}
+
+.db-row-main.file:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--fg1);
+}
+
+.db-icon {
+  color: var(--fg2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+
+.db-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--fg2);
+  font-size: 12px;
+}
+
+.db-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-spin {
+  animation: spinPulse 800ms linear infinite;
+}
+
+@keyframes spinPulse {
+  0% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1.0;
+  }
+  100% {
+    opacity: 0.55;
+  }
 }
 
 .db-empty {
@@ -602,6 +742,9 @@ a {
 }
 
 @media (max-width: 920px) {
+  .conn {
+    display: none;
+  }
   .device-browser {
     grid-template-columns: 1fr;
   }

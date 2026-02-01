@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { TabState } from "../model/state";
 import type { LayoutNode } from "../model/layout";
+import type { Settings } from "../model/settings";
 import {
   addLeafTab,
   closeLeaf,
@@ -16,8 +17,12 @@ import {
 import SplitNodeView from "./layout/SplitNodeView";
 import LeafPane from "./layout/LeafPane";
 
-export function WorkspaceView(props: { tab: TabState; onTabChange: (tab: TabState) => void }) {
-  const { tab, onTabChange } = props;
+export function WorkspaceView(props: {
+  tab: TabState;
+  settings: Settings;
+  onTabChange: (tab: TabState) => void;
+}) {
+  const { tab, settings, onTabChange } = props;
   const [draggingLeafId, setDraggingLeafId] = useState<string | null>(null);
 
   const onRootChange = (root: LayoutNode) => {
@@ -33,6 +38,7 @@ export function WorkspaceView(props: { tab: TabState; onTabChange: (tab: TabStat
       return (
         <LeafPane
           node={node}
+          settings={settings}
           draggingLeafId={draggingLeafId}
           setDraggingLeafId={setDraggingLeafId}
           onDrop={onDrop}

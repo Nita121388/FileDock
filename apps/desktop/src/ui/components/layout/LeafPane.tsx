@@ -1,5 +1,6 @@
 import type { DropZone, LeafNode, PaneKind, SplitDir } from "../../model/layout";
 import { activeTab } from "../../model/layout";
+import type { Settings } from "../../model/settings";
 import { PaneView } from "../panes/PaneView";
 
 const PANE_LABELS: Record<PaneKind, string> = {
@@ -10,6 +11,7 @@ const PANE_LABELS: Record<PaneKind, string> = {
 
 export default function LeafPane(props: {
   node: LeafNode;
+  settings: Settings;
   draggingLeafId: string | null;
   setDraggingLeafId: (id: string | null) => void;
   onDrop: (sourceLeafId: string, targetLeafId: string, zone: DropZone) => void;
@@ -22,6 +24,7 @@ export default function LeafPane(props: {
 }) {
   const {
     node,
+    settings,
     draggingLeafId,
     setDraggingLeafId,
     onDrop,
@@ -132,7 +135,7 @@ export default function LeafPane(props: {
       ) : null}
 
       <div className="pane-body">
-        <PaneView pane={tab.pane} />
+        <PaneView pane={tab.pane} settings={settings} />
       </div>
     </div>
   );

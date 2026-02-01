@@ -8,13 +8,19 @@ import {
   removeTab
 } from "./model/state";
 import { loadState, saveState } from "./model/storage";
+import { DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "./model/settings";
 
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadState() ?? DEFAULT_APP_STATE);
+  const [settings, setSettings] = useState<Settings>(() => loadSettings() ?? DEFAULT_SETTINGS);
 
   useEffect(() => {
     saveState(state);
   }, [state]);
+
+  useEffect(() => {
+    saveSettings(settings);
+  }, [settings]);
 
   const activeTab: TabState = useMemo(() => {
     const t = state.tabs.find((x) => x.id === state.activeTabId);
@@ -49,6 +55,23 @@ export default function App() {
         <div className="brand">
           <h1>FileDock</h1>
           <div className="meta">desktop UI shell</div>
+        </div>
+
+        <div className="conn">
+          <input
+            className="conn-input"
+            value={settings.serverBaseUrl}
+            onChange={(e) => setSettings((s) => ({ ...s, serverBaseUrl: e.target.value }))}
+            placeholder="http://127.0.0.1:8787"
+            title="Server base URL"
+          />
+          <input
+            className="conn-input"
+            value={settings.token}
+            onChange={(e) => setSettings((s) => ({ ...s, token: e.target.value }))}
+            placeholder="token (optional)"
+            title="X-FileDock-Token (optional)"
+          />
         </div>
 
         <div className="tabs" role="tablist" aria-label="Workspaces">
@@ -90,6 +113,7 @@ export default function App() {
       <div className="workspace" role="main">
         <WorkspaceView
           tab={activeTab}
+          settings={settings}
           onTabChange={(tab) => {
             setState((s) => ({
               ...s,
@@ -107,4 +131,3 @@ export default function App() {
     </div>
   );
 }
-
