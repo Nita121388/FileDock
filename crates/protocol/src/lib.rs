@@ -62,6 +62,9 @@ pub struct ChunkPresenceResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotCreateRequest {
     pub device_name: String,
+    /// Optional stable id (from device registration).
+    /// When omitted, server relies on device_name only.
+    pub device_id: Option<String>,
     pub root_path: String,
 }
 
@@ -74,6 +77,7 @@ pub struct SnapshotCreateResponse {
 pub struct SnapshotMeta {
     pub snapshot_id: String,
     pub device_name: String,
+    pub device_id: Option<String>,
     pub root_path: String,
     pub created_unix: i64,
 }

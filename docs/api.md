@@ -49,6 +49,7 @@ MVP (current implementation):
 MVP (current implementation):
 
 - `POST /v1/snapshots` (create snapshot id)
+  - Optional: include `device_id` to link snapshot to a registered device
 - `GET /v1/snapshots` (list snapshots)
 - `PUT /v1/snapshots/{snapshot_id}/manifest`
 - `GET /v1/snapshots/{snapshot_id}/manifest`

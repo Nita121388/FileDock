@@ -223,8 +223,10 @@ async fn main() -> Result<(), String> {
 
             // Create snapshot id
             let create_url = format!("{}/v1/snapshots", server.trim_end_matches('/'));
+            let device_id = std::env::var("FILEDOCK_DEVICE_ID").ok().filter(|s| !s.trim().is_empty());
             let create_req = SnapshotCreateRequest {
                 device_name: device,
+                device_id,
                 root_path: root.display().to_string(),
             };
             let create_resp: SnapshotCreateResponse = client

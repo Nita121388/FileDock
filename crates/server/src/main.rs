@@ -258,6 +258,7 @@ async fn create_snapshot(
     let meta = SnapshotMeta {
         snapshot_id: snapshot_id.clone(),
         device_name: req.device_name,
+        device_id: req.device_id,
         root_path: req.root_path,
         created_unix: now_unix(),
     };
