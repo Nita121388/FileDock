@@ -438,29 +438,42 @@ export default function App() {
         let ulDone = 0;
 
         // Fetch missing chunks from source, upload to destination.
-        for (const c of newChunks) {
-          if (!missing.has(c.hash)) continue;
-          setTransferProgress(id, {
-            phase: `copying chunk ${c.hash.slice(0, 8)}`,
-            doneBytes: missingBytesDone,
-            totalBytes: missingBytesTotal,
-            pct: missingBytesTotal > 0 ? Math.floor((missingBytesDone / missingBytesTotal) * 100) : 100
-          });
+        const toCopy = newChunks.filter((c) => missing.has(c.hash));
+        const maxChunkConcurrency = Math.min(4, Math.max(1, toCopy.length));
+        let idx = 0;
+        await Promise.all(
+          Array.from({ length: maxChunkConcurrency }, async () => {
+            while (idx < toCopy.length) {
+              const c = toCopy[idx++]!;
+              setTransferProgress(id, {
+                phase: `copying chunks (${Math.min(idx, toCopy.length)}/${toCopy.length})`,
+                doneBytes: missingBytesDone,
+                totalBytes: missingBytesTotal,
+                pct: missingBytesTotal > 0 ? Math.floor((missingBytesDone / missingBytesTotal) * 100) : 100
+              });
 
-          const bytes = await withRetry(async () => {
-            return await getChunkBytes(srcSettings, c.hash, ac.signal);
-          });
-          dlDone += bytes.byteLength;
-          if (dlLimiter) await dlLimiter(dlDone);
+              const bytes = await withRetry(async () => {
+                return await getChunkBytes(srcSettings, c.hash, ac.signal);
+              });
+              dlDone += bytes.byteLength;
+              if (dlLimiter) await dlLimiter(dlDone);
 
-          await withRetry(async () => {
-            await putChunk(dstSettings, c.hash, bytes, ac.signal);
-          });
-          ulDone += bytes.byteLength;
-          if (ulLimiter) await ulLimiter(ulDone);
+              await withRetry(async () => {
+                await putChunk(dstSettings, c.hash, bytes, ac.signal);
+              });
+              ulDone += bytes.byteLength;
+              if (ulLimiter) await ulLimiter(ulDone);
 
-          missingBytesDone += c.size;
-        }
+              missingBytesDone += c.size;
+              setTransferProgress(id, {
+                phase: `copying chunks (${Math.min(idx, toCopy.length)}/${toCopy.length})`,
+                doneBytes: missingBytesDone,
+                totalBytes: missingBytesTotal,
+                pct: missingBytesTotal > 0 ? Math.floor((missingBytesDone / missingBytesTotal) * 100) : 100
+              });
+            }
+          })
+        );
       } else {
         // Fallback: download the file bytes, chunk locally, and upload missing chunks.
         setTransferProgress(id, { phase: "downloading", pct: 0 });
@@ -769,31 +782,46 @@ export default function App() {
           const dlLimiter = makeLimiter(bytesPerSec);
           const ulLimiter = makeLimiter(bytesPerSec);
 
-          for (const c of srcMeta.chunks) {
-            if (!missing.has(c.hash)) continue;
-            const frac = missingBytesTotal > 0 ? missingBytesDone / missingBytesTotal : 1;
-            const pct = total > 0 ? Math.floor(((i + frac) / total) * 100) : 0;
-            setTransferProgress(id, {
-              phase: `copying chunk ${c.hash.slice(0, 8)} (${srcFilePath})`,
-              doneBytes: missingBytesDone,
-              totalBytes: missingBytesTotal,
-              pct
-            });
+          const toCopy = srcMeta.chunks.filter((c) => missing.has(c.hash));
+          const maxChunkConcurrency = Math.min(4, Math.max(1, toCopy.length));
+          let idx = 0;
+          await Promise.all(
+            Array.from({ length: maxChunkConcurrency }, async () => {
+              while (idx < toCopy.length) {
+                const c = toCopy[idx++]!;
+                const frac = missingBytesTotal > 0 ? missingBytesDone / missingBytesTotal : 1;
+                const pct = total > 0 ? Math.floor(((i + frac) / total) * 100) : 0;
+                setTransferProgress(id, {
+                  phase: `copying chunks (${Math.min(idx, toCopy.length)}/${toCopy.length}) (${srcFilePath})`,
+                  doneBytes: missingBytesDone,
+                  totalBytes: missingBytesTotal,
+                  pct
+                });
 
-            const bytes = await withRetry(async () => {
-              return await getChunkBytes(srcSettings, c.hash, ac.signal);
-            });
-            dlDone += bytes.byteLength;
-            if (dlLimiter) await dlLimiter(dlDone);
+                const bytes = await withRetry(async () => {
+                  return await getChunkBytes(srcSettings, c.hash, ac.signal);
+                });
+                dlDone += bytes.byteLength;
+                if (dlLimiter) await dlLimiter(dlDone);
 
-            await withRetry(async () => {
-              await putChunk(dstSettings, c.hash, bytes, ac.signal);
-            });
-            ulDone += bytes.byteLength;
-            if (ulLimiter) await ulLimiter(ulDone);
+                await withRetry(async () => {
+                  await putChunk(dstSettings, c.hash, bytes, ac.signal);
+                });
+                ulDone += bytes.byteLength;
+                if (ulLimiter) await ulLimiter(ulDone);
 
-            missingBytesDone += c.size;
-          }
+                missingBytesDone += c.size;
+                const frac2 = missingBytesTotal > 0 ? missingBytesDone / missingBytesTotal : 1;
+                const pct2 = total > 0 ? Math.floor(((i + frac2) / total) * 100) : 0;
+                setTransferProgress(id, {
+                  phase: `copying chunks (${Math.min(idx, toCopy.length)}/${toCopy.length}) (${srcFilePath})`,
+                  doneBytes: missingBytesDone,
+                  totalBytes: missingBytesTotal,
+                  pct: pct2
+                });
+              }
+            })
+          );
 
           // Update destination manifest (copy-on-write snapshot) for this file.
           manifestFiles.push({
