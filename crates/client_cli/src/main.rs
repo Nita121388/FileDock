@@ -11,6 +11,26 @@ use walkdir::WalkDir;
 
 const PRESENCE_BATCH: usize = 1000;
 const DEFAULT_CONCURRENCY: usize = 4;
+const TOKEN_HEADER: &str = "x-filedock-token";
+
+fn build_client() -> Result<reqwest::Client, String> {
+    // If FILEDOCK_TOKEN is set, attach it to all requests.
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Ok(token) = std::env::var("FILEDOCK_TOKEN") {
+        let token = token.trim().to_string();
+        if !token.is_empty() {
+            let name = reqwest::header::HeaderName::from_static(TOKEN_HEADER);
+            let value = reqwest::header::HeaderValue::from_str(&token)
+                .map_err(|e| format!("invalid FILEDOCK_TOKEN: {e}"))?;
+            headers.insert(name, value);
+        }
+    }
+
+    reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .map_err(|e| format!("build http client: {e}"))
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "filedock", version, about = "FileDock CLI")]
@@ -145,7 +165,7 @@ async fn main() -> Result<(), String> {
             }
             let hashes: Vec<String> = chunks.iter().map(|c| c.hash.clone()).collect();
 
-            let client = reqwest::Client::new();
+            let client = build_client()?;
 
             let pres_resp = chunk_presence(&client, &server, hashes.clone()).await?;
             let missing: std::collections::HashSet<String> =
@@ -171,7 +191,7 @@ async fn main() -> Result<(), String> {
             concurrency,
             exclude,
         } => {
-            let client = reqwest::Client::new();
+            let client = build_client()?;
 
             let root = folder
                 .canonicalize()
@@ -389,7 +409,7 @@ async fn main() -> Result<(), String> {
             snapshot,
             path,
         } => {
-            let client = reqwest::Client::new();
+            let client = build_client()?;
             let url = format!(
                 "{}/v1/snapshots/{}/tree",
                 server.trim_end_matches('/'),
@@ -415,7 +435,7 @@ async fn main() -> Result<(), String> {
             path,
             out,
         } => {
-            let client = reqwest::Client::new();
+            let client = build_client()?;
             let url = format!(
                 "{}/v1/snapshots/{}/file",
                 server.trim_end_matches('/'),
@@ -452,7 +472,7 @@ async fn main() -> Result<(), String> {
             out,
             concurrency,
         } => {
-            let client = reqwest::Client::new();
+            let client = build_client()?;
 
             let manifest_url = format!(
                 "{}/v1/snapshots/{}/manifest",
@@ -522,7 +542,7 @@ async fn main() -> Result<(), String> {
         }
 
         Command::Snapshots { server } => {
-            let client = reqwest::Client::new();
+            let client = build_client()?;
             let url = format!("{}/v1/snapshots", server.trim_end_matches('/'));
             let metas: Vec<SnapshotMeta> = client
                 .get(url)

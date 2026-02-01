@@ -5,7 +5,9 @@ MVP: versioned HTTP JSON API.
 ## Conventions
 
 - Base path: `/v1`
-- Auth: device token (MVP)
+- Auth (current MVP): optional static token
+  - If the server is started with `FILEDOCK_TOKEN`, all endpoints except `/health` require:
+    - Header: `X-FileDock-Token: <token>`
 - Responses: JSON
 
 ## Endpoints (Draft)

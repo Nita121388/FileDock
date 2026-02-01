@@ -4,6 +4,7 @@
 
 - Server is trusted for availability and metadata integrity.
 - Client verifies chunk hashes end-to-end.
+- Server can be run with a static token gate (`FILEDOCK_TOKEN` + `X-FileDock-Token`) to prevent unauthenticated access.
 
 ## Optional End-to-End Encryption (E2EE)
 

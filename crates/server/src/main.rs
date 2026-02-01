@@ -1,6 +1,9 @@
 use axum::{
     extract::{Path, State},
+    body::Body,
+    http::Request,
     http::StatusCode,
+    middleware::Next,
     routing::{get, post, put},
     Json, Router,
 };
@@ -22,6 +25,7 @@ use serde::Deserialize;
 #[derive(Clone)]
 struct AppState {
     storage: Arc<dyn Storage>,
+    token: Option<String>,
 }
 
 async fn health() -> Json<HealthResponse> {
@@ -29,6 +33,34 @@ async fn health() -> Json<HealthResponse> {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     })
+}
+
+async fn auth(
+    State(state): State<AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Result<axum::response::Response, StatusCode> {
+    // If FILEDOCK_TOKEN is not set, run in open mode (dev).
+    let Some(expected) = &state.token else {
+        return Ok(next.run(req).await);
+    };
+
+    // Health endpoint is always open.
+    if req.uri().path() == "/health" {
+        return Ok(next.run(req).await);
+    }
+
+    let got = req
+        .headers()
+        .get("x-filedock-token")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if got != expected {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    Ok(next.run(req).await)
 }
 
 async fn chunks_presence(
@@ -406,7 +438,14 @@ async fn main() {
     let storage_dir = std::env::var("FILEDOCK_STORAGE_DIR").unwrap_or_else(|_| "./filedock-data".to_string());
     let storage: Arc<dyn Storage> = Arc::new(DiskStorage::new(storage_dir));
 
-    let state = AppState { storage };
+    let token = std::env::var("FILEDOCK_TOKEN").ok().filter(|s| !s.is_empty());
+    if token.is_some() {
+        tracing::info!("auth: enabled (FILEDOCK_TOKEN set)");
+    } else {
+        tracing::warn!("auth: disabled (FILEDOCK_TOKEN not set)");
+    }
+
+    let state = AppState { storage, token };
 
     let app = Router::new()
         .route("/health", get(health))
@@ -419,6 +458,8 @@ async fn main() {
         .route("/v1/snapshots/:snapshot_id/file", get(get_file_stream))
         .route("/v1/chunks/presence", post(chunks_presence))
         .route("/v1/chunks/:hash", put(put_chunk).get(get_chunk))
+        // Add auth layer before attaching state; middleware already has a cloned state.
+        .layer(axum::middleware::from_fn_with_state(state.clone(), auth))
         .with_state(state);
 
     let addr: SocketAddr = "0.0.0.0:8787".parse().expect("valid listen addr");

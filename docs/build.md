@@ -13,6 +13,13 @@ This repo is a Rust workspace (server + CLI) with a planned Tauri desktop app.
 cargo run -p filedock-server
 ```
 
+Optional basic auth (recommended for any non-local use):
+
+```bash
+export FILEDOCK_TOKEN="change-me"
+cargo run -p filedock-server
+```
+
 Health:
 
 ```bash
@@ -23,6 +30,12 @@ curl -sS http://localhost:8787/health
 
 ```bash
 cargo run -p filedock -- health-sample
+```
+
+If the server is started with `FILEDOCK_TOKEN`, set the same token for the CLI:
+
+```bash
+export FILEDOCK_TOKEN="change-me"
 ```
 
 ### Push a File (single-chunk MVP)
