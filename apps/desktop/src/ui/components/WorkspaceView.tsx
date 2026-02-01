@@ -2,7 +2,17 @@ import { useState } from "react";
 
 import type { TabState } from "../model/state";
 import type { LayoutNode } from "../model/layout";
-import { closeLeaf, moveLeaf, setLeafPane, splitLeaf, updateSplitRatio, type DropZone } from "../model/layout";
+import {
+  addLeafTab,
+  closeLeaf,
+  closeLeafTab,
+  moveLeaf,
+  setLeafActiveTab,
+  setLeafPane,
+  splitLeaf,
+  updateSplitRatio,
+  type DropZone
+} from "../model/layout";
 import SplitNodeView from "./layout/SplitNodeView";
 import LeafPane from "./layout/LeafPane";
 
@@ -29,6 +39,9 @@ export function WorkspaceView(props: { tab: TabState; onTabChange: (tab: TabStat
           onSplit={(dir) => onRootChange(splitLeaf(tab.root, node.id, dir))}
           onClose={() => onRootChange(closeLeaf(tab.root, node.id))}
           onSetPane={(pane) => onRootChange(setLeafPane(tab.root, node.id, pane))}
+          onAddTab={(pane) => onRootChange(addLeafTab(tab.root, node.id, pane))}
+          onSetActiveTab={(tabId) => onRootChange(setLeafActiveTab(tab.root, node.id, tabId))}
+          onCloseTab={(tabId) => onRootChange(closeLeafTab(tab.root, node.id, tabId))}
         />
       );
     }

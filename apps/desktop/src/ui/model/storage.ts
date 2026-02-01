@@ -1,4 +1,5 @@
 import type { AppState } from "./state";
+import { normalizeLayoutNode } from "./layout";
 
 const KEY = "filedock.desktop.state.v1";
 
@@ -9,6 +10,12 @@ export function loadState(): AppState | null {
     const parsed = JSON.parse(raw) as AppState;
     if (!parsed || typeof parsed !== "object") return null;
     if (!Array.isArray(parsed.tabs) || typeof parsed.activeTabId !== "string") return null;
+
+    // Best-effort migration/normalization for evolving layout schemas.
+    parsed.tabs = parsed.tabs.map((t) => ({
+      ...t,
+      root: normalizeLayoutNode(t.root as any)
+    })) as any;
     return parsed;
   } catch {
     return null;
@@ -22,4 +29,3 @@ export function saveState(state: AppState): void {
     // Ignore quota / disabled storage; app still works.
   }
 }
-

@@ -1,4 +1,5 @@
 import type { DropZone, LeafNode, PaneKind, SplitDir } from "../../model/layout";
+import { activeTab } from "../../model/layout";
 import { PaneView } from "../panes/PaneView";
 
 const PANE_LABELS: Record<PaneKind, string> = {
@@ -15,11 +16,26 @@ export default function LeafPane(props: {
   onSplit: (dir: SplitDir) => void;
   onClose: () => void;
   onSetPane: (pane: PaneKind) => void;
+  onAddTab: (pane: PaneKind) => void;
+  onSetActiveTab: (tabId: string) => void;
+  onCloseTab: (tabId: string) => void;
 }) {
-  const { node, draggingLeafId, setDraggingLeafId, onDrop, onSplit, onClose, onSetPane } = props;
+  const {
+    node,
+    draggingLeafId,
+    setDraggingLeafId,
+    onDrop,
+    onSplit,
+    onClose,
+    onSetPane,
+    onAddTab,
+    onSetActiveTab,
+    onCloseTab
+  } = props;
 
   const dragging = draggingLeafId !== null;
   const canDrop = dragging && draggingLeafId !== node.id;
+  const tab = activeTab(node);
 
   return (
     <div className="pane">
@@ -37,13 +53,39 @@ export default function LeafPane(props: {
         >
           ::
         </span>
-        <div className="pane-title">{PANE_LABELS[node.pane]}</div>
+        <div className="pane-tabs" role="tablist" aria-label="Pane tabs">
+          {node.tabs.map((t) => (
+            <button
+              key={t.id}
+              className={t.id === node.activeTabId ? "pane-tab active" : "pane-tab"}
+              onClick={() => onSetActiveTab(t.id)}
+              title={t.title ?? PANE_LABELS[t.pane]}
+            >
+              <span className="pane-tab-label">{t.title ?? PANE_LABELS[t.pane]}</span>
+              {node.tabs.length > 1 ? (
+                <span
+                  className="pane-tab-close"
+                  title="Close tab"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCloseTab(t.id);
+                  }}
+                >
+                  x
+                </span>
+              ) : null}
+            </button>
+          ))}
+          <button className="pane-tab add" onClick={() => onAddTab("deviceBrowser")} title="New tab">
+            +
+          </button>
+        </div>
 
         <div className="pane-spacer" />
 
         <select
           className="pane-select"
-          value={node.pane}
+          value={tab.pane}
           onChange={(e) => onSetPane(e.target.value as PaneKind)}
           aria-label="Pane type"
         >
@@ -90,7 +132,7 @@ export default function LeafPane(props: {
       ) : null}
 
       <div className="pane-body">
-        <PaneView pane={node.pane} />
+        <PaneView pane={tab.pane} />
       </div>
     </div>
   );

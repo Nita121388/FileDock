@@ -11,7 +11,7 @@ MVP docking:
 
 - drag a pane titlebar onto another pane to reveal drop zones:
   - left/right/top/bottom: auto-split + dock
-  - center: swap pane types (temporary behavior)
+  - center: merge into target pane as tabs
 
 This folder contains the frontend UI and a minimal Tauri wrapper skeleton.
 

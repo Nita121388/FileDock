@@ -6,6 +6,12 @@ export type DropZone = "center" | "left" | "right" | "top" | "bottom";
 
 export type LayoutNode = SplitNode | LeafNode;
 
+export interface PaneTab {
+  id: string;
+  pane: PaneKind;
+  title?: string;
+}
+
 export interface SplitNode {
   kind: "split";
   id: string;
@@ -18,7 +24,8 @@ export interface SplitNode {
 export interface LeafNode {
   kind: "leaf";
   id: string;
-  pane: PaneKind;
+  tabs: PaneTab[];
+  activeTabId: string;
 }
 
 export function clampRatio(v: number): number {
@@ -32,14 +39,27 @@ export function defaultLayout(): LayoutNode {
     id: uid("split"),
     dir: "row",
     ratio: 0.34,
-    a: { kind: "leaf", id: uid("pane"), pane: "deviceBrowser" },
-    b: { kind: "leaf", id: uid("pane"), pane: "notes" }
+    a: leafFromPane("deviceBrowser"),
+    b: leafFromPane("notes")
   };
 }
 
 export function uid(prefix: string): string {
   // Avoid crypto dependency; uniqueness is good enough for persisted UI state.
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function makeTab(pane: PaneKind, title?: string): PaneTab {
+  return { id: uid("tab"), pane, title };
+}
+
+export function leafFromPane(pane: PaneKind): LeafNode {
+  const t = makeTab(pane);
+  return { kind: "leaf", id: uid("pane"), tabs: [t], activeTabId: t.id };
+}
+
+export function activeTab(leaf: LeafNode): PaneTab {
+  return leaf.tabs.find((t) => t.id === leaf.activeTabId) ?? leaf.tabs[0]!;
 }
 
 export function mapNode(node: LayoutNode, f: (n: LayoutNode) => LayoutNode): LayoutNode {
@@ -58,6 +78,35 @@ export function findLeaf(node: LayoutNode, id: string): LeafNode | null {
   return findLeaf(node.a, id) ?? findLeaf(node.b, id);
 }
 
+export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
+  if (node.kind === "split") {
+    return {
+      ...node,
+      ratio: clampRatio(node.ratio),
+      a: normalizeLayoutNode(node.a),
+      b: normalizeLayoutNode(node.b)
+    };
+  }
+
+  // Migration: legacy leaf schema had {pane}.
+  const anyLeaf = node as unknown as { pane?: PaneKind; tabs?: PaneTab[]; activeTabId?: string };
+  if (anyLeaf.tabs && Array.isArray(anyLeaf.tabs) && anyLeaf.tabs.length > 0) {
+    const tabs = anyLeaf.tabs.filter((t) => t && typeof t.id === "string" && typeof t.pane === "string");
+    const activeTabId = typeof anyLeaf.activeTabId === "string" ? anyLeaf.activeTabId : tabs[0]!.id;
+    const activeExists = tabs.some((t) => t.id === activeTabId);
+    return {
+      kind: "leaf",
+      id: node.id,
+      tabs,
+      activeTabId: activeExists ? activeTabId : tabs[0]!.id
+    };
+  }
+
+  const pane: PaneKind = anyLeaf.pane ?? "notes";
+  const t = makeTab(pane);
+  return { kind: "leaf", id: node.id, tabs: [t], activeTabId: t.id };
+}
+
 export function updateSplitRatio(node: LayoutNode, splitId: string, ratio: number): LayoutNode {
   return mapNode(node, (n) => {
     if (n.kind !== "split") return n;
@@ -71,7 +120,7 @@ export function splitLeaf(node: LayoutNode, leafId: string, dir: SplitDir): Layo
     if (n.kind !== "leaf") return n;
     if (n.id !== leafId) return n;
     const left: LeafNode = { ...n };
-    const right: LeafNode = { kind: "leaf", id: uid("pane"), pane: "notes" };
+    const right: LeafNode = leafFromPane("notes");
     return {
       kind: "split",
       id: uid("split"),
@@ -87,7 +136,43 @@ export function setLeafPane(node: LayoutNode, leafId: string, pane: PaneKind): L
   return mapNode(node, (n) => {
     if (n.kind !== "leaf") return n;
     if (n.id !== leafId) return n;
-    return { ...n, pane };
+    const a = activeTab(n);
+    return {
+      ...n,
+      tabs: n.tabs.map((t) => (t.id === a.id ? { ...t, pane } : t))
+    };
+  });
+}
+
+export function addLeafTab(node: LayoutNode, leafId: string, pane: PaneKind): LayoutNode {
+  return mapNode(node, (n) => {
+    if (n.kind !== "leaf") return n;
+    if (n.id !== leafId) return n;
+    const t = makeTab(pane);
+    return { ...n, tabs: [...n.tabs, t], activeTabId: t.id };
+  });
+}
+
+export function setLeafActiveTab(node: LayoutNode, leafId: string, tabId: string): LayoutNode {
+  return mapNode(node, (n) => {
+    if (n.kind !== "leaf") return n;
+    if (n.id !== leafId) return n;
+    const ok = n.tabs.some((t) => t.id === tabId);
+    return ok ? { ...n, activeTabId: tabId } : n;
+  });
+}
+
+export function closeLeafTab(node: LayoutNode, leafId: string, tabId: string): LayoutNode {
+  return mapNode(node, (n) => {
+    if (n.kind !== "leaf") return n;
+    if (n.id !== leafId) return n;
+    const tabs = n.tabs.filter((t) => t.id !== tabId);
+    if (tabs.length === 0) {
+      const t = makeTab("notes");
+      return { ...n, tabs: [t], activeTabId: t.id };
+    }
+    const activeTabId = tabs.some((t) => t.id === n.activeTabId) ? n.activeTabId : tabs[0]!.id;
+    return { ...n, tabs, activeTabId };
   });
 }
 
@@ -112,33 +197,40 @@ export function closeLeaf(node: LayoutNode, leafId: string): LayoutNode {
 
   const r = remove(node);
   // Keep at least one pane alive.
-  return r.node ?? { kind: "leaf", id: uid("pane"), pane: "notes" };
+  return r.node ?? leafFromPane("notes");
 }
 
 export function moveLeaf(root: LayoutNode, sourceLeafId: string, targetLeafId: string, zone: DropZone): LayoutNode {
   if (sourceLeafId === targetLeafId) return root;
-  if (zone === "center") return swapLeafPanes(root, sourceLeafId, targetLeafId);
+  if (zone === "center") return mergeLeafTabs(root, sourceLeafId, targetLeafId);
 
   const extracted = extractLeaf(root, sourceLeafId);
   if (!extracted.leaf) return root;
   return insertLeaf(extracted.root, targetLeafId, zone, extracted.leaf);
 }
 
-function getLeafPane(root: LayoutNode, leafId: string): PaneKind | null {
-  const l = findLeaf(root, leafId);
-  return l ? l.pane : null;
-}
+function mergeLeafTabs(root: LayoutNode, sourceLeafId: string, targetLeafId: string): LayoutNode {
+  const extracted = extractLeaf(root, sourceLeafId);
+  if (!extracted.leaf) return root;
 
-function swapLeafPanes(root: LayoutNode, aId: string, bId: string): LayoutNode {
-  const a = getLeafPane(root, aId);
-  const b = getLeafPane(root, bId);
-  if (!a || !b) return root;
-  return mapNode(root, (n) => {
+  const sourceTabs = extracted.leaf.tabs;
+  if (sourceTabs.length === 0) return extracted.root;
+
+  let merged = false;
+  const next = mapNode(extracted.root, (n) => {
     if (n.kind !== "leaf") return n;
-    if (n.id === aId) return { ...n, pane: b };
-    if (n.id === bId) return { ...n, pane: a };
-    return n;
+    if (n.id !== targetLeafId) return n;
+    merged = true;
+    return {
+      ...n,
+      tabs: [...n.tabs, ...sourceTabs],
+      activeTabId: sourceTabs[sourceTabs.length - 1]!.id
+    };
   });
+
+  // If target not found (shouldn't happen), fall back to re-inserting source by splitting.
+  if (!merged) return insertLeaf(extracted.root, targetLeafId, "right", extracted.leaf);
+  return next;
 }
 
 function extractLeaf(root: LayoutNode, leafId: string): { root: LayoutNode; leaf: LeafNode | null } {
@@ -164,7 +256,7 @@ function extractLeaf(root: LayoutNode, leafId: string): { root: LayoutNode; leaf
   }
 
   const r = remove(root);
-  const nextRoot = r.node ?? { kind: "leaf", id: uid("pane"), pane: "notes" };
+  const nextRoot = r.node ?? leafFromPane("notes");
   return { root: nextRoot, leaf: r.extracted };
 }
 

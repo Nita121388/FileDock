@@ -261,6 +261,54 @@ a {
   color: var(--fg1);
 }
 
+.pane-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: auto;
+  padding: 2px 2px;
+}
+
+.pane-tab {
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg2);
+  border-radius: 999px;
+  padding: 6px 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.pane-tab.active {
+  border-color: rgba(59, 228, 200, 0.55);
+  background: rgba(59, 228, 200, 0.10);
+  color: var(--fg0);
+}
+
+.pane-tab.add {
+  border-style: dashed;
+  color: var(--fg1);
+}
+
+.pane-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-tab-close {
+  color: var(--fg2);
+  padding: 0 4px;
+}
+
+.pane-tab-close:hover {
+  color: var(--danger);
+}
+
 .pane-spacer {
   flex: 1;
 }
