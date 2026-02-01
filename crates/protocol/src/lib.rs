@@ -30,6 +30,20 @@ pub struct DeviceInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceRegisterRequest {
+    pub device_name: String,
+    pub os: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceRegisterResponse {
+    pub device_id: String,
+    /// MVP: returned once at registration time.
+    /// Not yet used for request auth (server may still be protected by FILEDOCK_TOKEN).
+    pub device_token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthResponse {
     pub status: String,
     pub version: String,

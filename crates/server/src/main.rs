@@ -11,8 +11,8 @@ use bytes::Bytes;
 use futures_util::stream;
 use filedock_protocol::{
     is_valid_chunk_hash, is_valid_rel_path, ChunkPresenceRequest, ChunkPresenceResponse, ChunkRef,
-    HealthResponse, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, TreeEntry,
-    TreeResponse, SnapshotMeta,
+    DeviceInfo, DeviceRegisterRequest, DeviceRegisterResponse, HealthResponse, SnapshotCreateRequest,
+    SnapshotCreateResponse, SnapshotManifest, TreeEntry, TreeResponse, SnapshotMeta,
 };
 use filedock_storage::{DiskStorage, PutOpts, Storage};
 use std::{net::SocketAddr, sync::Arc};
@@ -21,6 +21,15 @@ use uuid::Uuid;
 
 use axum::extract::Query;
 use serde::Deserialize;
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct DeviceRecord {
+    device_id: String,
+    device_name: String,
+    os: String,
+    device_token: String,
+    created_unix: i64,
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -33,6 +42,80 @@ async fn health() -> Json<HealthResponse> {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     })
+}
+
+async fn register_device(
+    State(state): State<AppState>,
+    Json(req): Json<DeviceRegisterRequest>,
+) -> Result<Json<DeviceRegisterResponse>, (StatusCode, String)> {
+    if req.device_name.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "device_name required".to_string()));
+    }
+    if req.os.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "os required".to_string()));
+    }
+
+    let device_id = Uuid::new_v4().to_string();
+    let device_token = Uuid::new_v4().to_string();
+
+    let rec = DeviceRecord {
+        device_id: device_id.clone(),
+        device_name: req.device_name,
+        os: req.os,
+        device_token: device_token.clone(),
+        created_unix: now_unix(),
+    };
+
+    let key = format!("devices/{device_id}.json");
+    let data = serde_json::to_vec(&rec)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state
+        .storage
+        .put(
+            &key,
+            Bytes::from(data),
+            PutOpts {
+                content_type: Some("application/json".to_string()),
+            },
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(DeviceRegisterResponse {
+        device_id,
+        device_token,
+    }))
+}
+
+async fn list_devices(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<DeviceInfo>>, (StatusCode, String)> {
+    let keys = state
+        .storage
+        .list_prefix("devices/")
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let mut out = Vec::new();
+    for key in keys {
+        if !key.ends_with(".json") {
+            continue;
+        }
+        let data = state.storage.get(&key).await.map_err(|e| match e {
+            filedock_storage::StorageError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
+        let rec: DeviceRecord = serde_json::from_slice(&data)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        out.push(DeviceInfo {
+            id: rec.device_id,
+            name: rec.device_name,
+            os: rec.os,
+        });
+    }
+
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(out))
 }
 
 async fn auth(
@@ -449,6 +532,8 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/v1/auth/device/register", post(register_device))
+        .route("/v1/devices", get(list_devices))
         .route("/v1/snapshots", post(create_snapshot).get(list_snapshots))
         .route(
             "/v1/snapshots/:snapshot_id/manifest",

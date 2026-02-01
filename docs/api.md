@@ -22,10 +22,18 @@ MVP: versioned HTTP JSON API.
   - Request: device name, os
   - Response: device_id, device_token
 
+MVP (current implementation):
+
+- `POST /v1/auth/device/register` (create a device id + token)
+
 ### Devices
 
 - `GET /v1/devices`
 - `POST /v1/devices/{device_id}/heartbeat`
+
+MVP (current implementation):
+
+- `GET /v1/devices` (list registered devices)
 
 ### Jobs & Snapshots
 
