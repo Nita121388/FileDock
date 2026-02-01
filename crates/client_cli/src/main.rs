@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use filedock_protocol::{
     is_valid_chunk_hash, ChunkPresenceRequest, ChunkPresenceResponse, HealthResponse,
-    SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, ManifestFileEntry,
+    ChunkRef, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, ManifestFileEntry,
     TreeResponse,
 };
 use std::path::PathBuf;
@@ -78,6 +78,21 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+
+    /// Download an entire snapshot to a local folder.
+    PullFolder {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
+
+        /// Snapshot id.
+        #[arg(long)]
+        snapshot: String,
+
+        /// Output folder.
+        #[arg(long)]
+        out: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -99,24 +114,26 @@ async fn main() -> Result<(), String> {
             let data = tokio::fs::read(&file)
                 .await
                 .map_err(|e| format!("read file: {e}"))?;
-            let hash = blake3::hash(&data).to_hex().to_string();
-            if !is_valid_chunk_hash(&hash) {
-                return Err("unexpected hash format".to_string());
-            }
+            let chunks = chunk_file(&data);
+            let hashes: Vec<String> = chunks.iter().map(|c| c.hash.clone()).collect();
 
             let client = reqwest::Client::new();
 
-            let pres_resp = chunk_presence(&client, &server, vec![hash.clone()]).await?;
+            let pres_resp = chunk_presence(&client, &server, hashes.clone()).await?;
+            let missing: std::collections::HashSet<String> =
+                pres_resp.missing.into_iter().collect();
 
-            if pres_resp.missing.is_empty() {
-                println!("already present: {hash}");
-                return Ok(());
+            // Upload missing chunks (re-slice from original buffer).
+            let mut offset = 0usize;
+            for c in &chunks {
+                let end = offset + c.size as usize;
+                if missing.contains(&c.hash) {
+                    put_chunk(&client, &server, &c.hash, data[offset..end].to_vec()).await?;
+                }
+                offset = end;
             }
 
-            // Upload missing chunk
-            put_chunk(&client, &server, &hash, data).await?;
-
-            println!("uploaded: {hash}");
+            println!("uploaded chunks: {}", chunks.len());
         }
 
         Command::PushFolder {
@@ -183,21 +200,28 @@ async fn main() -> Result<(), String> {
                 let data = tokio::fs::read(&abs_path)
                     .await
                     .map_err(|e| format!("read file: {e}"))?;
-                let hash = blake3::hash(&data).to_hex().to_string();
-                if !is_valid_chunk_hash(&hash) {
-                    return Err("unexpected hash format".to_string());
-                }
+                let chunks = chunk_file(&data);
+                let hashes: Vec<String> = chunks.iter().map(|c| c.hash.clone()).collect();
+                let pres_resp = chunk_presence(&client, &server, hashes.clone()).await?;
+                let missing: std::collections::HashSet<String> =
+                    pres_resp.missing.into_iter().collect();
 
-                let pres_resp = chunk_presence(&client, &server, vec![hash.clone()]).await?;
-                if !pres_resp.missing.is_empty() {
-                    put_chunk(&client, &server, &hash, data).await?;
+                // Upload missing chunks.
+                let mut offset = 0usize;
+                for c in &chunks {
+                    let end = offset + c.size as usize;
+                    if missing.contains(&c.hash) {
+                        put_chunk(&client, &server, &c.hash, data[offset..end].to_vec()).await?;
+                    }
+                    offset = end;
                 }
 
                 files.push(ManifestFileEntry {
                     path: rel_str,
                     size,
                     mtime_unix,
-                    chunk_hash: hash,
+                    chunk_hash: None,
+                    chunks: Some(chunks),
                 });
             }
 
@@ -285,6 +309,62 @@ async fn main() -> Result<(), String> {
                 .map_err(|e| format!("write out: {e}"))?;
             println!("downloaded: {}", out.display());
         }
+
+        Command::PullFolder {
+            server,
+            snapshot,
+            out,
+        } => {
+            let client = reqwest::Client::new();
+
+            let manifest_url = format!(
+                "{}/v1/snapshots/{}/manifest",
+                server.trim_end_matches('/'),
+                snapshot
+            );
+            let manifest: SnapshotManifest = client
+                .get(manifest_url)
+                .send()
+                .await
+                .map_err(|e| format!("manifest request: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("manifest response: {e}"))?
+                .json()
+                .await
+                .map_err(|e| format!("manifest decode: {e}"))?;
+
+            for f in manifest.files {
+                let rel_path = f.path;
+                let out_path = out.join(rel_path.replace('/', std::path::MAIN_SEPARATOR_STR));
+                let url = format!(
+                    "{}/v1/snapshots/{}/file",
+                    server.trim_end_matches('/'),
+                    snapshot
+                );
+                let bytes = client
+                    .get(url)
+                    .query(&[("path", rel_path)])
+                    .send()
+                    .await
+                    .map_err(|e| format!("file request: {e}"))?
+                    .error_for_status()
+                    .map_err(|e| format!("file response: {e}"))?
+                    .bytes()
+                    .await
+                    .map_err(|e| format!("read bytes: {e}"))?;
+
+                if let Some(parent) = out_path.parent() {
+                    tokio::fs::create_dir_all(parent)
+                        .await
+                        .map_err(|e| format!("mkdir: {e}"))?;
+                }
+                tokio::fs::write(&out_path, &bytes)
+                    .await
+                    .map_err(|e| format!("write out: {e}"))?;
+            }
+
+            println!("restored to: {}", out.display());
+        }
     }
 
     Ok(())
@@ -338,4 +418,27 @@ async fn put_chunk(
         return Err(format!("upload failed: {}", resp.status()));
     }
     Ok(())
+}
+
+const DEFAULT_CHUNK_SIZE: usize = 4 * 1024 * 1024;
+
+fn chunk_file(data: &[u8]) -> Vec<ChunkRef> {
+    let mut out = Vec::new();
+    let mut offset = 0usize;
+    while offset < data.len() {
+        let end = std::cmp::min(offset + DEFAULT_CHUNK_SIZE, data.len());
+        let chunk = &data[offset..end];
+        let hash = blake3::hash(chunk).to_hex().to_string();
+        // This should always be true, but keep it as a sanity check.
+        if !is_valid_chunk_hash(&hash) {
+            // Fall back to empty result; caller will error on use.
+            return Vec::new();
+        }
+        out.push(ChunkRef {
+            hash,
+            size: (end - offset) as u64,
+        });
+        offset = end;
+    }
+    out
 }

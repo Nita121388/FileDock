@@ -69,6 +69,8 @@ Maps a file entry to an ordered list of chunks.
 - `chunk_hash`
 - `chunk_size`
 
+Note: Current MVP stores chunk lists directly in the snapshot manifest (no database yet).
+
 ### Transfer Task
 
 Represents a cross-device copy/move.

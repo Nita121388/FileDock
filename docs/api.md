@@ -48,6 +48,10 @@ MVP (current implementation):
 - `GET /v1/snapshots/{snapshot_id}/tree?path=` (empty path = root)
 - `GET /v1/snapshots/{snapshot_id}/file?path=relative/file`
 
+Notes:
+
+- `GET /file` reconstructs data from one or more stored chunks.
+
 ### Chunks
 
 - `POST /v1/chunks/presence` (hash list -> missing list)

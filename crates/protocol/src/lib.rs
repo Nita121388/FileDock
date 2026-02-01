@@ -63,8 +63,12 @@ pub struct ManifestFileEntry {
     pub size: u64,
     /// Seconds since UNIX epoch (UTC).
     pub mtime_unix: i64,
-    /// For MVP we store a single chunk hash per file.
-    pub chunk_hash: String,
+    /// For MVP we started with a single chunk hash per file.
+    /// Kept for backward-compatibility; new uploads should prefer `chunks`.
+    pub chunk_hash: Option<String>,
+
+    /// Optional multi-chunk representation (preferred).
+    pub chunks: Option<Vec<ChunkRef>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +76,12 @@ pub struct SnapshotManifest {
     pub snapshot_id: String,
     pub created_unix: i64,
     pub files: Vec<ManifestFileEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChunkRef {
+    pub hash: String,
+    pub size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

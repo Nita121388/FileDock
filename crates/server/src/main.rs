@@ -6,7 +6,7 @@ use axum::{
 };
 use bytes::Bytes;
 use filedock_protocol::{
-    is_valid_chunk_hash, is_valid_rel_path, ChunkPresenceRequest, ChunkPresenceResponse,
+    is_valid_chunk_hash, is_valid_rel_path, ChunkPresenceRequest, ChunkPresenceResponse, ChunkRef,
     HealthResponse, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, TreeEntry,
     TreeResponse,
 };
@@ -123,8 +123,22 @@ async fn put_manifest(
         if !is_valid_rel_path(&f.path) {
             return Err((StatusCode::BAD_REQUEST, "invalid file path".to_string()));
         }
-        if !is_valid_chunk_hash(&f.chunk_hash) {
-            return Err((StatusCode::BAD_REQUEST, "invalid chunk hash".to_string()));
+
+        // Back-compat: accept either single chunk_hash or chunks[].
+        if let Some(ch) = &f.chunk_hash {
+            if !is_valid_chunk_hash(ch) {
+                return Err((StatusCode::BAD_REQUEST, "invalid chunk hash".to_string()));
+            }
+        }
+        if let Some(chunks) = &f.chunks {
+            if chunks.is_empty() {
+                return Err((StatusCode::BAD_REQUEST, "empty chunks".to_string()));
+            }
+            for ChunkRef { hash, size: _ } in chunks {
+                if !is_valid_chunk_hash(hash) {
+                    return Err((StatusCode::BAD_REQUEST, "invalid chunk hash".to_string()));
+                }
+            }
         }
     }
 
@@ -208,7 +222,12 @@ async fn get_tree(
                 kind: "file".to_string(),
                 size: Some(f.size),
                 mtime_unix: Some(f.mtime_unix),
-                chunk_hash: Some(f.chunk_hash.clone()),
+                // For UI: show a representative hash if present.
+                chunk_hash: f.chunk_hash.clone().or_else(|| {
+                    f.chunks
+                        .as_ref()
+                        .and_then(|c| c.first().map(|x| x.hash.clone()))
+                }),
             });
         }
     }
@@ -251,12 +270,31 @@ async fn get_file_bytes(
         .find(|f| f.path == q.path)
         .ok_or((StatusCode::NOT_FOUND, "file not found".to_string()))?;
 
-    // MVP: single chunk per file
-    let key = format!("chunks/{}", entry.chunk_hash);
-    state.storage.get(&key).await.map_err(|e| match e {
-        filedock_storage::StorageError::NotFound => (StatusCode::NOT_FOUND, "chunk not found".to_string()),
-        _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-    })
+    // MVP: single chunk per file (legacy) OR multi-chunk reconstruction (in-memory).
+    let chunks: Vec<ChunkRef> = if let Some(chunks) = &entry.chunks {
+        chunks.clone()
+    } else if let Some(hash) = &entry.chunk_hash {
+        vec![ChunkRef {
+            hash: hash.clone(),
+            size: entry.size,
+        }]
+    } else {
+        return Err((StatusCode::BAD_REQUEST, "manifest missing chunk info".to_string()));
+    };
+
+    let mut out = Vec::with_capacity(entry.size as usize);
+    for c in chunks {
+        let key = format!("chunks/{}", c.hash);
+        let data = state.storage.get(&key).await.map_err(|e| match e {
+            filedock_storage::StorageError::NotFound => {
+                (StatusCode::NOT_FOUND, "chunk not found".to_string())
+            }
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
+        out.extend_from_slice(&data);
+    }
+
+    Ok(Bytes::from(out))
 }
 
 #[tokio::main]
