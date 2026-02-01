@@ -18,8 +18,31 @@ import {
   type SnapshotMeta,
   type TreeEntry
 } from "../../../api/client";
-import { restoreSnapshotToFolder, type RestoreSnapshotProgress } from "../../../api/tauri";
+import { cancelRestoreSnapshot, restoreSnapshotToFolder, type RestoreSnapshotProgress } from "../../../api/tauri";
 import { chunkFile } from "../../../util/chunking";
+
+const RESTORE_KEY = "filedock.desktop.restore.v1";
+
+function loadRestoreConcurrency(): number {
+  try {
+    const raw = localStorage.getItem(RESTORE_KEY);
+    if (!raw) return 4;
+    const parsed = JSON.parse(raw) as any;
+    const c = Number(parsed?.concurrency);
+    if (!Number.isFinite(c) || c < 1) return 4;
+    return Math.min(16, Math.floor(c));
+  } catch {
+    return 4;
+  }
+}
+
+function saveRestoreConcurrency(concurrency: number) {
+  try {
+    localStorage.setItem(RESTORE_KEY, JSON.stringify({ concurrency }));
+  } catch {
+    // ignore
+  }
+}
 
 type DeviceTab = Extract<PaneTab, { pane: "deviceBrowser" }>;
 
@@ -77,6 +100,11 @@ export default function DeviceBrowserPane(props: {
   const [selected, setSelected] = useState<string[]>([]);
   const [lastSelIndex, setLastSelIndex] = useState<number | null>(null);
   const [restorePct, setRestorePct] = useState<number | null>(null);
+  const [restoreConcurrency, setRestoreConcurrency] = useState<number>(() => loadRestoreConcurrency());
+
+  useEffect(() => {
+    saveRestoreConcurrency(restoreConcurrency);
+  }, [restoreConcurrency]);
 
   const deviceName = tab.state.deviceName;
   const snapshotId = tab.state.snapshotId;
@@ -528,6 +556,18 @@ export default function DeviceBrowserPane(props: {
             >
               Up
             </button>
+            <input
+              className="conn-input"
+              style={{ width: 70 }}
+              type="number"
+              min={1}
+              max={16}
+              step={1}
+              value={restoreConcurrency}
+              disabled={loading}
+              onChange={(e) => setRestoreConcurrency(Math.max(1, Math.min(16, Number(e.target.value) || 1)))}
+              title="Restore concurrency (files in parallel)"
+            />
             <button
               className="db-mini"
               disabled={!snapshotId || loading}
@@ -557,7 +597,7 @@ export default function DeviceBrowserPane(props: {
                       device_token: devTok,
                       snapshot_id: snapshotId,
                       dest_dir: picked,
-                      concurrency: 4
+                      concurrency: restoreConcurrency
                     },
                     (p: RestoreSnapshotProgress) => {
                       const pct =
@@ -578,6 +618,22 @@ export default function DeviceBrowserPane(props: {
               title="Restore the selected snapshot into a local folder"
             >
               RST{restorePct !== null ? ` ${restorePct}%` : ""}
+            </button>
+            <button
+              className="db-mini"
+              disabled={!snapshotId || !loading || restorePct === null}
+              onClick={async () => {
+                if (!snapshotId) return;
+                try {
+                  const ok = await cancelRestoreSnapshot(snapshotId);
+                  setStatus(ok ? `cancel requested (${snapshotId})` : "no running restore found");
+                } catch (e: any) {
+                  setStatus(String(e?.message ?? e));
+                }
+              }}
+              title="Cancel restore (stops scheduling new files; in-flight downloads finish)"
+            >
+              Cancel
             </button>
           </span>
         </div>

@@ -81,7 +81,9 @@ In the UI, set:
 
 In the Device Browser pane:
 - select a snapshot
+- set restore concurrency (small number input next to `RST`, default 4)
 - click `RST` and pick a destination folder
+- if needed, click `Cancel` (stops scheduling new files; in-flight downloads finish)
 
 ### Cross-device copy (desktop)
 

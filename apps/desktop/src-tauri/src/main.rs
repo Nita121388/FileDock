@@ -1,14 +1,28 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use filedock_protocol::{is_valid_rel_path, SnapshotManifest};
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-use tauri::AppHandle;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+use tauri::{AppHandle, State};
 
 const TOKEN_HEADER: &str = "x-filedock-token";
 const DEVICE_ID_HEADER: &str = "x-filedock-device-id";
 const DEVICE_TOKEN_HEADER: &str = "x-filedock-device-token";
+const RESTORE_EVENT: &str = "filedock_restore_progress";
+
+#[derive(Default)]
+struct RestoreManager {
+    // snapshot_id -> cancellation flag
+    cancel: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 struct RestoreSnapshotRequest {
@@ -119,9 +133,59 @@ async fn download_to_file(
     Ok(written)
 }
 
+async fn download_to_file_with_retry(
+    client: &reqwest::Client,
+    url: &str,
+    dest: &Path,
+) -> Result<u64, String> {
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        let res = download_to_file(client, url, dest).await;
+        match res {
+            Ok(n) => return Ok(n),
+            Err(e) => {
+                // Best-effort retry on transient failures (network, 5xx-ish messages).
+                // We only have string errors here; keep it simple.
+                let retryable = e.contains("download request:")
+                    || e.contains("download stream:")
+                    || e.contains("download response: 5")
+                    || e.contains("download response: 429")
+                    || e.contains("download response: 408");
+                if attempt >= 3 || !retryable {
+                    return Err(e);
+                }
+            }
+        }
+
+        // 250ms, 500ms (+ jitter)
+        let base_ms = 250u64.saturating_mul(1u64 << (attempt - 1));
+        let jitter: u64 = rand::random::<u8>() as u64;
+        tokio::time::sleep(Duration::from_millis(base_ms + jitter)).await;
+    }
+}
+
+#[tauri::command]
+fn cancel_restore_snapshot(state: State<RestoreManager>, snapshot_id: String) -> Result<bool, String> {
+    let id = snapshot_id.trim();
+    if id.is_empty() {
+        return Err("snapshot_id required".to_string());
+    }
+    let mut m = state
+        .cancel
+        .lock()
+        .map_err(|_| "restore manager lock poisoned".to_string())?;
+    if let Some(flag) = m.get(id) {
+        flag.store(true, Ordering::Relaxed);
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 #[tauri::command]
 async fn restore_snapshot_to_folder(
     app: AppHandle,
+    state: State<RestoreManager>,
     req: RestoreSnapshotRequest,
 ) -> Result<RestoreSnapshotResponse, String> {
     if req.server_base_url.trim().is_empty() {
@@ -133,6 +197,31 @@ async fn restore_snapshot_to_folder(
     if req.dest_dir.trim().is_empty() {
         return Err("dest_dir required".to_string());
     }
+
+    // Register cancellation flag for this restore.
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    {
+        let mut m = state
+            .cancel
+            .lock()
+            .map_err(|_| "restore manager lock poisoned".to_string())?;
+        m.insert(req.snapshot_id.clone(), cancel_flag.clone());
+    }
+    struct Cleanup<'a> {
+        state: &'a RestoreManager,
+        snapshot_id: String,
+    }
+    impl Drop for Cleanup<'_> {
+        fn drop(&mut self) {
+            if let Ok(mut m) = self.state.cancel.lock() {
+                m.remove(&self.snapshot_id);
+            }
+        }
+    }
+    let _cleanup = Cleanup {
+        state: &state,
+        snapshot_id: req.snapshot_id.clone(),
+    };
 
     let client = build_client(&req)?;
     let base = req.server_base_url.trim_end_matches('/').to_string();
@@ -158,59 +247,123 @@ async fn restore_snapshot_to_folder(
         .await
         .map_err(|e| format!("mkdir dest: {e}"))?;
 
-    // Download files concurrently. We emit progress after each file completes.
+    // Download files concurrently. MVP cancellation stops scheduling new files; in-flight file downloads finish.
     let mut done_files = 0u64;
     let mut done_bytes = 0u64;
 
-    let files = manifest.files;
-    let mut tasks = futures_util::stream::iter(files.into_iter().map(|f| {
+    let files = Arc::new(manifest.files);
+    let next = Arc::new(AtomicUsize::new(0));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<(String, u64), String>>(req.concurrency.max(1) * 2);
+    let mut handles = Vec::new();
+
+    for _ in 0..req.concurrency.max(1) {
         let client = client.clone();
         let base = base.clone();
         let snapshot_id = req.snapshot_id.clone();
         let dest_root = dest_root.clone();
-        async move {
-            let out_path = rel_posix_to_platform_path(&dest_root, &f.path)?;
-            let url = format!(
-                "{}/v1/snapshots/{}/file?path={}",
-                base,
-                snapshot_id,
-                urlencoding::encode(&f.path)
-            );
-            let bytes = if f.size == 0 {
-                // Create empty file.
-                if let Some(parent) = out_path.parent() {
-                    tokio::fs::create_dir_all(parent)
-                        .await
-                        .map_err(|e| format!("mkdir: {e}"))?;
+        let files = files.clone();
+        let next = next.clone();
+        let tx = tx.clone();
+        let cancel = cancel_flag.clone();
+
+        handles.push(tokio::spawn(async move {
+            loop {
+                if cancel.load(Ordering::Relaxed) {
+                    return;
                 }
-                tokio::fs::write(&out_path, &[])
-                    .await
-                    .map_err(|e| format!("write empty file: {e}"))?;
-                0u64
-            } else {
-                download_to_file(&client, &url, &out_path).await?
-            };
-            Ok::<(String, u64), String>((f.path, bytes))
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                if i >= files.len() {
+                    return;
+                }
+                let f = &files[i];
+                let out_path = match rel_posix_to_platform_path(&dest_root, &f.path) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.send(Err(e)).await;
+                        return;
+                    }
+                };
+
+                if cancel.load(Ordering::Relaxed) {
+                    return;
+                }
+
+                let url = format!(
+                    "{}/v1/snapshots/{}/file?path={}",
+                    base,
+                    snapshot_id,
+                    urlencoding::encode(&f.path)
+                );
+
+                let bytes = if f.size == 0 {
+                    if let Some(parent) = out_path.parent() {
+                        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                            let _ = tx.send(Err(format!("mkdir: {e}"))).await;
+                            return;
+                        }
+                    }
+                    if let Err(e) = tokio::fs::write(&out_path, &[]).await {
+                        let _ = tx.send(Err(format!("write empty file: {e}"))).await;
+                        return;
+                    }
+                    0u64
+                } else {
+                    match download_to_file_with_retry(&client, &url, &out_path).await {
+                        Ok(n) => n,
+                        Err(e) => {
+                            let _ = tx.send(Err(e)).await;
+                            return;
+                        }
+                    }
+                };
+
+                if tx.send(Ok((f.path.clone(), bytes))).await.is_err() {
+                    return;
+                }
+            }
+        }));
+    }
+    drop(tx);
+
+    while let Some(msg) = rx.recv().await {
+        if cancel_flag.load(Ordering::Relaxed) {
+            break;
         }
-    }))
-    .buffer_unordered(req.concurrency.max(1));
+        match msg {
+            Ok((path, bytes)) => {
+                done_files = done_files.saturating_add(1);
+                done_bytes = done_bytes.saturating_add(bytes);
+                let _ = app.emit_all(
+                    RESTORE_EVENT,
+                    RestoreSnapshotProgress {
+                        snapshot_id: req.snapshot_id.clone(),
+                        path,
+                        done_files,
+                        total_files,
+                        done_bytes,
+                        total_bytes,
+                    },
+                );
+            }
+            Err(e) => {
+                cancel_flag.store(true, Ordering::Relaxed);
+                for h in handles {
+                    let _ = h.await;
+                }
+                return Err(e);
+            }
+        }
+    }
 
-    while let Some(res) = tasks.next().await {
-        let (path, bytes) = res?;
-        done_files = done_files.saturating_add(1);
-        done_bytes = done_bytes.saturating_add(bytes);
+    if cancel_flag.load(Ordering::Relaxed) {
+        for h in handles {
+            let _ = h.await;
+        }
+        return Err("cancelled".to_string());
+    }
 
-        let _ = app.emit_all(
-            "filedock_restore_progress",
-            RestoreSnapshotProgress {
-                snapshot_id: req.snapshot_id.clone(),
-                path,
-                done_files,
-                total_files,
-                done_bytes,
-                total_bytes,
-            },
-        );
+    for h in handles {
+        let _ = h.await;
     }
 
     Ok(RestoreSnapshotResponse {
@@ -224,7 +377,11 @@ async fn restore_snapshot_to_folder(
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![restore_snapshot_to_folder])
+        .manage(RestoreManager::default())
+        .invoke_handler(tauri::generate_handler![
+            restore_snapshot_to_folder,
+            cancel_restore_snapshot
+        ])
         .run(tauri::generate_context!())
         .expect("error while running filedock desktop");
 }

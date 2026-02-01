@@ -46,3 +46,6 @@ export async function restoreSnapshotToFolder(
   }
 }
 
+export async function cancelRestoreSnapshot(snapshotId: string): Promise<boolean> {
+  return await invoke<boolean>("cancel_restore_snapshot", { snapshotId });
+}
