@@ -268,6 +268,7 @@ async fn main() -> Result<(), String> {
             // Pass 2: upload missing chunks, concurrent by file.
             let uploaded_files = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
             let uploaded_bytes = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let skipped_files = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
             let server_base = server.trim_end_matches('/').to_string();
             let missing = std::sync::Arc::new(missing);
 
@@ -277,8 +278,35 @@ async fn main() -> Result<(), String> {
                     let missing = missing.clone();
                     let uploaded_files = uploaded_files.clone();
                     let uploaded_bytes = uploaded_bytes.clone();
+                    let skipped_files = skipped_files.clone();
                     let server_base = server_base.clone();
                     async move {
+                        let needs_upload = plan.chunks.iter().any(|c| missing.contains(&c.hash));
+                        if !needs_upload {
+                            let done_files =
+                                uploaded_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                    + 1;
+                            let done_bytes = uploaded_bytes
+                                .fetch_add(plan.size, std::sync::atomic::Ordering::Relaxed)
+                                + plan.size;
+                            let done_skipped =
+                                skipped_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                    + 1;
+                            if done_files % 25 == 0 || done_files == total_files {
+                                eprintln!(
+                                    "uploaded files: {done_files}/{total_files}  bytes: {done_bytes}/{total_bytes}  skipped: {done_skipped}"
+                                );
+                            }
+
+                            return Ok(ManifestFileEntry {
+                                path: plan.rel_path,
+                                size: plan.size,
+                                mtime_unix: plan.mtime_unix,
+                                chunk_hash: None,
+                                chunks: Some(plan.chunks),
+                            });
+                        }
+
                         let data = tokio::fs::read(&plan.abs_path)
                             .await
                             .map_err(|e| format!("read file: {e}"))?;
@@ -296,7 +324,10 @@ async fn main() -> Result<(), String> {
                         let done_files = uploaded_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                         let done_bytes = uploaded_bytes.fetch_add(plan.size, std::sync::atomic::Ordering::Relaxed) + plan.size;
                         if done_files % 25 == 0 || done_files == total_files {
-                            eprintln!("uploaded files: {done_files}/{total_files}  bytes: {done_bytes}/{total_bytes}");
+                            let done_skipped = skipped_files.load(std::sync::atomic::Ordering::Relaxed);
+                            eprintln!(
+                                "uploaded files: {done_files}/{total_files}  bytes: {done_bytes}/{total_bytes}  skipped: {done_skipped}"
+                            );
                         }
 
                         Ok(ManifestFileEntry {
