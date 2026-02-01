@@ -3,23 +3,27 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const QUEUE_KEY = "filedock.desktop.queue.v1";
 
-function loadQueueSettings(): { concurrency: number; paused: boolean } {
+type QueueSettings = { concurrency: number; paused: boolean; autoRun: boolean };
+
+function loadQueueSettings(): QueueSettings {
   try {
     const raw = localStorage.getItem(QUEUE_KEY);
-    if (!raw) return { concurrency: 2, paused: false };
+    if (!raw) return { concurrency: 2, paused: false, autoRun: false };
     const parsed = JSON.parse(raw) as any;
     const concurrency = Number(parsed?.concurrency);
     const paused = Boolean(parsed?.paused);
+    const autoRun = Boolean(parsed?.autoRun);
     return {
       concurrency: Number.isFinite(concurrency) && concurrency >= 1 ? Math.min(8, Math.floor(concurrency)) : 2,
-      paused
+      paused,
+      autoRun
     };
   } catch {
-    return { concurrency: 2, paused: false };
+    return { concurrency: 2, paused: false, autoRun: false };
   }
 }
 
-function saveQueueSettings(next: { concurrency: number; paused: boolean }) {
+function saveQueueSettings(next: QueueSettings) {
   try {
     localStorage.setItem(QUEUE_KEY, JSON.stringify(next));
   } catch {
@@ -32,16 +36,22 @@ export default function TransferQueuePane(props: {
   onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../../../model/transfers").Conn) => void;
   onRemove: (id: string) => void;
   onRun: (id: string) => Promise<void>;
+  onCancel: (id: string) => void;
 }) {
-  const { transfers, onEnqueueDownload, onRemove, onRun } = props;
+  const { transfers, onEnqueueDownload, onRemove, onRun, onCancel } = props;
   const [busy, setBusy] = useState(false);
-  const [queue, setQueue] = useState(() => loadQueueSettings());
+  const [queue, setQueue] = useState<QueueSettings>(() => loadQueueSettings());
   const pausedRef = useRef(queue.paused);
+  const busyRef = useRef(busy);
 
   useEffect(() => {
     pausedRef.current = queue.paused;
     saveQueueSettings(queue);
   }, [queue]);
+
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
 
   const counts = useMemo(() => {
     return {
@@ -53,8 +63,9 @@ export default function TransferQueuePane(props: {
   }, [transfers]);
 
   const runAll = async (mode: "queued" | "failed" | "all") => {
-    if (busy) return;
+    if (busyRef.current) return;
     if (queue.paused) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const ids = transfers
@@ -83,6 +94,7 @@ export default function TransferQueuePane(props: {
       await Promise.all(workers);
     } finally {
       setBusy(false);
+      busyRef.current = false;
     }
   };
 
@@ -167,6 +179,14 @@ export default function TransferQueuePane(props: {
             >
               {queue.paused ? "Resume" : "Pause"}
             </button>
+            <button
+              className="db-mini"
+              disabled={busy}
+              onClick={() => setQueue((q) => ({ ...q, autoRun: !q.autoRun }))}
+              title={queue.autoRun ? "Disable auto-run" : "Auto-run queued jobs when possible"}
+            >
+              {queue.autoRun ? "Auto: ON" : "Auto: OFF"}
+            </button>
             <button className="db-mini" disabled={busy || queue.paused} onClick={() => runAll("queued")} title="Run queued">
               Run queued
             </button>
@@ -181,6 +201,12 @@ export default function TransferQueuePane(props: {
             </button>
           </div>
         </div>
+      ) : null}
+
+      {queue.autoRun && !queue.paused && !busy && counts.queued > 0 && counts.running < queue.concurrency ? (
+        // Kick off queued transfers automatically.
+        // Note: we render a placeholder node to run an effect below without extra state.
+        <AutoRunner onTick={() => runAll("queued")} />
       ) : null}
 
       {transfers.map((j) => (
@@ -222,6 +248,11 @@ export default function TransferQueuePane(props: {
             >
               Run
             </button>
+            {j.status === "running" ? (
+              <button className="db-mini danger" onClick={() => onCancel(j.id)} title="Cancel">
+                Cancel
+              </button>
+            ) : null}
             <button className="db-mini" onClick={() => onRemove(j.id)} title="Remove">
               Remove
             </button>
@@ -234,4 +265,14 @@ export default function TransferQueuePane(props: {
       </div>
     </div>
   );
+}
+
+function AutoRunner(props: { onTick: () => void }) {
+  const { onTick } = props;
+  useEffect(() => {
+    // Schedule after paint to avoid re-entrancy during render.
+    const t = window.setTimeout(() => onTick(), 0);
+    return () => window.clearTimeout(t);
+  }, [onTick]);
+  return null;
 }

@@ -23,6 +23,7 @@ export function PaneView(props: {
   }) => void;
   onRemoveTransfer: (id: string) => void;
   onRunTransfer: (id: string) => Promise<void>;
+  onCancelTransfer: (id: string) => void;
   onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
 }) {
   switch (props.tab.pane) {
@@ -44,6 +45,7 @@ export function PaneView(props: {
           onEnqueueDownload={props.onEnqueueDownload}
           onRemove={props.onRemoveTransfer}
           onRun={props.onRunTransfer}
+          onCancel={props.onCancelTransfer}
         />
       );
     case "notes":

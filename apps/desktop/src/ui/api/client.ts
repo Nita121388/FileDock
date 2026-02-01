@@ -77,14 +77,16 @@ function headers(settings: Settings): HeadersInit {
 async function apiPostJson<T>(
   settings: Settings,
   path: string,
-  body: unknown
+  body: unknown,
+  signal?: AbortSignal
 ): Promise<T> {
   const base = settings.serverBaseUrl.replace(/\/+$/, "");
   const url = base + path;
   const resp = await fetch(url, {
     method: "POST",
     headers: headers(settings),
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
@@ -93,7 +95,12 @@ async function apiPostJson<T>(
   return (await resp.json()) as T;
 }
 
-export async function apiGetJson<T>(settings: Settings, path: string, query?: Record<string, string>): Promise<T> {
+export async function apiGetJson<T>(
+  settings: Settings,
+  path: string,
+  query?: Record<string, string>,
+  signal?: AbortSignal
+): Promise<T> {
   const base = settings.serverBaseUrl.replace(/\/+$/, "");
   const url = new URL(base + path);
   if (query) {
@@ -101,7 +108,8 @@ export async function apiGetJson<T>(settings: Settings, path: string, query?: Re
   }
   const resp = await fetch(url.toString(), {
     method: "GET",
-    headers: headers(settings)
+    headers: headers(settings),
+    signal
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
@@ -110,7 +118,12 @@ export async function apiGetJson<T>(settings: Settings, path: string, query?: Re
   return (await resp.json()) as T;
 }
 
-export async function apiGetBytes(settings: Settings, path: string, query?: Record<string, string>): Promise<Blob> {
+export async function apiGetBytes(
+  settings: Settings,
+  path: string,
+  query?: Record<string, string>,
+  signal?: AbortSignal
+): Promise<Blob> {
   const base = settings.serverBaseUrl.replace(/\/+$/, "");
   const url = new URL(base + path);
   if (query) {
@@ -118,7 +131,8 @@ export async function apiGetBytes(settings: Settings, path: string, query?: Reco
   }
   const resp = await fetch(url.toString(), {
     method: "GET",
-    headers: headers(settings)
+    headers: headers(settings),
+    signal
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
@@ -131,7 +145,8 @@ export async function apiGetUint8Array(
   settings: Settings,
   path: string,
   query?: Record<string, string>,
-  onProgress?: (doneBytes: number, totalBytes: number | null) => void
+  onProgress?: (doneBytes: number, totalBytes: number | null) => void,
+  signal?: AbortSignal
 ): Promise<Uint8Array> {
   const base = settings.serverBaseUrl.replace(/\/+$/, "");
   const url = new URL(base + path);
@@ -140,7 +155,8 @@ export async function apiGetUint8Array(
   }
   const resp = await fetch(url.toString(), {
     method: "GET",
-    headers: headers(settings)
+    headers: headers(settings),
+    signal
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
@@ -202,11 +218,15 @@ export async function registerDevice(settings: Settings, req: DeviceRegisterRequ
   return apiPostJson<DeviceRegisterResponse>(settings, "/v1/auth/device/register", req);
 }
 
-export async function chunksPresence(settings: Settings, req: ChunkPresenceRequest): Promise<ChunkPresenceResponse> {
-  return apiPostJson<ChunkPresenceResponse>(settings, "/v1/chunks/presence", req);
+export async function chunksPresence(
+  settings: Settings,
+  req: ChunkPresenceRequest,
+  signal?: AbortSignal
+): Promise<ChunkPresenceResponse> {
+  return apiPostJson<ChunkPresenceResponse>(settings, "/v1/chunks/presence", req, signal);
 }
 
-export async function putChunk(settings: Settings, hash: string, data: Uint8Array): Promise<void> {
+export async function putChunk(settings: Settings, hash: string, data: Uint8Array, signal?: AbortSignal): Promise<void> {
   const base = settings.serverBaseUrl.replace(/\/+$/, "");
   const url = `${base}/v1/chunks/${encodeURIComponent(hash)}`;
   const body: ArrayBuffer =
@@ -216,7 +236,8 @@ export async function putChunk(settings: Settings, hash: string, data: Uint8Arra
   const resp = await fetch(url, {
     method: "PUT",
     headers: headers(settings),
-    body
+    body,
+    signal
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
@@ -224,17 +245,27 @@ export async function putChunk(settings: Settings, hash: string, data: Uint8Arra
   }
 }
 
-export async function createSnapshot(settings: Settings, req: SnapshotCreateRequest): Promise<SnapshotCreateResponse> {
-  return apiPostJson<SnapshotCreateResponse>(settings, "/v1/snapshots", req);
+export async function createSnapshot(
+  settings: Settings,
+  req: SnapshotCreateRequest,
+  signal?: AbortSignal
+): Promise<SnapshotCreateResponse> {
+  return apiPostJson<SnapshotCreateResponse>(settings, "/v1/snapshots", req, signal);
 }
 
-export async function putManifest(settings: Settings, snapshotId: string, manifest: SnapshotManifest): Promise<void> {
+export async function putManifest(
+  settings: Settings,
+  snapshotId: string,
+  manifest: SnapshotManifest,
+  signal?: AbortSignal
+): Promise<void> {
   const base = settings.serverBaseUrl.replace(/\/+$/, "");
   const url = `${base}/v1/snapshots/${encodeURIComponent(snapshotId)}/manifest`;
   const resp = await fetch(url, {
     method: "PUT",
     headers: headers(settings),
-    body: JSON.stringify(manifest)
+    body: JSON.stringify(manifest),
+    signal
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");

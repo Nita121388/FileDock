@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceView } from "./components/WorkspaceView";
 import {
   DEFAULT_APP_STATE,
@@ -33,6 +33,7 @@ export default function App() {
   const [state, setState] = useState<AppState>(() => loadState() ?? DEFAULT_APP_STATE);
   const [settings, setSettings] = useState<Settings>(() => loadSettings() ?? DEFAULT_SETTINGS);
   const [transfers, setTransfers] = useState<TransferJob[]>(() => loadTransfers());
+  const abortersRef = useRef<Map<string, AbortController>>(new Map());
 
   useEffect(() => {
     saveState(state);
@@ -123,18 +124,54 @@ export default function App() {
     setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, error } : x)));
   };
 
+  function isAbortError(e: unknown): boolean {
+    const any = e as any;
+    return any?.name === "AbortError" || String(any?.message ?? "").toLowerCase().includes("aborted");
+  }
+
   const withRetry = async <T,>(fn: () => Promise<T>, tries = 3): Promise<T> => {
     let last: unknown = null;
     for (let attempt = 0; attempt < tries; attempt++) {
       try {
         return await fn();
       } catch (e) {
+        // Stop retry loops on user cancel.
+        if (isAbortError(e)) throw e;
         last = e;
         const ms = Math.min(3000, 250 * Math.pow(2, attempt)) + Math.floor(Math.random() * 150);
         await new Promise((r) => setTimeout(r, ms));
       }
     }
     throw last;
+  };
+
+  const newAborter = (id: string): AbortController => {
+    // Replace any previous controller for the same job id.
+    const prev = abortersRef.current.get(id);
+    if (prev) {
+      try {
+        prev.abort();
+      } catch {
+        // ignore
+      }
+    }
+    const ac = new AbortController();
+    abortersRef.current.set(id, ac);
+    return ac;
+  };
+
+  const clearAborter = (id: string) => {
+    abortersRef.current.delete(id);
+  };
+
+  const cancelTransfer = (id: string) => {
+    const ac = abortersRef.current.get(id);
+    if (!ac) return;
+    try {
+      ac.abort();
+    } finally {
+      // Status update happens in the transfer catch handler.
+    }
   };
 
   const connToSettings = (c: Conn): Settings => ({
@@ -148,6 +185,8 @@ export default function App() {
     const job = transfers.find((x) => x.id === id);
     if (!job) return;
     if (job.kind !== "download") return;
+    if (job.status === "running" || job.status === "done") return;
+    const ac = newAborter(id);
     setTransferStatus(id, "running");
     setTransferError(id, undefined);
     try {
@@ -161,7 +200,8 @@ export default function App() {
           (done, total) => {
             const pct = total && total > 0 ? Math.floor((done / total) * 100) : undefined;
             setTransferProgress(id, { phase: "downloading", doneBytes: done, totalBytes: total ?? undefined, pct });
-          }
+          },
+          ac.signal
         );
       });
       setTransferProgress(id, { phase: "saving", pct: 100 });
@@ -177,10 +217,18 @@ export default function App() {
         xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined, progress: undefined } : x))
       );
     } catch (e: any) {
+      if (isAbortError(e)) {
+        setTransfers((xs) =>
+          xs.map((x) => (x.id === id ? { ...x, status: "failed", error: "canceled", progress: undefined } : x))
+        );
+        return;
+      }
       const msg = String(e?.message ?? e);
       setTransfers((xs) =>
         xs.map((x) => (x.id === id ? { ...x, status: "failed", error: msg, progress: undefined } : x))
       );
+    } finally {
+      clearAborter(id);
     }
   };
 
@@ -188,6 +236,8 @@ export default function App() {
     const job = transfers.find((x) => x.id === id);
     if (!job) return;
     if (job.kind !== "copy_file") return;
+    if (job.status === "running" || job.status === "done") return;
+    const ac = newAborter(id);
     setTransferStatus(id, "running");
     setTransferError(id, undefined);
 
@@ -205,7 +255,8 @@ export default function App() {
           (done, total) => {
             const pct = total && total > 0 ? Math.floor((done / total) * 100) : undefined;
             setTransferProgress(id, { phase: "downloading", doneBytes: done, totalBytes: total ?? undefined, pct });
-          }
+          },
+          ac.signal
         );
       });
 
@@ -221,7 +272,7 @@ export default function App() {
       const batchSize = 1000;
       for (let i = 0; i < hashes.length; i += batchSize) {
         const batch = hashes.slice(i, i + batchSize);
-        const resp = await chunksPresence(dstSettings, { hashes: batch });
+        const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
         for (const h of resp.missing) missing.add(h);
       }
 
@@ -233,7 +284,7 @@ export default function App() {
         const end = offset + c.size;
         if (missing.has(c.hash)) {
           await withRetry(async () => {
-            await putChunk(dstSettings, c.hash, buf.subarray(offset, end));
+            await putChunk(dstSettings, c.hash, buf.subarray(offset, end), ac.signal);
           });
           uploaded++;
         }
@@ -245,12 +296,19 @@ export default function App() {
       // 5) Create snapshot + manifest on destination.
       setTransferProgress(id, { phase: "finalizing", pct: 0 });
       const now = Math.floor(Date.now() / 1000);
-      const snap = await createSnapshot(dstSettings, {
+      const snap = await createSnapshot(
+        dstSettings,
+        {
         device_name: job.dstDeviceName,
         device_id: job.dstDeviceId ?? null,
         root_path: "(transfer)"
-      });
-      await putManifest(dstSettings, snap.snapshot_id, {
+        },
+        ac.signal
+      );
+      await putManifest(
+        dstSettings,
+        snap.snapshot_id,
+        {
         snapshot_id: snap.snapshot_id,
         created_unix: now,
         files: [
@@ -262,16 +320,26 @@ export default function App() {
             chunks: manifestChunks
           }
         ]
-      });
+        },
+        ac.signal
+      );
 
       setTransfers((xs) =>
         xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined, progress: undefined } : x))
       );
     } catch (e: any) {
+      if (isAbortError(e)) {
+        setTransfers((xs) =>
+          xs.map((x) => (x.id === id ? { ...x, status: "failed", error: "canceled", progress: undefined } : x))
+        );
+        return;
+      }
       const msg = String(e?.message ?? e);
       setTransfers((xs) =>
         xs.map((x) => (x.id === id ? { ...x, status: "failed", error: msg, progress: undefined } : x))
       );
+    } finally {
+      clearAborter(id);
     }
   };
 
@@ -366,6 +434,7 @@ export default function App() {
           onEnqueueCopy={enqueueCopy}
           onRemoveTransfer={removeTransfer}
           onRunTransfer={runTransfer}
+          onCancelTransfer={cancelTransfer}
           onSetDeviceAuth={(deviceId, deviceToken) =>
             setSettings((s) => ({ ...s, deviceId, deviceToken }))
           }
