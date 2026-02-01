@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use filedock_protocol::{is_valid_rel_path, SnapshotManifest};
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -21,6 +22,12 @@ const RESTORE_EVENT: &str = "filedock_restore_progress";
 #[derive(Default)]
 struct RestoreManager {
     // snapshot_id -> cancellation flag
+    cancel: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+#[derive(Default)]
+struct PluginRunManager {
+    // run_id -> cancellation flag
     cancel: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
@@ -378,10 +385,12 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(RestoreManager::default())
+        .manage(PluginRunManager::default())
         .invoke_handler(tauri::generate_handler![
             restore_snapshot_to_folder,
             cancel_restore_snapshot,
-            run_filedock_plugin
+            run_filedock_plugin,
+            cancel_filedock_plugin_run
         ])
         .run(tauri::generate_context!())
         .expect("error while running filedock desktop");
@@ -394,12 +403,31 @@ struct RunFiledockPluginRequest {
     timeout_secs: Option<u64>,
     filedock_path: Option<String>,
     plugin_dirs: Option<Vec<String>>,
+    run_id: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
 struct RunFiledockPluginResponse {
     stdout: String,
     stderr: String,
+}
+
+#[tauri::command]
+fn cancel_filedock_plugin_run(state: State<PluginRunManager>, run_id: String) -> Result<bool, String> {
+    let id = run_id.trim();
+    if id.is_empty() {
+        return Err("runId required".to_string());
+    }
+
+    let mut m = state
+        .cancel
+        .lock()
+        .map_err(|_| "plugin run manager lock poisoned".to_string())?;
+    if let Some(flag) = m.get(id) {
+        flag.store(true, Ordering::Relaxed);
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 fn resolve_filedock_path(explicit: Option<&str>) -> (String, Option<PathBuf>) {
@@ -440,7 +468,10 @@ fn resolve_filedock_path(explicit: Option<&str>) -> (String, Option<PathBuf>) {
 }
 
 #[tauri::command]
-async fn run_filedock_plugin(req: RunFiledockPluginRequest) -> Result<RunFiledockPluginResponse, String> {
+async fn run_filedock_plugin(
+    state: State<PluginRunManager>,
+    req: RunFiledockPluginRequest,
+) -> Result<RunFiledockPluginResponse, String> {
     let name = req.name.trim().to_string();
     if name.is_empty() {
         return Err("name required".to_string());
@@ -453,6 +484,42 @@ async fn run_filedock_plugin(req: RunFiledockPluginRequest) -> Result<RunFiledoc
     let (filedock, filedock_dir) = resolve_filedock_path(req.filedock_path.as_deref());
 
     let timeout_secs = req.timeout_secs.unwrap_or(30).max(1);
+    let run_id = req
+        .run_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let cancel_flag = if let Some(id) = run_id.as_deref() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut m = state
+            .cancel
+            .lock()
+            .map_err(|_| "plugin run manager lock poisoned".to_string())?;
+        m.insert(id.to_string(), flag.clone());
+        Some(flag)
+    } else {
+        None
+    };
+
+    struct Cleanup<'a> {
+        state: &'a PluginRunManager,
+        run_id: Option<String>,
+    }
+    impl Drop for Cleanup<'_> {
+        fn drop(&mut self) {
+            if let Some(id) = self.run_id.as_deref() {
+                if let Ok(mut m) = self.state.cancel.lock() {
+                    m.remove(id);
+                }
+            }
+        }
+    }
+    let _cleanup = Cleanup {
+        state: &state,
+        run_id: run_id.clone(),
+    };
 
     let mut cmd = tokio::process::Command::new(filedock);
     cmd.arg("plugin")
@@ -481,10 +548,31 @@ async fn run_filedock_plugin(req: RunFiledockPluginRequest) -> Result<RunFiledoc
         cmd.env("FILEDOCK_PLUGIN_DIRS", dir.to_string_lossy().to_string());
     }
 
-    let output = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output())
-        .await
-        .map_err(|_| format!("plugin timed out after {timeout_secs}s"))?
-        .map_err(|e| format!("spawn filedock: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("spawn filedock: {e}"))?;
+    let output = tokio::select! {
+        res = child.wait_with_output() => {
+            res.map_err(|e| format!("wait filedock: {e}"))?
+        }
+        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
+            let _ = child.kill().await;
+            return Err(format!("plugin timed out after {timeout_secs}s"));
+        }
+        _ = async {
+            if let Some(flag) = cancel_flag.as_ref() {
+                loop {
+                    if flag.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                }
+            } else {
+                futures_util::future::pending::<()>().await;
+            }
+        } => {
+            let _ = child.kill().await;
+            return Err("canceled".to_string());
+        }
+    };
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();

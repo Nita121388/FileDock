@@ -7,6 +7,30 @@ export type Conn = {
   deviceToken: string;
 };
 
+export type SftpConn = {
+  host: string;
+  port: number;
+  user: string;
+  auth: {
+    password: string;
+    key_path: string;
+    agent: boolean;
+  };
+  known_hosts: {
+    policy: "strict" | "accept-new" | "insecure";
+    path: string;
+  };
+  base_path: string;
+};
+
+export type PluginRunConfig = {
+  // Optional path to filedock binary. Empty means "auto-detect or PATH".
+  filedock_path?: string;
+  // ":"-separated plugin dirs (FILEDOCK_PLUGIN_DIRS).
+  plugin_dirs?: string;
+  timeout_secs?: number;
+};
+
 export type TransferProgress = {
   phase: string; // e.g. downloading / hashing / uploading / manifest
   doneBytes?: number;
@@ -77,7 +101,34 @@ export type CopyFolderJob = {
   progress?: TransferProgress;
 };
 
-export type TransferJob = DownloadJob | CopyJob | CopyFolderJob;
+export type SftpDownloadJob = {
+  id: string;
+  kind: "sftp_download";
+  createdAt: number;
+  status: TransferStatus;
+  runner?: PluginRunConfig;
+  conn: SftpConn;
+  remotePath: string; // absolute POSIX path on the remote side
+  localPath: string; // absolute local path
+  error?: string;
+  progress?: TransferProgress;
+};
+
+export type SftpUploadJob = {
+  id: string;
+  kind: "sftp_upload";
+  createdAt: number;
+  status: TransferStatus;
+  runner?: PluginRunConfig;
+  conn: SftpConn;
+  localPath: string; // absolute local path
+  remotePath: string; // absolute POSIX path on the remote side
+  mkdirs?: boolean;
+  error?: string;
+  progress?: TransferProgress;
+};
+
+export type TransferJob = DownloadJob | CopyJob | CopyFolderJob | SftpDownloadJob | SftpUploadJob;
 
 const KEY = "filedock.desktop.transfers.v1";
 
@@ -103,6 +154,8 @@ export function loadTransfers(): TransferJob[] {
         if (j.kind === "download") return withStatus as DownloadJob;
         if (j.kind === "copy_file") return withStatus as CopyJob;
         if (j.kind === "copy_folder") return withStatus as CopyFolderJob;
+        if (j.kind === "sftp_download") return withStatus as SftpDownloadJob;
+        if (j.kind === "sftp_upload") return withStatus as SftpUploadJob;
         return null;
       })
       .filter((j): j is TransferJob => j !== null);

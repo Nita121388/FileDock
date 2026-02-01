@@ -32,7 +32,19 @@ function joinPosix(a: string, b: string): string {
 export default function SftpBrowserPane(props: {
   tab: SftpTab;
   onTabChange: (tab: SftpTab) => void;
-  onEnqueueDownload: (snapshotId: string, path: string, conn?: any) => void;
+  onEnqueueSftpDownload: (job: {
+    runner?: import("../../../model/transfers").PluginRunConfig;
+    conn: import("../../../model/transfers").SftpConn;
+    remotePath: string;
+    localPath: string;
+  }) => void;
+  onEnqueueSftpUpload: (job: {
+    runner?: import("../../../model/transfers").PluginRunConfig;
+    conn: import("../../../model/transfers").SftpConn;
+    localPath: string;
+    remotePath: string;
+    mkdirs?: boolean;
+  }) => void;
 }) {
   const st = props.tab.state;
 
@@ -140,15 +152,16 @@ export default function SftpBrowserPane(props: {
       defaultPath: suggested
     });
     if (!dest) return;
-    setErr(null);
-    setLoading(true);
-    try {
-      await call("download", { remote_path: remote, local_path: dest });
-    } catch (e: any) {
-      setErr(e?.message || String(e));
-    } finally {
-      setLoading(false);
-    }
+    props.onEnqueueSftpDownload({
+      runner: {
+        filedock_path: st.filedockPath || undefined,
+        plugin_dirs: st.pluginDirs || undefined,
+        timeout_secs: 300
+      },
+      conn: conn as any,
+      remotePath: remote,
+      localPath: dest
+    });
   }
 
   async function onUploadFile() {
@@ -160,16 +173,17 @@ export default function SftpBrowserPane(props: {
 
     const base = local.split(/[\\/]/).pop() || `upload_${uid("file")}`;
     const remote = st.path && st.path !== "/" ? joinPosix(st.path, base) : `/${base}`;
-    setErr(null);
-    setLoading(true);
-    try {
-      await call("upload", { local_path: local, remote_path: remote, mkdirs: true });
-      await refresh();
-    } catch (e: any) {
-      setErr(e?.message || String(e));
-    } finally {
-      setLoading(false);
-    }
+    props.onEnqueueSftpUpload({
+      runner: {
+        filedock_path: st.filedockPath || undefined,
+        plugin_dirs: st.pluginDirs || undefined,
+        timeout_secs: 300
+      },
+      conn: conn as any,
+      localPath: local,
+      remotePath: remote,
+      mkdirs: true
+    });
   }
 
   async function onMkdir() {

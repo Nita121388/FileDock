@@ -56,6 +56,7 @@ export type RunFiledockPluginRequest = {
   timeout_secs?: number;
   filedock_path?: string;
   plugin_dirs?: string[];
+  run_id?: string;
 };
 
 export type RunFiledockPluginResponse = {
@@ -67,4 +68,8 @@ export async function runFiledockPlugin(
   req: RunFiledockPluginRequest
 ): Promise<RunFiledockPluginResponse> {
   return await invoke<RunFiledockPluginResponse>("run_filedock_plugin", { req });
+}
+
+export async function cancelFiledockPluginRun(runId: string): Promise<boolean> {
+  return await invoke<boolean>("cancel_filedock_plugin_run", { runId });
 }

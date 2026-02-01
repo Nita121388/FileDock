@@ -15,6 +15,8 @@ import {
   saveTransfers,
   uid,
   type Conn,
+  type PluginRunConfig,
+  type SftpConn,
   type TransferJob,
   type TransferProgress,
   type TransferStatus
@@ -31,6 +33,7 @@ import {
   putManifest
 } from "./api/client";
 import { chunkBytes } from "./util/chunking";
+import { cancelFiledockPluginRun, runFiledockPlugin } from "./api/tauri";
 
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadState() ?? DEFAULT_APP_STATE);
@@ -264,6 +267,46 @@ export default function App() {
     setTransfers((xs) => [job, ...xs]);
   };
 
+  const enqueueSftpDownload = (req: {
+    runner?: PluginRunConfig;
+    conn: SftpConn;
+    remotePath: string;
+    localPath: string;
+  }) => {
+    const job: TransferJob = {
+      id: uid("xfer"),
+      kind: "sftp_download",
+      createdAt: Date.now(),
+      status: "queued",
+      runner: req.runner,
+      conn: req.conn,
+      remotePath: req.remotePath,
+      localPath: req.localPath
+    } as any;
+    setTransfers((xs) => [job, ...xs]);
+  };
+
+  const enqueueSftpUpload = (req: {
+    runner?: PluginRunConfig;
+    conn: SftpConn;
+    localPath: string;
+    remotePath: string;
+    mkdirs?: boolean;
+  }) => {
+    const job: TransferJob = {
+      id: uid("xfer"),
+      kind: "sftp_upload",
+      createdAt: Date.now(),
+      status: "queued",
+      runner: req.runner,
+      conn: req.conn,
+      localPath: req.localPath,
+      remotePath: req.remotePath,
+      mkdirs: req.mkdirs ?? true
+    } as any;
+    setTransfers((xs) => [job, ...xs]);
+  };
+
   const enqueueCopy = (req: {
     src: Conn;
     srcSnapshotId: string;
@@ -385,6 +428,11 @@ export default function App() {
 
   const cancelTransfer = (id: string) => {
     const ac = abortersRef.current.get(id);
+    const job = transfers.find((x) => x.id === id);
+    if (job && (job.kind === "sftp_download" || job.kind === "sftp_upload")) {
+      // Best-effort: signal the backend to kill the plugin process if it is running.
+      cancelFiledockPluginRun(id).catch(() => {});
+    }
     if (!ac) return;
     try {
       ac.abort();
@@ -434,6 +482,120 @@ export default function App() {
       a.download = job.fileName || "download";
       a.click();
       URL.revokeObjectURL(url);
+      setTransfers((xs) =>
+        xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined, progress: undefined } : x))
+      );
+    } catch (e: any) {
+      if (isAbortError(e)) {
+        setTransfers((xs) =>
+          xs.map((x) => (x.id === id ? { ...x, status: "failed", error: "canceled", progress: undefined } : x))
+        );
+        return;
+      }
+      const msg = String(e?.message ?? e);
+      setTransfers((xs) =>
+        xs.map((x) => (x.id === id ? { ...x, status: "failed", error: msg, progress: undefined } : x))
+      );
+    } finally {
+      clearAborter(id);
+    }
+  };
+
+  function splitPluginDirs(s: string | undefined): string[] | undefined {
+    const raw = (s ?? "").trim();
+    if (!raw) return undefined;
+    const parts = raw
+      .split(":")
+      .map((x) => x.trim())
+      .filter(Boolean);
+    return parts.length ? parts : undefined;
+  }
+
+  const sftpDownloadNow = async (id: string) => {
+    const job = transfers.find((x) => x.id === id);
+    if (!job) return;
+    if (job.kind !== "sftp_download") return;
+    if (job.status === "running" || job.status === "done") return;
+
+    const ac = newAborter(id);
+    setTransferStatus(id, "running");
+    setTransferError(id, undefined);
+    setTransferProgress(id, { phase: "sftp download", pct: undefined });
+
+    try {
+      const payload = {
+        op: "download",
+        conn: job.conn,
+        args: { remote_path: job.remotePath, local_path: job.localPath }
+      };
+      await runFiledockPlugin({
+        name: "sftp",
+        json: JSON.stringify(payload),
+        timeout_secs: job.runner?.timeout_secs ?? 300,
+        filedock_path: job.runner?.filedock_path,
+        plugin_dirs: splitPluginDirs(job.runner?.plugin_dirs),
+        run_id: id
+      });
+
+      if (ac.signal.aborted) {
+        setTransfers((xs) =>
+          xs.map((x) => (x.id === id ? { ...x, status: "failed", error: "canceled", progress: undefined } : x))
+        );
+        return;
+      }
+
+      setTransfers((xs) =>
+        xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined, progress: undefined } : x))
+      );
+    } catch (e: any) {
+      if (isAbortError(e)) {
+        setTransfers((xs) =>
+          xs.map((x) => (x.id === id ? { ...x, status: "failed", error: "canceled", progress: undefined } : x))
+        );
+        return;
+      }
+      const msg = String(e?.message ?? e);
+      setTransfers((xs) =>
+        xs.map((x) => (x.id === id ? { ...x, status: "failed", error: msg, progress: undefined } : x))
+      );
+    } finally {
+      clearAborter(id);
+    }
+  };
+
+  const sftpUploadNow = async (id: string) => {
+    const job = transfers.find((x) => x.id === id);
+    if (!job) return;
+    if (job.kind !== "sftp_upload") return;
+    if (job.status === "running" || job.status === "done") return;
+
+    const ac = newAborter(id);
+    setTransferStatus(id, "running");
+    setTransferError(id, undefined);
+    setTransferProgress(id, { phase: "sftp upload", pct: undefined });
+
+    try {
+      const payload = {
+        op: "upload",
+        conn: job.conn,
+        args: { local_path: job.localPath, remote_path: job.remotePath, mkdirs: job.mkdirs ?? true }
+      };
+      await runFiledockPlugin({
+        name: "sftp",
+        json: JSON.stringify(payload),
+        timeout_secs: job.runner?.timeout_secs ?? 300,
+        filedock_path: job.runner?.filedock_path,
+        plugin_dirs: splitPluginDirs(job.runner?.plugin_dirs),
+        run_id: id
+      });
+
+      if (ac.signal.aborted) {
+        setTransfers((xs) =>
+          xs.map((x) => (x.id === id ? { ...x, status: "failed", error: "canceled", progress: undefined } : x))
+        );
+        return;
+      }
+
       setTransfers((xs) =>
         xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined, progress: undefined } : x))
       );
@@ -1180,6 +1342,8 @@ export default function App() {
     if (job.kind === "download") return downloadNow(id);
     if (job.kind === "copy_file") return copyNow(id);
     if (job.kind === "copy_folder") return copyFolderNow(id);
+    if (job.kind === "sftp_download") return sftpDownloadNow(id);
+    if (job.kind === "sftp_upload") return sftpUploadNow(id);
   };
 
   return (
@@ -1263,6 +1427,8 @@ export default function App() {
           settings={settings}
           transfers={transfers}
           onEnqueueDownload={enqueueDownload}
+          onEnqueueSftpDownload={enqueueSftpDownload}
+          onEnqueueSftpUpload={enqueueSftpUpload}
           onEnqueueCopy={enqueueCopy}
           onEnqueueCopyFolder={enqueueCopyFolder}
           onRemoveTransfer={removeTransfer}

@@ -6,6 +6,7 @@ import { PaneView } from "../panes/PaneView";
 
 const PANE_LABELS: Record<PaneKind, string> = {
   deviceBrowser: "Device Browser",
+  sftpBrowser: "SFTP (VPS)",
   transferQueue: "Transfer Queue",
   notes: "Notes"
 };
@@ -15,6 +16,19 @@ export default function LeafPane(props: {
   settings: Settings;
   transfers: TransferJob[];
   onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../../model/transfers").Conn) => void;
+  onEnqueueSftpDownload: (job: {
+    runner?: import("../../model/transfers").PluginRunConfig;
+    conn: import("../../model/transfers").SftpConn;
+    remotePath: string;
+    localPath: string;
+  }) => void;
+  onEnqueueSftpUpload: (job: {
+    runner?: import("../../model/transfers").PluginRunConfig;
+    conn: import("../../model/transfers").SftpConn;
+    localPath: string;
+    remotePath: string;
+    mkdirs?: boolean;
+  }) => void;
   onEnqueueCopy: (job: {
     src: import("../../model/transfers").Conn;
     srcSnapshotId: string;
@@ -58,6 +72,8 @@ export default function LeafPane(props: {
     settings,
     transfers,
     onEnqueueDownload,
+    onEnqueueSftpDownload,
+    onEnqueueSftpUpload,
     onEnqueueCopy,
     onEnqueueCopyFolder,
     onRemoveTransfer,
@@ -184,6 +200,8 @@ export default function LeafPane(props: {
           onUpdateTab={onUpdateActiveTab}
           transfers={transfers}
           onEnqueueDownload={onEnqueueDownload}
+          onEnqueueSftpDownload={onEnqueueSftpDownload}
+          onEnqueueSftpUpload={onEnqueueSftpUpload}
           onEnqueueCopy={onEnqueueCopy}
           onEnqueueCopyFolder={onEnqueueCopyFolder}
           onRemoveTransfer={onRemoveTransfer}
