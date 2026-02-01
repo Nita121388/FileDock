@@ -1,0 +1,11 @@
+[Unit]
+Description=FileDock backup timer (%i)
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=15m
+Unit=filedock-backup@%i.service
+
+[Install]
+WantedBy=timers.target
+

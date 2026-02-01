@@ -1,0 +1,25 @@
+[Unit]
+Description=FileDock backup loop (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+
+# Optional env file to keep secrets out of unit files.
+# Create it as: /etc/filedock/<name>.env
+EnvironmentFile=-/etc/filedock/%i.env
+
+# Adjust these to your install path. The "filedock" binary must be on PATH or set ExecStart to an absolute path.
+ExecStart=filedock push-folder-loop \
+  --server ${FILEDOCK_SERVER} \
+  --device ${FILEDOCK_DEVICE_NAME} \
+  --folder ${FILEDOCK_FOLDER} \
+  --interval-secs ${FILEDOCK_INTERVAL_SECS}
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

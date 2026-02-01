@@ -19,6 +19,7 @@ Status: active development (MVP features working; still evolving).
 ## Quick Links
 
 - Quickstart: `docs/quickstart.md`
+- Scheduling / agent mode: `docs/agent.md`
 - Architecture: `docs/architecture.md`
 - Roadmap: `docs/roadmap.md`
 - Development: `docs/development.md`
