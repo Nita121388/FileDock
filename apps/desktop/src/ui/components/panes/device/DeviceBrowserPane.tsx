@@ -14,8 +14,9 @@ export default function DeviceBrowserPane(props: {
   settings: Settings;
   tab: DeviceTab;
   onTabChange: (tab: DeviceTab) => void;
+  onEnqueueDownload: (snapshotId: string, path: string) => void;
 }) {
-  const { settings, tab, onTabChange } = props;
+  const { settings, tab, onTabChange, onEnqueueDownload } = props;
 
   const [status, setStatus] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -197,29 +198,44 @@ export default function DeviceBrowserPane(props: {
                   </button>
 
                   {e.kind === "file" ? (
-                    <button
-                      className="db-mini"
-                      onClick={async () => {
-                        const filePath = path ? `${path}/${e.name}` : e.name;
-                        try {
-                          const blob = await apiGetBytes(settings, `/v1/snapshots/${encodeURIComponent(snapshotId)}/file`, {
-                            path: filePath
-                          });
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement("a");
-                          a.href = url;
-                          a.download = e.name;
-                          a.click();
-                          URL.revokeObjectURL(url);
-                          setStatus(`downloaded ${filePath}`);
-                        } catch (err: any) {
-                          setStatus(String(err?.message ?? err));
-                        }
-                      }}
-                      title="Download"
-                    >
-                      DL
-                    </button>
+                    <>
+                      <button
+                        className="db-mini"
+                        onClick={() => {
+                          const filePath = path ? `${path}/${e.name}` : e.name;
+                          onEnqueueDownload(snapshotId, filePath);
+                          setStatus(`queued ${filePath}`);
+                        }}
+                        title="Add to transfer queue"
+                      >
+                        +Q
+                      </button>
+                      <button
+                        className="db-mini"
+                        onClick={async () => {
+                          const filePath = path ? `${path}/${e.name}` : e.name;
+                          try {
+                            const blob = await apiGetBytes(
+                              settings,
+                              `/v1/snapshots/${encodeURIComponent(snapshotId)}/file`,
+                              { path: filePath }
+                            );
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = e.name;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                            setStatus(`downloaded ${filePath}`);
+                          } catch (err: any) {
+                            setStatus(String(err?.message ?? err));
+                          }
+                        }}
+                        title="Download"
+                      >
+                        DL
+                      </button>
+                    </>
                   ) : null}
                 </div>
               ))}

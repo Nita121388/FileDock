@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { TabState } from "../model/state";
 import type { LayoutNode } from "../model/layout";
 import type { Settings } from "../model/settings";
+import type { TransferJob } from "../model/transfers";
 import {
   addLeafTab,
   closeLeaf,
@@ -21,9 +22,13 @@ import LeafPane from "./layout/LeafPane";
 export function WorkspaceView(props: {
   tab: TabState;
   settings: Settings;
+  transfers: TransferJob[];
+  onEnqueueDownload: (snapshotId: string, path: string) => void;
+  onRemoveTransfer: (id: string) => void;
+  onDownloadTransfer: (id: string) => Promise<void>;
   onTabChange: (tab: TabState) => void;
 }) {
-  const { tab, settings, onTabChange } = props;
+  const { tab, settings, transfers, onEnqueueDownload, onRemoveTransfer, onDownloadTransfer, onTabChange } = props;
   const [draggingLeafId, setDraggingLeafId] = useState<string | null>(null);
 
   const onRootChange = (root: LayoutNode) => {
@@ -40,6 +45,10 @@ export function WorkspaceView(props: {
         <LeafPane
           node={node}
           settings={settings}
+          transfers={transfers}
+          onEnqueueDownload={onEnqueueDownload}
+          onRemoveTransfer={onRemoveTransfer}
+          onDownloadTransfer={onDownloadTransfer}
           draggingLeafId={draggingLeafId}
           setDraggingLeafId={setDraggingLeafId}
           onDrop={onDrop}

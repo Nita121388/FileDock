@@ -9,10 +9,13 @@ import {
 } from "./model/state";
 import { loadState, saveState } from "./model/storage";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "./model/settings";
+import { basename, loadTransfers, saveTransfers, uid, type TransferJob } from "./model/transfers";
+import { apiGetBytes } from "./api/client";
 
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadState() ?? DEFAULT_APP_STATE);
   const [settings, setSettings] = useState<Settings>(() => loadSettings() ?? DEFAULT_SETTINGS);
+  const [transfers, setTransfers] = useState<TransferJob[]>(() => loadTransfers());
 
   useEffect(() => {
     saveState(state);
@@ -21,6 +24,10 @@ export default function App() {
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    saveTransfers(transfers);
+  }, [transfers]);
 
   const activeTab: TabState = useMemo(() => {
     const t = state.tabs.find((x) => x.id === state.activeTabId);
@@ -47,6 +54,43 @@ export default function App() {
       const next = removeTab(s, tabId);
       return next;
     });
+  };
+
+  const enqueueDownload = (snapshotId: string, path: string) => {
+    const job: TransferJob = {
+      id: uid("xfer"),
+      kind: "download",
+      createdAt: Date.now(),
+      status: "queued",
+      snapshotId,
+      path,
+      fileName: basename(path)
+    };
+    setTransfers((xs) => [job, ...xs]);
+  };
+
+  const removeTransfer = (id: string) => setTransfers((xs) => xs.filter((x) => x.id !== id));
+
+  const downloadNow = async (id: string) => {
+    const job = transfers.find((x) => x.id === id);
+    if (!job) return;
+    try {
+      const blob = await apiGetBytes(
+        settings,
+        `/v1/snapshots/${encodeURIComponent(job.snapshotId)}/file`,
+        { path: job.path }
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = job.fileName || "download";
+      a.click();
+      URL.revokeObjectURL(url);
+      setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined } : x)));
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, status: "failed", error: msg } : x)));
+    }
   };
 
   return (
@@ -114,6 +158,10 @@ export default function App() {
         <WorkspaceView
           tab={activeTab}
           settings={settings}
+          transfers={transfers}
+          onEnqueueDownload={enqueueDownload}
+          onRemoveTransfer={removeTransfer}
+          onDownloadTransfer={downloadNow}
           onTabChange={(tab) => {
             setState((s) => ({
               ...s,

@@ -1,6 +1,7 @@
 import type { DropZone, LeafNode, PaneKind, SplitDir, PaneTab } from "../../model/layout";
 import { activeTab, displayTabTitle } from "../../model/layout";
 import type { Settings } from "../../model/settings";
+import type { TransferJob } from "../../model/transfers";
 import { PaneView } from "../panes/PaneView";
 
 const PANE_LABELS: Record<PaneKind, string> = {
@@ -12,6 +13,10 @@ const PANE_LABELS: Record<PaneKind, string> = {
 export default function LeafPane(props: {
   node: LeafNode;
   settings: Settings;
+  transfers: TransferJob[];
+  onEnqueueDownload: (snapshotId: string, path: string) => void;
+  onRemoveTransfer: (id: string) => void;
+  onDownloadTransfer: (id: string) => Promise<void>;
   draggingLeafId: string | null;
   setDraggingLeafId: (id: string | null) => void;
   onDrop: (sourceLeafId: string, targetLeafId: string, zone: DropZone) => void;
@@ -26,6 +31,10 @@ export default function LeafPane(props: {
   const {
     node,
     settings,
+    transfers,
+    onEnqueueDownload,
+    onRemoveTransfer,
+    onDownloadTransfer,
     draggingLeafId,
     setDraggingLeafId,
     onDrop,
@@ -142,6 +151,10 @@ export default function LeafPane(props: {
           settings={settings}
           onSetPane={onSetPane}
           onUpdateTab={onUpdateActiveTab}
+          transfers={transfers}
+          onEnqueueDownload={onEnqueueDownload}
+          onRemoveTransfer={onRemoveTransfer}
+          onDownloadTransfer={onDownloadTransfer}
         />
       </div>
     </div>

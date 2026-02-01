@@ -649,10 +649,22 @@ a {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.04);
   padding: 10px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.queue-main {
+  flex: 1;
+  min-width: 0;
 }
 
 .queue-title {
   font-size: 13px;
+  color: var(--fg1);
+}
+
+.queue-path {
   color: var(--fg1);
 }
 
@@ -663,6 +675,18 @@ a {
   margin-top: 8px;
   font-size: 12px;
   color: var(--fg2);
+}
+
+.queue-err {
+  color: rgba(255, 77, 109, 0.95);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .pill {

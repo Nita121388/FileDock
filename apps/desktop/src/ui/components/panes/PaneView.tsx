@@ -1,5 +1,6 @@
 import type { PaneKind, PaneTab } from "../../model/layout";
 import type { Settings } from "../../model/settings";
+import type { TransferJob } from "../../model/transfers";
 import DeviceBrowserPane from "./device/DeviceBrowserPane";
 import NotesPane from "./notes/NotesPane";
 import TransferQueuePane from "./transfer/TransferQueuePane";
@@ -9,6 +10,10 @@ export function PaneView(props: {
   settings: Settings;
   onSetPane: (pane: PaneKind) => void;
   onUpdateTab: (updater: (tab: PaneTab) => PaneTab) => void;
+  transfers: TransferJob[];
+  onEnqueueDownload: (snapshotId: string, path: string) => void;
+  onRemoveTransfer: (id: string) => void;
+  onDownloadTransfer: (id: string) => Promise<void>;
 }) {
   switch (props.tab.pane) {
     case "deviceBrowser":
@@ -17,10 +22,17 @@ export function PaneView(props: {
           settings={props.settings}
           tab={props.tab}
           onTabChange={(next) => props.onUpdateTab(() => next)}
+          onEnqueueDownload={props.onEnqueueDownload}
         />
       );
     case "transferQueue":
-      return <TransferQueuePane />;
+      return (
+        <TransferQueuePane
+          transfers={props.transfers}
+          onRemove={props.onRemoveTransfer}
+          onDownload={props.onDownloadTransfer}
+        />
+      );
     case "notes":
       return <NotesPane />;
     default:

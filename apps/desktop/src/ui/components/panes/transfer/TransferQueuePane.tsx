@@ -1,44 +1,51 @@
-import { useMemo } from "react";
+import type { TransferJob } from "../../../model/transfers";
 
-type Job = {
-  id: string;
-  from: string;
-  to: string;
-  status: "queued" | "running" | "done" | "failed";
-  progress: number; // 0..1
-};
-
-export default function TransferQueuePane() {
-  // UI shell: mock queue.
-  const jobs: Job[] = useMemo(
-    () => [
-      { id: "xfer_001", from: "Laptop:/Photos", to: "NAS:/backup/Photos", status: "running", progress: 0.38 },
-      { id: "xfer_002", from: "Desktop:/Projects", to: "NAS:/backup/Projects", status: "queued", progress: 0.0 },
-      { id: "xfer_003", from: "Laptop:/Docs", to: "NAS:/backup/Docs", status: "done", progress: 1.0 }
-    ],
-    []
-  );
+export default function TransferQueuePane(props: {
+  transfers: TransferJob[];
+  onRemove: (id: string) => void;
+  onDownload: (id: string) => Promise<void>;
+}) {
+  const { transfers, onRemove, onDownload } = props;
 
   return (
     <div className="queue">
-      {jobs.map((j) => (
+      {transfers.length === 0 ? (
+        <div className="db-empty">No transfers yet. Queue a file from Device Browser (+Q).</div>
+      ) : null}
+
+      {transfers.map((j) => (
         <div key={j.id} className="queue-row">
           <div className="queue-main">
             <div className="queue-title">
-              <span className="accent">{j.id}</span> {j.from} → {j.to}
+              <span className="accent">{j.id}</span>{" "}
+              <span className="queue-path">
+                {j.snapshotId}:{j.path}
+              </span>
             </div>
             <div className="queue-sub">
               <span className={`pill pill-${j.status}`}>{j.status}</span>
-              <span>{Math.round(j.progress * 100)}%</span>
+              {j.error ? <span className="queue-err">{j.error}</span> : null}
             </div>
           </div>
-          <div className="queue-bar">
-            <div className="queue-bar-fill" style={{ width: `${j.progress * 100}%` }} />
+
+          <div className="queue-actions">
+            <button
+              className="db-mini"
+              disabled={j.status === "done"}
+              onClick={() => onDownload(j.id)}
+              title="Download now"
+            >
+              Download
+            </button>
+            <button className="db-mini" onClick={() => onRemove(j.id)} title="Remove">
+              Remove
+            </button>
           </div>
         </div>
       ))}
+
       <div className="queue-hint">
-        Drag files between panes to create transfers (next milestone).
+        Next: drag files between panes to create cross-device transfers.
       </div>
     </div>
   );
