@@ -57,6 +57,14 @@ pub struct SnapshotCreateResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotMeta {
+    pub snapshot_id: String,
+    pub device_name: String,
+    pub root_path: String,
+    pub created_unix: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestFileEntry {
     /// Relative path from the snapshot root (POSIX style).
     pub path: String,

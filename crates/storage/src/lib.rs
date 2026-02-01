@@ -30,6 +30,8 @@ pub trait Storage: Send + Sync {
     async fn exists(&self, key: &str) -> Result<bool, StorageError>;
     async fn put(&self, key: &str, data: Bytes, opts: PutOpts) -> Result<(), StorageError>;
     async fn get(&self, key: &str) -> Result<Bytes, StorageError>;
+    /// List object keys under a prefix (best-effort; order not guaranteed).
+    async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError>;
 }
 
 #[derive(Debug, Clone)]
@@ -99,5 +101,58 @@ impl Storage for DiskStorage {
             Err(e) => Err(StorageError::Io(e.to_string())),
         }
     }
-}
 
+    async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
+        // Treat prefix as a logical key prefix like "snapshots/".
+        // We map it to a directory and recursively list files.
+        let dir_path = self.key_to_path(prefix)?;
+        let mut out = Vec::new();
+
+        let meta = match tokio::fs::metadata(&dir_path).await {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+            Err(e) => return Err(StorageError::Io(e.to_string())),
+        };
+        if !meta.is_dir() {
+            return Ok(out);
+        }
+
+        let root = self.root_dir.clone();
+        let mut stack = vec![dir_path];
+        while let Some(dir) = stack.pop() {
+            let mut rd = tokio::fs::read_dir(&dir)
+                .await
+                .map_err(|e| StorageError::Io(e.to_string()))?;
+            while let Some(ent) = rd
+                .next_entry()
+                .await
+                .map_err(|e| StorageError::Io(e.to_string()))?
+            {
+                let path = ent.path();
+                let ft = ent
+                    .file_type()
+                    .await
+                    .map_err(|e| StorageError::Io(e.to_string()))?;
+                if ft.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if !ft.is_file() {
+                    continue;
+                }
+
+                let rel = path
+                    .strip_prefix(&root)
+                    .map_err(|e| StorageError::Other(e.to_string()))?;
+                let key = rel
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                out.push(key);
+            }
+        }
+
+        Ok(out)
+    }
+}

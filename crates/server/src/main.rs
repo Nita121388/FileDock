@@ -8,7 +8,7 @@ use bytes::Bytes;
 use filedock_protocol::{
     is_valid_chunk_hash, is_valid_rel_path, ChunkPresenceRequest, ChunkPresenceResponse, ChunkRef,
     HealthResponse, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, TreeEntry,
-    TreeResponse,
+    TreeResponse, SnapshotMeta,
 };
 use filedock_storage::{DiskStorage, PutOpts, Storage};
 use std::{net::SocketAddr, sync::Arc};
@@ -96,6 +96,7 @@ async fn get_chunk(
 }
 
 async fn create_snapshot(
+    State(state): State<AppState>,
     Json(req): Json<SnapshotCreateRequest>,
 ) -> Result<Json<SnapshotCreateResponse>, (StatusCode, String)> {
     if req.device_name.trim().is_empty() {
@@ -105,7 +106,56 @@ async fn create_snapshot(
         return Err((StatusCode::BAD_REQUEST, "root_path required".to_string()));
     }
     let snapshot_id = Uuid::new_v4().to_string();
+
+    let meta = SnapshotMeta {
+        snapshot_id: snapshot_id.clone(),
+        device_name: req.device_name,
+        root_path: req.root_path,
+        created_unix: now_unix(),
+    };
+    let key = format!("snapshots/{snapshot_id}.json");
+    let data = serde_json::to_vec(&meta)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state
+        .storage
+        .put(
+            &key,
+            Bytes::from(data),
+            PutOpts {
+                content_type: Some("application/json".to_string()),
+            },
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
     Ok(Json(SnapshotCreateResponse { snapshot_id }))
+}
+
+async fn list_snapshots(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<SnapshotMeta>>, (StatusCode, String)> {
+    let keys = state
+        .storage
+        .list_prefix("snapshots/")
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let mut out = Vec::new();
+    for key in keys {
+        if !key.ends_with(".json") {
+            continue;
+        }
+        let data = state.storage.get(&key).await.map_err(|e| match e {
+            filedock_storage::StorageError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
+        let meta: SnapshotMeta = serde_json::from_slice(&data)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        out.push(meta);
+    }
+
+    out.sort_by(|a, b| b.created_unix.cmp(&a.created_unix));
+    Ok(Json(out))
 }
 
 async fn put_manifest(
@@ -311,7 +361,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health))
-        .route("/v1/snapshots", post(create_snapshot))
+        .route("/v1/snapshots", post(create_snapshot).get(list_snapshots))
         .route(
             "/v1/snapshots/:snapshot_id/manifest",
             put(put_manifest).get(get_manifest),
@@ -327,4 +377,11 @@ async fn main() {
 
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
     axum::serve(listener, app).await.expect("serve");
+}
+
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }

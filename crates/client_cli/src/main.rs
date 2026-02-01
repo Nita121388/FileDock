@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use filedock_protocol::{
     is_valid_chunk_hash, ChunkPresenceRequest, ChunkPresenceResponse, HealthResponse,
     ChunkRef, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, ManifestFileEntry,
-    TreeResponse,
+    TreeResponse, SnapshotMeta,
 };
 use std::path::PathBuf;
 use walkdir::WalkDir;
@@ -92,6 +92,13 @@ enum Command {
         /// Output folder.
         #[arg(long)]
         out: PathBuf,
+    },
+
+    /// List snapshots known to the server.
+    Snapshots {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
     },
 }
 
@@ -364,6 +371,25 @@ async fn main() -> Result<(), String> {
             }
 
             println!("restored to: {}", out.display());
+        }
+
+        Command::Snapshots { server } => {
+            let client = reqwest::Client::new();
+            let url = format!("{}/v1/snapshots", server.trim_end_matches('/'));
+            let metas: Vec<SnapshotMeta> = client
+                .get(url)
+                .send()
+                .await
+                .map_err(|e| format!("snapshots request: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("snapshots response: {e}"))?
+                .json()
+                .await
+                .map_err(|e| format!("snapshots decode: {e}"))?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&metas).map_err(|e| e.to_string())?
+            );
         }
     }
 

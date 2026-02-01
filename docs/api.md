@@ -35,6 +35,7 @@ MVP: versioned HTTP JSON API.
 MVP (current implementation):
 
 - `POST /v1/snapshots` (create snapshot id)
+- `GET /v1/snapshots` (list snapshots)
 - `PUT /v1/snapshots/{snapshot_id}/manifest`
 - `GET /v1/snapshots/{snapshot_id}/manifest`
 
