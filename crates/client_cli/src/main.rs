@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use filedock_protocol::{
     is_valid_chunk_hash, ChunkPresenceRequest, ChunkPresenceResponse, HealthResponse,
     ChunkRef, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, ManifestFileEntry,
-    TreeResponse, SnapshotMeta,
+    TreeResponse, SnapshotMeta, SnapshotDeleteResponse, SnapshotPruneRequest, SnapshotPruneResponse,
 };
 use futures_util::stream::{self, StreamExt};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -198,6 +198,44 @@ enum Command {
         /// Server base URL, e.g. http://127.0.0.1:8787
         #[arg(long)]
         server: String,
+    },
+
+    /// Delete a snapshot (metadata + manifest). Chunks are not garbage-collected.
+    DeleteSnapshot {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
+
+        /// Snapshot id.
+        #[arg(long)]
+        snapshot: String,
+    },
+
+    /// Prune old snapshots (retention policy). Chunks are not garbage-collected.
+    PruneSnapshots {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
+
+        /// Optional filter: only prune this device_id.
+        #[arg(long)]
+        device_id: Option<String>,
+
+        /// Optional filter: only prune this device_name.
+        #[arg(long)]
+        device_name: Option<String>,
+
+        /// Keep the newest N snapshots per device (optional).
+        #[arg(long)]
+        keep_last: Option<u32>,
+
+        /// Keep snapshots newer than N days per device (optional).
+        #[arg(long)]
+        keep_days: Option<u32>,
+
+        /// Compute what would be deleted, but don't delete anything.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -685,6 +723,63 @@ async fn main() -> Result<(), String> {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&metas).map_err(|e| e.to_string())?
+            );
+        }
+
+        Command::DeleteSnapshot { server, snapshot } => {
+            let client = build_client()?;
+            let url = format!(
+                "{}/v1/snapshots/{}",
+                server.trim_end_matches('/'),
+                snapshot
+            );
+            let resp: SnapshotDeleteResponse = client
+                .delete(url)
+                .send()
+                .await
+                .map_err(|e| format!("delete snapshot request: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("delete snapshot response: {e}"))?
+                .json()
+                .await
+                .map_err(|e| format!("delete snapshot decode: {e}"))?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?
+            );
+        }
+
+        Command::PruneSnapshots {
+            server,
+            device_id,
+            device_name,
+            keep_last,
+            keep_days,
+            dry_run,
+        } => {
+            let client = build_client()?;
+            let url = format!("{}/v1/snapshots/prune", server.trim_end_matches('/'));
+            let req = SnapshotPruneRequest {
+                device_id,
+                device_name,
+                keep_last,
+                keep_days,
+                dry_run,
+            };
+            let resp: SnapshotPruneResponse = client
+                .post(url)
+                .json(&req)
+                .send()
+                .await
+                .map_err(|e| format!("prune request: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("prune response: {e}"))?
+                .json()
+                .await
+                .map_err(|e| format!("prune decode: {e}"))?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?
             );
         }
     }

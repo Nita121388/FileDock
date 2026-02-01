@@ -32,6 +32,8 @@ pub trait Storage: Send + Sync {
     async fn get(&self, key: &str) -> Result<Bytes, StorageError>;
     /// List object keys under a prefix (best-effort; order not guaranteed).
     async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError>;
+    /// Delete an object key. Returns true if something was deleted, false if it did not exist.
+    async fn delete(&self, key: &str) -> Result<bool, StorageError>;
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +156,15 @@ impl Storage for DiskStorage {
         }
 
         Ok(out)
+    }
+
+    async fn delete(&self, key: &str) -> Result<bool, StorageError> {
+        let path = self.key_to_path(key)?;
+        match tokio::fs::remove_file(&path).await {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(StorageError::Io(e.to_string())),
+        }
     }
 }
 

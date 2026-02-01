@@ -51,6 +51,8 @@ MVP (current implementation):
 - `POST /v1/snapshots` (create snapshot id)
   - Optional: include `device_id` to link snapshot to a registered device
 - `GET /v1/snapshots` (list snapshots)
+- `DELETE /v1/snapshots/{snapshot_id}` (delete snapshot metadata + manifest; chunks are not GC'd)
+- `POST /v1/snapshots/prune` (retention prune; chunks are not GC'd)
 - `PUT /v1/snapshots/{snapshot_id}/manifest`
 - `GET /v1/snapshots/{snapshot_id}/manifest`
 

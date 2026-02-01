@@ -4,15 +4,15 @@ use axum::{
     http::Request,
     http::StatusCode,
     middleware::Next,
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use bytes::Bytes;
-use futures_util::stream;
 use filedock_protocol::{
     is_valid_chunk_hash, is_valid_rel_path, ChunkPresenceRequest, ChunkPresenceResponse, ChunkRef,
     DeviceInfo, DeviceRegisterRequest, DeviceRegisterResponse, HealthResponse, SnapshotCreateRequest,
     SnapshotCreateResponse, SnapshotManifest, TreeEntry, TreeResponse, SnapshotMeta,
+    SnapshotDeleteResponse, SnapshotPruneRequest, SnapshotPruneResponse,
 };
 use filedock_storage::{DiskStorage, PutOpts, Storage};
 use std::{net::SocketAddr, sync::Arc};
@@ -297,6 +297,10 @@ async fn create_snapshot(
 async fn list_snapshots(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<SnapshotMeta>>, (StatusCode, String)> {
+    Ok(Json(load_snapshot_metas(&state).await?))
+}
+
+async fn load_snapshot_metas(state: &AppState) -> Result<Vec<SnapshotMeta>, (StatusCode, String)> {
     let keys = state
         .storage
         .list_prefix("snapshots/")
@@ -318,7 +322,148 @@ async fn list_snapshots(
     }
 
     out.sort_by(|a, b| b.created_unix.cmp(&a.created_unix));
-    Ok(Json(out))
+    Ok(out)
+}
+
+async fn delete_snapshot(
+    State(state): State<AppState>,
+    Path(snapshot_id): Path<String>,
+) -> Result<Json<SnapshotDeleteResponse>, (StatusCode, String)> {
+    if snapshot_id.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "snapshot id required".to_string()));
+    }
+
+    let meta_key = format!("snapshots/{snapshot_id}.json");
+    let manifest_key = format!("manifests/{snapshot_id}.json");
+
+    let deleted_meta = state
+        .storage
+        .delete(&meta_key)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let deleted_manifest = state
+        .storage
+        .delete(&manifest_key)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(SnapshotDeleteResponse {
+        snapshot_id,
+        deleted_meta,
+        deleted_manifest,
+    }))
+}
+
+async fn prune_snapshots(
+    State(state): State<AppState>,
+    Json(req): Json<SnapshotPruneRequest>,
+) -> Result<Json<SnapshotPruneResponse>, (StatusCode, String)> {
+    if req.keep_last.is_none() && req.keep_days.is_none() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "keep_last or keep_days required".to_string(),
+        ));
+    }
+
+    let now = now_unix();
+    let cutoff_unix = req
+        .keep_days
+        .map(|d| now.saturating_sub((d as i64).saturating_mul(86400)));
+
+    let all = load_snapshot_metas(&state).await?;
+    let examined = all.len() as u64;
+
+    let matched: Vec<SnapshotMeta> = all
+        .into_iter()
+        .filter(|m| {
+            if let Some(id) = &req.device_id {
+                if m.device_id.as_deref() != Some(id.as_str()) {
+                    return false;
+                }
+            }
+            if let Some(name) = &req.device_name {
+                if m.device_name != *name {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect();
+
+    let matched_count = matched.len() as u64;
+
+    // Group snapshots by a stable device key: prefer device_id when present, else device_name.
+    let mut groups: std::collections::BTreeMap<String, Vec<SnapshotMeta>> =
+        std::collections::BTreeMap::new();
+    for m in matched {
+        let key = m
+            .device_id
+            .clone()
+            .unwrap_or_else(|| format!("name:{}", m.device_name));
+        groups.entry(key).or_default().push(m);
+    }
+
+    let mut keep = std::collections::HashSet::<String>::new();
+    for (_k, metas) in groups.iter_mut() {
+        metas.sort_by(|a, b| b.created_unix.cmp(&a.created_unix));
+
+        if let Some(keep_last) = req.keep_last {
+            let keep_last = keep_last as usize;
+            for m in metas.iter().take(keep_last) {
+                keep.insert(m.snapshot_id.clone());
+            }
+        }
+
+        if let Some(cutoff) = cutoff_unix {
+            for m in metas.iter() {
+                if m.created_unix >= cutoff {
+                    keep.insert(m.snapshot_id.clone());
+                }
+            }
+        }
+    }
+
+    let mut deleted_snapshot_ids = Vec::<String>::new();
+    if !req.dry_run {
+        for (_k, metas) in groups.iter() {
+            for m in metas {
+                if keep.contains(&m.snapshot_id) {
+                    continue;
+                }
+                let meta_key = format!("snapshots/{}.json", m.snapshot_id);
+                let manifest_key = format!("manifests/{}.json", m.snapshot_id);
+                let _ = state
+                    .storage
+                    .delete(&manifest_key)
+                    .await
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                let _ = state
+                    .storage
+                    .delete(&meta_key)
+                    .await
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                deleted_snapshot_ids.push(m.snapshot_id.clone());
+            }
+        }
+    } else {
+        for (_k, metas) in groups.iter() {
+            for m in metas {
+                if keep.contains(&m.snapshot_id) {
+                    continue;
+                }
+                deleted_snapshot_ids.push(m.snapshot_id.clone());
+            }
+        }
+    }
+
+    Ok(Json(SnapshotPruneResponse {
+        dry_run: req.dry_run,
+        examined,
+        matched: matched_count,
+        groups: groups.len() as u64,
+        deleted: deleted_snapshot_ids.len() as u64,
+        deleted_snapshot_ids,
+    }))
 }
 
 async fn put_manifest(
@@ -583,6 +728,8 @@ async fn main() {
         .route("/v1/auth/device/register", post(register_device))
         .route("/v1/devices", get(list_devices))
         .route("/v1/snapshots", post(create_snapshot).get(list_snapshots))
+        .route("/v1/snapshots/prune", post(prune_snapshots))
+        .route("/v1/snapshots/:snapshot_id", delete(delete_snapshot))
         .route(
             "/v1/snapshots/:snapshot_id/manifest",
             put(put_manifest).get(get_manifest),

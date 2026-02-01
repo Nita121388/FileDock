@@ -83,6 +83,40 @@ pub struct SnapshotMeta {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotDeleteResponse {
+    pub snapshot_id: String,
+    pub deleted_meta: bool,
+    pub deleted_manifest: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotPruneRequest {
+    /// Optional filter: only prune snapshots for this device_id.
+    pub device_id: Option<String>,
+    /// Optional filter: only prune snapshots for this device_name.
+    pub device_name: Option<String>,
+
+    /// Keep the newest N snapshots (per device group).
+    pub keep_last: Option<u32>,
+    /// Keep snapshots newer than N days (per device group).
+    pub keep_days: Option<u32>,
+
+    /// If true, compute what would be deleted but do not delete anything.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotPruneResponse {
+    pub dry_run: bool,
+    pub examined: u64,
+    pub matched: u64,
+    pub groups: u64,
+    pub deleted: u64,
+    pub deleted_snapshot_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestFileEntry {
     /// Relative path from the snapshot root (POSIX style).
     pub path: String,
