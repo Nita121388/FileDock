@@ -127,6 +127,65 @@ export async function apiGetBytes(settings: Settings, path: string, query?: Reco
   return await resp.blob();
 }
 
+export async function apiGetUint8Array(
+  settings: Settings,
+  path: string,
+  query?: Record<string, string>,
+  onProgress?: (doneBytes: number, totalBytes: number | null) => void
+): Promise<Uint8Array> {
+  const base = settings.serverBaseUrl.replace(/\/+$/, "");
+  const url = new URL(base + path);
+  if (query) {
+    for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
+  }
+  const resp = await fetch(url.toString(), {
+    method: "GET",
+    headers: headers(settings)
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`GET ${path} failed: ${resp.status} ${text}`.trim());
+  }
+
+  const lenHeader = resp.headers.get("content-length");
+  const total = lenHeader ? Number(lenHeader) : null;
+  const body = resp.body;
+
+  if (!body) {
+    const buf = new Uint8Array(await resp.arrayBuffer());
+    onProgress?.(buf.length, buf.length);
+    return buf;
+  }
+
+  const reader = body.getReader();
+  let done = 0;
+  const chunks: Uint8Array[] = [];
+  let out: Uint8Array | null = total !== null && Number.isFinite(total) && total >= 0 ? new Uint8Array(total) : null;
+
+  while (true) {
+    const { value, done: rdDone } = await reader.read();
+    if (rdDone) break;
+    if (!value) continue;
+    const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+    chunks.push(chunk);
+    if (out) {
+      out.set(chunk, done);
+    }
+    done += chunk.byteLength;
+    onProgress?.(done, total);
+  }
+
+  if (out) return out.subarray(0, done);
+  // Unknown length: concatenate.
+  out = new Uint8Array(done);
+  let off = 0;
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.byteLength;
+  }
+  return out;
+}
+
 export async function listSnapshots(settings: Settings): Promise<SnapshotMeta[]> {
   return apiGetJson<SnapshotMeta[]>(settings, "/v1/snapshots");
 }

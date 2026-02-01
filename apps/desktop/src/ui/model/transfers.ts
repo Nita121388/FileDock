@@ -7,6 +7,13 @@ export type Conn = {
   deviceToken: string;
 };
 
+export type TransferProgress = {
+  phase: string; // e.g. downloading / hashing / uploading / manifest
+  doneBytes?: number;
+  totalBytes?: number;
+  pct?: number; // 0-100 (best-effort)
+};
+
 export type DownloadJob = {
   id: string;
   kind: "download";
@@ -18,6 +25,7 @@ export type DownloadJob = {
   path: string; // snapshot-relative POSIX path
   fileName: string;
   error?: string;
+  progress?: TransferProgress;
 };
 
 export type CopyJob = {
@@ -33,6 +41,7 @@ export type CopyJob = {
   dstDeviceId?: string;
   dstPath: string;
   error?: string;
+  progress?: TransferProgress;
 };
 
 export type TransferJob = DownloadJob | CopyJob;
@@ -54,7 +63,7 @@ export function loadTransfers(): TransferJob[] {
           j.status === "queued" || j.status === "running" || j.status === "done" || j.status === "failed"
             ? j.status
             : "queued";
-        const withStatus = { ...j, status };
+        const withStatus = { ...j, status, progress: undefined };
 
         if (j.kind === "download") return withStatus as DownloadJob;
         if (j.kind === "copy_file") return withStatus as CopyJob;

@@ -123,8 +123,17 @@ export default function TransferQueuePane(props: {
             </div>
             <div className="queue-sub">
               <span className={`pill pill-${j.status}`}>{j.status}</span>
+              {j.progress?.phase ? <span className="queue-path">{j.progress.phase}</span> : null}
+              {typeof j.progress?.pct === "number" ? (
+                <span className="pill pill-running">{j.progress.pct}%</span>
+              ) : null}
               {j.error ? <span className="queue-err">{j.error}</span> : null}
             </div>
+            {typeof j.progress?.pct === "number" ? (
+              <div className="queue-bar" aria-label="progress">
+                <div className="queue-bar-fill" style={{ width: `${Math.max(0, Math.min(100, j.progress.pct))}%` }} />
+              </div>
+            ) : null}
           </div>
 
           <div className="queue-actions">

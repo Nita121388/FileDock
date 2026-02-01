@@ -9,9 +9,19 @@ import {
 } from "./model/state";
 import { loadState, saveState } from "./model/storage";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "./model/settings";
-import { basename, loadTransfers, saveTransfers, uid, type Conn, type TransferJob } from "./model/transfers";
+import {
+  basename,
+  loadTransfers,
+  saveTransfers,
+  uid,
+  type Conn,
+  type TransferJob,
+  type TransferProgress,
+  type TransferStatus
+} from "./model/transfers";
 import {
   apiGetBytes,
+  apiGetUint8Array,
   chunksPresence,
   createSnapshot,
   putChunk,
@@ -103,8 +113,28 @@ export default function App() {
   };
 
   const removeTransfer = (id: string) => setTransfers((xs) => xs.filter((x) => x.id !== id));
-  const setTransferStatus = (id: string, status: import("./model/transfers").TransferStatus) => {
+  const setTransferStatus = (id: string, status: TransferStatus) => {
     setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, status } : x)));
+  };
+  const setTransferProgress = (id: string, progress: TransferProgress | undefined) => {
+    setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, progress } : x)));
+  };
+  const setTransferError = (id: string, error: string | undefined) => {
+    setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, error } : x)));
+  };
+
+  const withRetry = async <T,>(fn: () => Promise<T>, tries = 3): Promise<T> => {
+    let last: unknown = null;
+    for (let attempt = 0; attempt < tries; attempt++) {
+      try {
+        return await fn();
+      } catch (e) {
+        last = e;
+        const ms = Math.min(3000, 250 * Math.pow(2, attempt)) + Math.floor(Math.random() * 150);
+        await new Promise((r) => setTimeout(r, ms));
+      }
+    }
+    throw last;
   };
 
   const connToSettings = (c: Conn): Settings => ({
@@ -119,23 +149,38 @@ export default function App() {
     if (!job) return;
     if (job.kind !== "download") return;
     setTransferStatus(id, "running");
+    setTransferError(id, undefined);
     try {
       const eff = job.conn ? connToSettings(job.conn) : settings;
-      const blob = await apiGetBytes(
-        eff,
-        `/v1/snapshots/${encodeURIComponent(job.snapshotId)}/file`,
-        { path: job.path }
-      );
+      setTransferProgress(id, { phase: "downloading", pct: 0 });
+      const buf = await withRetry(async () => {
+        return await apiGetUint8Array(
+          eff,
+          `/v1/snapshots/${encodeURIComponent(job.snapshotId)}/file`,
+          { path: job.path },
+          (done, total) => {
+            const pct = total && total > 0 ? Math.floor((done / total) * 100) : undefined;
+            setTransferProgress(id, { phase: "downloading", doneBytes: done, totalBytes: total ?? undefined, pct });
+          }
+        );
+      });
+      setTransferProgress(id, { phase: "saving", pct: 100 });
+      const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+      const blob = new Blob([ab]);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = job.fileName || "download";
       a.click();
       URL.revokeObjectURL(url);
-      setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined } : x)));
+      setTransfers((xs) =>
+        xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined, progress: undefined } : x))
+      );
     } catch (e: any) {
       const msg = String(e?.message ?? e);
-      setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, status: "failed", error: msg } : x)));
+      setTransfers((xs) =>
+        xs.map((x) => (x.id === id ? { ...x, status: "failed", error: msg, progress: undefined } : x))
+      );
     }
   };
 
@@ -144,24 +189,34 @@ export default function App() {
     if (!job) return;
     if (job.kind !== "copy_file") return;
     setTransferStatus(id, "running");
+    setTransferError(id, undefined);
 
     const srcSettings = connToSettings(job.src);
     const dstSettings = connToSettings(job.dst);
 
     try {
       // 1) Download bytes from source server.
-      const blob = await apiGetBytes(
-        srcSettings,
-        `/v1/snapshots/${encodeURIComponent(job.srcSnapshotId)}/file`,
-        { path: job.srcPath }
-      );
-      const buf = new Uint8Array(await blob.arrayBuffer());
+      setTransferProgress(id, { phase: "downloading", pct: 0 });
+      const buf = await withRetry(async () => {
+        return await apiGetUint8Array(
+          srcSettings,
+          `/v1/snapshots/${encodeURIComponent(job.srcSnapshotId)}/file`,
+          { path: job.srcPath },
+          (done, total) => {
+            const pct = total && total > 0 ? Math.floor((done / total) * 100) : undefined;
+            setTransferProgress(id, { phase: "downloading", doneBytes: done, totalBytes: total ?? undefined, pct });
+          }
+        );
+      });
 
       // 2) Chunk + hash.
+      setTransferProgress(id, { phase: "hashing", pct: 0 });
       const refs = chunkBytes(buf);
       const hashes = refs.map((c) => c.hash);
+      const manifestChunks = refs.map((c) => ({ hash: c.hash, size: c.size }));
 
       // 3) Presence (batched) on destination.
+      setTransferProgress(id, { phase: "checking", pct: 0 });
       const missing = new Set<string>();
       const batchSize = 1000;
       for (let i = 0; i < hashes.length; i += batchSize) {
@@ -171,16 +226,24 @@ export default function App() {
       }
 
       // 4) Upload missing chunks.
+      setTransferProgress(id, { phase: "uploading", pct: 0 });
       let offset = 0;
+      let uploaded = 0;
       for (const c of refs) {
         const end = offset + c.size;
         if (missing.has(c.hash)) {
-          await putChunk(dstSettings, c.hash, buf.subarray(offset, end));
+          await withRetry(async () => {
+            await putChunk(dstSettings, c.hash, buf.subarray(offset, end));
+          });
+          uploaded++;
         }
         offset = end;
+        const pct = refs.length > 0 ? Math.floor((offset / buf.length) * 100) : 100;
+        setTransferProgress(id, { phase: `uploading (${uploaded}/${missing.size} chunks)`, pct });
       }
 
       // 5) Create snapshot + manifest on destination.
+      setTransferProgress(id, { phase: "finalizing", pct: 0 });
       const now = Math.floor(Date.now() / 1000);
       const snap = await createSnapshot(dstSettings, {
         device_name: job.dstDeviceName,
@@ -196,15 +259,19 @@ export default function App() {
             size: buf.length,
             mtime_unix: now,
             chunk_hash: null,
-            chunks: refs
+            chunks: manifestChunks
           }
         ]
       });
 
-      setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined } : x)));
+      setTransfers((xs) =>
+        xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined, progress: undefined } : x))
+      );
     } catch (e: any) {
       const msg = String(e?.message ?? e);
-      setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, status: "failed", error: msg } : x)));
+      setTransfers((xs) =>
+        xs.map((x) => (x.id === id ? { ...x, status: "failed", error: msg, progress: undefined } : x))
+      );
     }
   };
 
