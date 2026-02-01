@@ -59,6 +59,9 @@ export FILEDOCK_DEVICE_TOKEN="..."
 filedock device-heartbeat --server http://127.0.0.1:8787 --status "online"
 ```
 
+In config-file agent mode (`filedock agent --config ...`), heartbeats run on their own timer (`heartbeat_secs`),
+independent of the snapshot interval (`interval_secs`).
+
 ## Linux (systemd) templates
 
 See:

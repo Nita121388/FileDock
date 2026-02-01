@@ -1014,14 +1014,22 @@ async fn main() -> Result<(), String> {
                 cfg.heartbeat_secs
             );
 
-            // Initial heartbeat (best-effort).
-            if cfg.heartbeat_secs > 0 {
-                if let Err(e) = send_heartbeat_impl(&cfg.server, cfg.heartbeat_status.clone()).await {
+            let heartbeat_enabled = cfg.heartbeat_secs > 0;
+            let mut last_snapshot_id: Option<String> = None;
+
+            // Best-effort initial heartbeat (independent of snapshot loop).
+            if heartbeat_enabled {
+                let st = cfg
+                    .heartbeat_status
+                    .clone()
+                    .or_else(|| Some("online".to_string()));
+                if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
                     eprintln!("heartbeat: {e}");
                 }
             }
 
-            loop {
+            // Single-run mode.
+            if cfg.interval_secs == 0 {
                 let snap = push_folder_impl(
                     cfg.server.clone(),
                     cfg.device_name.clone(),
@@ -1032,8 +1040,9 @@ async fn main() -> Result<(), String> {
                 )
                 .await?;
                 eprintln!("agent: completed snapshot: {snap}");
+                last_snapshot_id = Some(snap.clone());
 
-                if cfg.heartbeat_secs > 0 {
+                if heartbeat_enabled {
                     let st = cfg
                         .heartbeat_status
                         .clone()
@@ -1043,13 +1052,63 @@ async fn main() -> Result<(), String> {
                     }
                 }
 
-                if cfg.interval_secs == 0 {
-                    break;
-                }
+                return Ok(());
+            }
 
+            // Repeating mode:
+            // - snapshots every `interval_secs`
+            // - heartbeats every `heartbeat_secs` (independent)
+            let mut snap_iv = tokio::time::interval(Duration::from_secs(cfg.interval_secs));
+            snap_iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut hb_iv = tokio::time::interval(Duration::from_secs(cfg.heartbeat_secs.max(1)));
+            hb_iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            loop {
                 tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(cfg.interval_secs)) => {},
-                    _ = tokio::signal::ctrl_c() => { eprintln!(\"agent: stopped\"); break; }
+                    _ = tokio::signal::ctrl_c() => {
+                        eprintln!("agent: stopped");
+                        break;
+                    }
+
+                    _ = hb_iv.tick(), if heartbeat_enabled => {
+                        let st = cfg.heartbeat_status.clone()
+                            .or_else(|| last_snapshot_id.clone().map(|s| format!("last snapshot {s}")))
+                            .or_else(|| Some("online".to_string()));
+                        if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
+                            eprintln!("heartbeat: {e}");
+                        }
+                    }
+
+                    _ = snap_iv.tick() => {
+                        // Allow Ctrl-C to stop starting a new snapshot.
+                        let snap = tokio::select! {
+                            _ = tokio::signal::ctrl_c() => {
+                                eprintln!("agent: stopped");
+                                break;
+                            }
+                            r = push_folder_impl(
+                                cfg.server.clone(),
+                                cfg.device_name.clone(),
+                                cfg.folder.clone(),
+                                cfg.concurrency,
+                                cfg.exclude.clone(),
+                                cfg.ignore_file.clone(),
+                            ) => r?
+                        };
+
+                        eprintln!("agent: completed snapshot: {snap}");
+                        last_snapshot_id = Some(snap.clone());
+
+                        if heartbeat_enabled {
+                            let st = cfg
+                                .heartbeat_status
+                                .clone()
+                                .or_else(|| Some(format!("snapshot {snap}")));
+                            if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
+                                eprintln!("heartbeat: {e}");
+                            }
+                        }
+                    }
                 }
             }
         }
