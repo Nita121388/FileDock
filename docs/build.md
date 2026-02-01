@@ -1,6 +1,6 @@
 # Build
 
-This repo is a Rust workspace (server + CLI) with a planned Tauri desktop app.
+This repo is a Rust workspace (server + CLI) with TUI and a Tauri desktop app.
 
 ## Prerequisites
 
@@ -10,6 +10,20 @@ This repo is a Rust workspace (server + CLI) with a planned Tauri desktop app.
 ## Server
 
 ```bash
+cargo run -p filedock-server
+```
+
+Override listen addr / storage dir:
+
+```bash
+cargo run -p filedock-server -- --listen 127.0.0.1:8787 --storage-dir ./filedock-data
+```
+
+Or via env vars:
+
+```bash
+export FILEDOCK_LISTEN="127.0.0.1:8787"
+export FILEDOCK_STORAGE_DIR="./filedock-data"
 cargo run -p filedock-server
 ```
 

@@ -1,0 +1,18 @@
+services:
+  filedock:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8787:8787"
+    environment:
+      # Optional: set for auth. If unset, server runs in open dev mode.
+      # FILEDOCK_TOKEN: "change-me"
+      FILEDOCK_STORAGE_DIR: "/data"
+      FILEDOCK_LISTEN: "0.0.0.0:8787"
+    volumes:
+      - filedock-data:/data
+
+volumes:
+  filedock-data: {}
+

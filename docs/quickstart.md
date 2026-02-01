@@ -8,14 +8,14 @@ From the repo root:
 
 ```bash
 cargo build -p filedock-server
-./target/debug/filedock-server --listen 127.0.0.1:8787 --data ./data
+./target/debug/filedock-server --listen 127.0.0.1:8787 --storage-dir ./data
 ```
 
 Optional (recommended): enable server token auth:
 
 ```bash
 export FILEDOCK_TOKEN="change-me"
-./target/debug/filedock-server --listen 127.0.0.1:8787 --data ./data
+./target/debug/filedock-server --listen 127.0.0.1:8787 --storage-dir ./data
 ```
 
 ## 2) Push a folder snapshot (CLI)
@@ -69,4 +69,3 @@ Open two Device Browser panes (either in tabs or split panes), connect each to a
 
 - Rust/Tauri prerequisites vary by platform. See `docs/build.md` for details.
 - This repo is developed in small "phase" commits; see `progress/` for a running diary.
-

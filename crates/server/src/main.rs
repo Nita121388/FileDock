@@ -21,6 +21,19 @@ use uuid::Uuid;
 
 use axum::extract::Query;
 use serde::Deserialize;
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(name = "filedock-server", version)]
+struct Opt {
+    /// Listen address (IP:PORT).
+    #[arg(long, env = "FILEDOCK_LISTEN", default_value = "0.0.0.0:8787")]
+    listen: String,
+
+    /// Storage directory (DiskStorage root).
+    #[arg(long, env = "FILEDOCK_STORAGE_DIR", default_value = "./filedock-data")]
+    storage_dir: String,
+}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct DeviceRecord {
@@ -545,9 +558,10 @@ async fn main() {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    // Disk storage root for MVP (override with FILEDOCK_STORAGE_DIR).
-    let storage_dir = std::env::var("FILEDOCK_STORAGE_DIR").unwrap_or_else(|_| "./filedock-data".to_string());
-    let storage: Arc<dyn Storage> = Arc::new(DiskStorage::new(storage_dir));
+    let opt = Opt::parse();
+
+    // Disk storage root for MVP.
+    let storage: Arc<dyn Storage> = Arc::new(DiskStorage::new(opt.storage_dir));
 
     let token = std::env::var("FILEDOCK_TOKEN").ok().filter(|s| !s.is_empty());
     if token.is_some() {
@@ -575,7 +589,7 @@ async fn main() {
         .layer(axum::middleware::from_fn_with_state(state.clone(), auth))
         .with_state(state);
 
-    let addr: SocketAddr = "0.0.0.0:8787".parse().expect("valid listen addr");
+    let addr: SocketAddr = opt.listen.parse().expect("valid listen addr");
     tracing::info!(%addr, "server listening");
 
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
