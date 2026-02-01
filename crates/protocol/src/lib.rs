@@ -73,3 +73,22 @@ pub struct SnapshotManifest {
     pub created_unix: i64,
     pub files: Vec<ManifestFileEntry>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TreeEntry {
+    /// Name of the child (not a full path).
+    pub name: String,
+    pub kind: String, // "file" | "dir"
+
+    // File-only fields (present when kind == "file").
+    pub size: Option<u64>,
+    pub mtime_unix: Option<i64>,
+    pub chunk_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TreeResponse {
+    /// Directory path queried ("" means root).
+    pub path: String,
+    pub entries: Vec<TreeEntry>,
+}

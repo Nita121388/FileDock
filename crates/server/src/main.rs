@@ -7,12 +7,16 @@ use axum::{
 use bytes::Bytes;
 use filedock_protocol::{
     is_valid_chunk_hash, is_valid_rel_path, ChunkPresenceRequest, ChunkPresenceResponse,
-    HealthResponse, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest,
+    HealthResponse, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, TreeEntry,
+    TreeResponse,
 };
 use filedock_storage::{DiskStorage, PutOpts, Storage};
 use std::{net::SocketAddr, sync::Arc};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
+
+use axum::extract::Query;
+use serde::Deserialize;
 
 #[derive(Clone)]
 struct AppState {
@@ -142,10 +146,10 @@ async fn put_manifest(
     Ok(StatusCode::CREATED)
 }
 
-async fn get_manifest(
-    State(state): State<AppState>,
-    Path(snapshot_id): Path<String>,
-) -> Result<Json<SnapshotManifest>, (StatusCode, String)> {
+async fn load_manifest(
+    state: &AppState,
+    snapshot_id: &str,
+) -> Result<SnapshotManifest, (StatusCode, String)> {
     let key = format!("manifests/{snapshot_id}.json");
     let data = state.storage.get(&key).await.map_err(|e| match e {
         filedock_storage::StorageError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
@@ -153,7 +157,106 @@ async fn get_manifest(
     })?;
     let manifest: SnapshotManifest = serde_json::from_slice(&data)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Ok(Json(manifest))
+    Ok(manifest)
+}
+
+async fn get_manifest(
+    State(state): State<AppState>,
+    Path(snapshot_id): Path<String>,
+) -> Result<Json<SnapshotManifest>, (StatusCode, String)> {
+    Ok(Json(load_manifest(&state, &snapshot_id).await?))
+}
+
+#[derive(Debug, Deserialize)]
+struct TreeQuery {
+    path: Option<String>,
+}
+
+async fn get_tree(
+    State(state): State<AppState>,
+    Path(snapshot_id): Path<String>,
+    Query(q): Query<TreeQuery>,
+) -> Result<Json<TreeResponse>, (StatusCode, String)> {
+    let manifest = load_manifest(&state, &snapshot_id).await?;
+
+    let path = q.path.unwrap_or_default();
+    let prefix = if path.trim().is_empty() {
+        String::new()
+    } else {
+        if !is_valid_rel_path(&path) {
+            return Err((StatusCode::BAD_REQUEST, "invalid path".to_string()));
+        }
+        format!("{path}/")
+    };
+
+    let mut dirs = std::collections::BTreeSet::<String>::new();
+    let mut files = Vec::<TreeEntry>::new();
+
+    for f in &manifest.files {
+        if !f.path.starts_with(&prefix) {
+            continue;
+        }
+        let rest = &f.path[prefix.len()..];
+        if rest.is_empty() {
+            continue;
+        }
+        if let Some((child, _)) = rest.split_once('/') {
+            dirs.insert(child.to_string());
+        } else {
+            files.push(TreeEntry {
+                name: rest.to_string(),
+                kind: "file".to_string(),
+                size: Some(f.size),
+                mtime_unix: Some(f.mtime_unix),
+                chunk_hash: Some(f.chunk_hash.clone()),
+            });
+        }
+    }
+
+    let mut entries = Vec::new();
+    for d in dirs {
+        entries.push(TreeEntry {
+            name: d,
+            kind: "dir".to_string(),
+            size: None,
+            mtime_unix: None,
+            chunk_hash: None,
+        });
+    }
+    // Stable sort file names.
+    files.sort_by(|a, b| a.name.cmp(&b.name));
+    entries.extend(files);
+
+    Ok(Json(TreeResponse { path, entries }))
+}
+
+#[derive(Debug, Deserialize)]
+struct FileQuery {
+    path: String,
+}
+
+async fn get_file_bytes(
+    State(state): State<AppState>,
+    Path(snapshot_id): Path<String>,
+    Query(q): Query<FileQuery>,
+) -> Result<Bytes, (StatusCode, String)> {
+    if !is_valid_rel_path(&q.path) {
+        return Err((StatusCode::BAD_REQUEST, "invalid path".to_string()));
+    }
+
+    let manifest = load_manifest(&state, &snapshot_id).await?;
+    let entry = manifest
+        .files
+        .iter()
+        .find(|f| f.path == q.path)
+        .ok_or((StatusCode::NOT_FOUND, "file not found".to_string()))?;
+
+    // MVP: single chunk per file
+    let key = format!("chunks/{}", entry.chunk_hash);
+    state.storage.get(&key).await.map_err(|e| match e {
+        filedock_storage::StorageError::NotFound => (StatusCode::NOT_FOUND, "chunk not found".to_string()),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    })
 }
 
 #[tokio::main]
@@ -175,6 +278,8 @@ async fn main() {
             "/v1/snapshots/:snapshot_id/manifest",
             put(put_manifest).get(get_manifest),
         )
+        .route("/v1/snapshots/:snapshot_id/tree", get(get_tree))
+        .route("/v1/snapshots/:snapshot_id/file", get(get_file_bytes))
         .route("/v1/chunks/presence", post(chunks_presence))
         .route("/v1/chunks/:hash", put(put_chunk).get(get_chunk))
         .with_state(state);

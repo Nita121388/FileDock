@@ -43,6 +43,11 @@ MVP (current implementation):
 - `GET /v1/snapshots/{snapshot_id}/tree?path=/...`
 - `GET /v1/snapshots/{snapshot_id}/file?path=/...`
 
+MVP (current implementation):
+
+- `GET /v1/snapshots/{snapshot_id}/tree?path=` (empty path = root)
+- `GET /v1/snapshots/{snapshot_id}/file?path=relative/file`
+
 ### Chunks
 
 - `POST /v1/chunks/presence` (hash list -> missing list)

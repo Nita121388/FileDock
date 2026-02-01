@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use filedock_protocol::{
     is_valid_chunk_hash, ChunkPresenceRequest, ChunkPresenceResponse, HealthResponse,
     SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, ManifestFileEntry,
+    TreeResponse,
 };
 use std::path::PathBuf;
 use walkdir::WalkDir;
@@ -42,6 +43,40 @@ enum Command {
         /// Root folder to back up.
         #[arg(long)]
         folder: PathBuf,
+    },
+
+    /// List a snapshot directory (server-side) using the uploaded manifest.
+    Tree {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
+
+        /// Snapshot id.
+        #[arg(long)]
+        snapshot: String,
+
+        /// Relative directory path inside the snapshot (empty = root).
+        #[arg(long, default_value = "")]
+        path: String,
+    },
+
+    /// Download a file from a snapshot by relative path.
+    PullFile {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
+
+        /// Snapshot id.
+        #[arg(long)]
+        snapshot: String,
+
+        /// Relative file path inside the snapshot.
+        #[arg(long)]
+        path: String,
+
+        /// Output file path (local).
+        #[arg(long)]
+        out: PathBuf,
     },
 }
 
@@ -187,6 +222,68 @@ async fn main() -> Result<(), String> {
                 .map_err(|e| format!("put manifest response: {e}"))?;
 
             println!("manifest uploaded: {snapshot_id}");
+        }
+
+        Command::Tree {
+            server,
+            snapshot,
+            path,
+        } => {
+            let client = reqwest::Client::new();
+            let url = format!(
+                "{}/v1/snapshots/{}/tree",
+                server.trim_end_matches('/'),
+                snapshot
+            );
+            let resp: TreeResponse = client
+                .get(url)
+                .query(&[("path", path)])
+                .send()
+                .await
+                .map_err(|e| format!("tree request: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("tree response: {e}"))?
+                .json()
+                .await
+                .map_err(|e| format!("tree decode: {e}"))?;
+            println!("{}", serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?);
+        }
+
+        Command::PullFile {
+            server,
+            snapshot,
+            path,
+            out,
+        } => {
+            let client = reqwest::Client::new();
+            let url = format!(
+                "{}/v1/snapshots/{}/file",
+                server.trim_end_matches('/'),
+                snapshot
+            );
+            let bytes = client
+                .get(url)
+                .query(&[("path", path)])
+                .send()
+                .await
+                .map_err(|e| format!("file request: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("file response: {e}"))?
+                .bytes()
+                .await
+                .map_err(|e| format!("read bytes: {e}"))?;
+
+            if let Some(parent) = out.parent() {
+                if !parent.as_os_str().is_empty() {
+                    tokio::fs::create_dir_all(parent)
+                        .await
+                        .map_err(|e| format!("mkdir: {e}"))?;
+                }
+            }
+            tokio::fs::write(&out, &bytes)
+                .await
+                .map_err(|e| format!("write out: {e}"))?;
+            println!("downloaded: {}", out.display());
         }
     }
 

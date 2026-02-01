@@ -37,6 +37,18 @@ cargo run -p filedock -- push-file --server http://127.0.0.1:8787 --file ./path/
 cargo run -p filedock -- push-folder --server http://127.0.0.1:8787 --device my-laptop --folder ./some/folder
 ```
 
+### Browse a Snapshot (tree)
+
+```bash
+cargo run -p filedock -- tree --server http://127.0.0.1:8787 --snapshot <snapshot_id> --path \"\"
+```
+
+### Restore a File (download)
+
+```bash
+cargo run -p filedock -- pull-file --server http://127.0.0.1:8787 --snapshot <snapshot_id> --path \"relative/file.txt\" --out ./restored/file.txt
+```
+
 ## CI
 
 GitHub Actions runs `fmt`, `clippy`, and `test` on pushes and PRs.
