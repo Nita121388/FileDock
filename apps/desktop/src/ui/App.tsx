@@ -46,6 +46,7 @@ export default function App() {
       }
     >
   >(new Map());
+  const inflightChunksRef = useRef<Map<string, Map<string, Promise<void>>>>(new Map());
 
   const getPresenceCache = (dst: Conn) => {
     const key = dst.serverBaseUrl;
@@ -53,6 +54,16 @@ export default function App() {
     if (!ent) {
       ent = { haveLRU: new Map(), missingUntilMs: new Map() };
       presenceCacheRef.current.set(key, ent);
+    }
+    return ent;
+  };
+
+  const getInflightChunks = (dst: Conn) => {
+    const key = dst.serverBaseUrl;
+    let ent = inflightChunksRef.current.get(key);
+    if (!ent) {
+      ent = new Map();
+      inflightChunksRef.current.set(key, ent);
     }
     return ent;
   };
@@ -148,6 +159,27 @@ export default function App() {
     }
 
     return missing;
+  };
+
+  const putChunkDedup = async (dst: Conn, hash: string, bytes: Uint8Array, signal: AbortSignal) => {
+    const inflight = getInflightChunks(dst);
+    const existing = inflight.get(hash);
+    if (existing) {
+      await existing;
+      return;
+    }
+
+    const p = (async () => {
+      try {
+        await putChunk(dst, hash, bytes, signal);
+        cacheMarkHave(dst, hash);
+      } finally {
+        inflight.delete(hash);
+      }
+    })();
+
+    inflight.set(hash, p);
+    await p;
   };
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -555,9 +587,8 @@ export default function App() {
               if (dlLimiter) await dlLimiter(dlDone);
 
           await withRetry(async () => {
-            await putChunk(dstSettings, c.hash, bytes, ac.signal);
+            await putChunkDedup(dstSettings, c.hash, bytes, ac.signal);
           });
-          cacheMarkHave(dstSettings, c.hash);
           ulDone += bytes.byteLength;
           if (ulLimiter) await ulLimiter(ulDone);
 
@@ -604,9 +635,8 @@ export default function App() {
           const end = offset + c.size;
           if (missing.has(c.hash)) {
             await withRetry(async () => {
-              await putChunk(dstSettings, c.hash, buf.subarray(offset, end), ac.signal);
+              await putChunkDedup(dstSettings, c.hash, buf.subarray(offset, end), ac.signal);
             });
-            cacheMarkHave(dstSettings, c.hash);
             uploaded++;
           }
           offset = end;
@@ -960,9 +990,8 @@ export default function App() {
                 if (dlLimiter) await dlLimiter(dlDone);
 
                 await withRetry(async () => {
-                  await putChunk(dstSettings, c.hash, bytes, ac.signal);
+                  await putChunkDedup(dstSettings, c.hash, bytes, ac.signal);
                 });
-                cacheMarkHave(dstSettings, c.hash);
                 ulDone += bytes.byteLength;
                 if (ulLimiter) await ulLimiter(ulDone);
 
@@ -1038,9 +1067,8 @@ export default function App() {
           const end = offset + c.size;
           if (missing.has(c.hash)) {
             await withRetry(async () => {
-              await putChunk(dstSettings, c.hash, buf.subarray(offset, end), ac.signal);
+              await putChunkDedup(dstSettings, c.hash, buf.subarray(offset, end), ac.signal);
             });
-            cacheMarkHave(dstSettings, c.hash);
             uploaded++;
           }
           offset = end;
