@@ -59,6 +59,10 @@ Notes:
 - `PUT /v1/chunks/{hash}`
 - `GET /v1/chunks/{hash}`
 
+Notes:
+
+- `PUT /chunks/{hash}` validates that the request body hashes to `{hash}` (integrity check).
+
 ### Transfer
 
 - `POST /v1/transfers`

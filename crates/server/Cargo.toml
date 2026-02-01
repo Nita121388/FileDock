@@ -15,3 +15,4 @@ filedock-protocol = { path = "../protocol" }
 filedock-storage = { path = "../storage" }
 bytes = "1"
 uuid = { version = "1", features = ["v4"] }
+blake3 = "1"

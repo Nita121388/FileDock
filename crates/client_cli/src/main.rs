@@ -122,6 +122,9 @@ async fn main() -> Result<(), String> {
                 .await
                 .map_err(|e| format!("read file: {e}"))?;
             let chunks = chunk_file(&data);
+            if chunks.is_empty() {
+                return Err("chunking produced no chunks".to_string());
+            }
             let hashes: Vec<String> = chunks.iter().map(|c| c.hash.clone()).collect();
 
             let client = reqwest::Client::new();
@@ -175,7 +178,18 @@ async fn main() -> Result<(), String> {
             let snapshot_id = create_resp.snapshot_id;
             println!("snapshot: {snapshot_id}");
 
-            let mut files = Vec::new();
+            #[derive(Debug, Clone)]
+            struct FilePlan {
+                abs_path: PathBuf,
+                rel_path: String,
+                size: u64,
+                mtime_unix: i64,
+                chunks: Vec<ChunkRef>,
+            }
+
+            // Pass 1: build file plans and gather all chunk hashes.
+            let mut plans = Vec::<FilePlan>::new();
+            let mut all_hashes = Vec::<String>::new();
 
             for entry in WalkDir::new(&root).follow_links(false) {
                 let entry = entry.map_err(|e| format!("walkdir: {e}"))?;
@@ -204,18 +218,39 @@ async fn main() -> Result<(), String> {
                     .map(|d| d.as_secs() as i64)
                     .unwrap_or(0);
 
+                // Read file once to compute chunk hashes.
                 let data = tokio::fs::read(&abs_path)
                     .await
                     .map_err(|e| format!("read file: {e}"))?;
                 let chunks = chunk_file(&data);
-                let hashes: Vec<String> = chunks.iter().map(|c| c.hash.clone()).collect();
-                let pres_resp = chunk_presence(&client, &server, hashes.clone()).await?;
-                let missing: std::collections::HashSet<String> =
-                    pres_resp.missing.into_iter().collect();
+                if chunks.is_empty() {
+                    return Err(format!("chunking produced no chunks: {}", abs_path.display()));
+                }
 
-                // Upload missing chunks.
+                all_hashes.extend(chunks.iter().map(|c| c.hash.clone()));
+                plans.push(FilePlan {
+                    abs_path,
+                    rel_path: rel_str,
+                    size,
+                    mtime_unix,
+                    chunks,
+                });
+            }
+
+            // Batch presence check for entire folder.
+            let pres_resp = chunk_presence(&client, &server, all_hashes).await?;
+            let missing: std::collections::HashSet<String> =
+                pres_resp.missing.into_iter().collect();
+
+            // Pass 2: upload missing chunks.
+            let mut files = Vec::new();
+            for plan in plans {
+                let data = tokio::fs::read(&plan.abs_path)
+                    .await
+                    .map_err(|e| format!("read file: {e}"))?;
+
                 let mut offset = 0usize;
-                for c in &chunks {
+                for c in &plan.chunks {
                     let end = offset + c.size as usize;
                     if missing.contains(&c.hash) {
                         put_chunk(&client, &server, &c.hash, data[offset..end].to_vec()).await?;
@@ -224,11 +259,11 @@ async fn main() -> Result<(), String> {
                 }
 
                 files.push(ManifestFileEntry {
-                    path: rel_str,
-                    size,
-                    mtime_unix,
+                    path: plan.rel_path,
+                    size: plan.size,
+                    mtime_unix: plan.mtime_unix,
                     chunk_hash: None,
-                    chunks: Some(chunks),
+                    chunks: Some(plan.chunks),
                 });
             }
 

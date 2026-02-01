@@ -60,6 +60,11 @@ async fn put_chunk(
     if !is_valid_chunk_hash(&hash) {
         return Err((StatusCode::BAD_REQUEST, "invalid chunk hash".to_string()));
     }
+    // Integrity: key must match content hash.
+    let actual = blake3::hash(&body).to_hex().to_string();
+    if actual != hash {
+        return Err((StatusCode::BAD_REQUEST, "chunk hash mismatch".to_string()));
+    }
     let key = format!("chunks/{hash}");
     state
         .storage
