@@ -5,4 +5,5 @@ members = [
   "crates/storage",
   "crates/server",
   "crates/client_cli",
+  "apps/tui",
 ]

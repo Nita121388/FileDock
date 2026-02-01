@@ -74,6 +74,20 @@ cargo run -p filedock -- pull-folder --server http://127.0.0.1:8787 --snapshot <
 cargo run -p filedock -- snapshots --server http://127.0.0.1:8787
 ```
 
+## TUI (Terminal UI)
+
+Browse snapshots + directories in a split-pane terminal UI:
+
+```bash
+cargo run -p filedock-tui -- --server http://127.0.0.1:8787
+```
+
+If the server is started with `FILEDOCK_TOKEN`, set the same token for the TUI:
+
+```bash
+export FILEDOCK_TOKEN="change-me"
+```
+
 ## CI
 
 GitHub Actions runs `fmt`, `clippy`, and `test` on pushes and PRs.
