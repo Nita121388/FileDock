@@ -19,3 +19,4 @@ Notes:
 
 - The UI intentionally starts “offline-first”: it focuses on layout + navigation scaffolding.
 - Server integration (snapshots/tree/transfer queue) is layered on later.
+- Snapshot restore (to local folder) is implemented via a Tauri command and appears as `RST` in the Device Browser pane.

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { PaneTab } from "../../../model/layout";
 import type { Settings } from "../../../model/settings";
 import type { Conn } from "../../../model/transfers";
@@ -17,6 +18,7 @@ import {
   type SnapshotMeta,
   type TreeEntry
 } from "../../../api/client";
+import { restoreSnapshotToFolder, type RestoreSnapshotProgress } from "../../../api/tauri";
 import { chunkFile } from "../../../util/chunking";
 
 type DeviceTab = Extract<PaneTab, { pane: "deviceBrowser" }>;
@@ -74,6 +76,7 @@ export default function DeviceBrowserPane(props: {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [lastSelIndex, setLastSelIndex] = useState<number | null>(null);
+  const [restorePct, setRestorePct] = useState<number | null>(null);
 
   const deviceName = tab.state.deviceName;
   const snapshotId = tab.state.snapshotId;
@@ -524,6 +527,57 @@ export default function DeviceBrowserPane(props: {
               title="Up"
             >
               Up
+            </button>
+            <button
+              className="db-mini"
+              disabled={!snapshotId || loading}
+              onClick={async () => {
+                if (!snapshotId) return;
+                try {
+                  const picked = await open({
+                    directory: true,
+                    multiple: false,
+                    title: "Restore snapshot to folder"
+                  });
+                  if (!picked || Array.isArray(picked)) return;
+
+                  setRestorePct(0);
+                  setLoading(true);
+                  setStatus(`restoring ${snapshotId} -> ${picked}`);
+
+                  const tok = effSettings.token?.trim() ? effSettings.token.trim() : undefined;
+                  const devId = effSettings.deviceId?.trim() ? effSettings.deviceId.trim() : undefined;
+                  const devTok = effSettings.deviceToken?.trim() ? effSettings.deviceToken.trim() : undefined;
+
+                  const resp = await restoreSnapshotToFolder(
+                    {
+                      server_base_url: effSettings.serverBaseUrl,
+                      token: tok,
+                      device_id: devId,
+                      device_token: devTok,
+                      snapshot_id: snapshotId,
+                      dest_dir: picked,
+                      concurrency: 4
+                    },
+                    (p: RestoreSnapshotProgress) => {
+                      const pct =
+                        p.total_bytes > 0 ? Math.floor((p.done_bytes / p.total_bytes) * 100) : 100;
+                      setRestorePct(pct);
+                      setStatus(`restore ${pct}%  [${p.done_files}/${p.total_files}]  ${p.path}`);
+                    }
+                  );
+
+                  setRestorePct(100);
+                  setStatus(`restored ${resp.total_files} files -> ${resp.dest_dir}`);
+                } catch (e: any) {
+                  setStatus(String(e?.message ?? e));
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              title="Restore the selected snapshot into a local folder"
+            >
+              RST{restorePct !== null ? ` ${restorePct}%` : ""}
             </button>
           </span>
         </div>

@@ -77,6 +77,12 @@ In the UI, set:
 - server URL: `http://127.0.0.1:8787`
 - token: `FILEDOCK_TOKEN` (if configured)
 
+### Restore a snapshot to a local folder (desktop)
+
+In the Device Browser pane:
+- select a snapshot
+- click `RST` and pick a destination folder
+
 ### Cross-device copy (desktop)
 
 Open two Device Browser panes (either in tabs or split panes), connect each to a server/device, then:
