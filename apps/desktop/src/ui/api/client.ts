@@ -246,6 +246,23 @@ export async function chunksPresence(
   return apiPostJson<ChunkPresenceResponse>(settings, "/v1/chunks/presence", req, signal);
 }
 
+export async function getChunkBytes(
+  settings: Settings,
+  hash: string,
+  signal?: AbortSignal,
+  onProgress?: (doneBytes: number, totalBytes: number | null) => void,
+  onChunk?: (chunkBytes: number, doneBytes: number, totalBytes: number | null) => void | Promise<void>
+): Promise<Uint8Array> {
+  return apiGetUint8Array(
+    settings,
+    `/v1/chunks/${encodeURIComponent(hash)}`,
+    undefined,
+    onProgress,
+    signal,
+    onChunk
+  );
+}
+
 export async function putChunk(settings: Settings, hash: string, data: Uint8Array, signal?: AbortSignal): Promise<void> {
   const base = settings.serverBaseUrl.replace(/\/+$/, "");
   const url = `${base}/v1/chunks/${encodeURIComponent(hash)}`;

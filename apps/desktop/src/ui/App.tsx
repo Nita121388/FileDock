@@ -24,6 +24,7 @@ import {
   apiGetUint8Array,
   chunksPresence,
   createSnapshot,
+  getChunkBytes,
   getTree,
   getManifest,
   putChunk,
@@ -338,71 +339,6 @@ export default function App() {
         }
       }
 
-      // 1) Download bytes from source server.
-      setTransferProgress(id, { phase: "downloading", pct: 0 });
-      const dlLimiter = makeLimiter(getRateLimitBytesPerSec());
-      const buf = await withRetry(async () => {
-        return await apiGetUint8Array(
-          srcSettings,
-          `/v1/snapshots/${encodeURIComponent(job.srcSnapshotId)}/file`,
-          { path: job.srcPath },
-          (done, total) => {
-            const pct = total && total > 0 ? Math.floor((done / total) * 100) : undefined;
-            setTransferProgress(id, { phase: "downloading", doneBytes: done, totalBytes: total ?? undefined, pct });
-          },
-          ac.signal,
-          dlLimiter ? async (_chunkBytes, doneBytes) => dlLimiter(doneBytes) : undefined
-        );
-      });
-
-      // 2) Chunk + hash.
-      setTransferProgress(id, { phase: "hashing", pct: 0 });
-      const refs = chunkBytes(buf);
-      const hashes = refs.map((c) => c.hash);
-      const manifestChunks = refs.map((c) => ({ hash: c.hash, size: c.size }));
-
-      // 3) Presence (batched) on destination.
-      setTransferProgress(id, { phase: "checking", pct: 0 });
-      const missing = new Set<string>();
-      const batchSize = 1000;
-      for (let i = 0; i < hashes.length; i += batchSize) {
-        const batch = hashes.slice(i, i + batchSize);
-        const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
-        for (const h of resp.missing) missing.add(h);
-      }
-
-      // 4) Upload missing chunks.
-      setTransferProgress(id, { phase: "uploading", pct: 0 });
-      const ulLimiter = makeLimiter(getRateLimitBytesPerSec());
-      let offset = 0;
-      let uploaded = 0;
-      for (const c of refs) {
-        const end = offset + c.size;
-        if (missing.has(c.hash)) {
-          await withRetry(async () => {
-            await putChunk(dstSettings, c.hash, buf.subarray(offset, end), ac.signal);
-          });
-          uploaded++;
-        }
-        offset = end;
-        if (ulLimiter) await ulLimiter(offset);
-        const pct = refs.length > 0 ? Math.floor((offset / buf.length) * 100) : 100;
-        setTransferProgress(id, { phase: `uploading (${uploaded}/${missing.size} chunks)`, pct });
-      }
-
-      // 5) Create snapshot + manifest on destination.
-      setTransferProgress(id, { phase: "finalizing", pct: 0 });
-      const now = Math.floor(Date.now() / 1000);
-      const snap = await createSnapshot(
-        dstSettings,
-        {
-          device_name: job.dstDeviceName,
-          device_id: job.dstDeviceId ?? null,
-          root_path: job.dstBaseSnapshotId ? `(transfer from ${job.dstBaseSnapshotId})` : "(transfer)"
-        },
-        ac.signal
-      );
-
       const fileMap = new Map<
         string,
         { path: string; size: number; mtime_unix: number; chunks: { hash: string; size: number }[] }
@@ -426,14 +362,156 @@ export default function App() {
       };
 
       const finalPath = choosePath(job.dstPath);
-      if (finalPath !== null) {
-        fileMap.set(finalPath, {
-          path: finalPath,
-          size: buf.length,
-          mtime_unix: now,
-          chunks: manifestChunks
-        });
+      if (finalPath === null) {
+        // Conflict policy decided to skip and the file already exists in the destination base manifest.
+        setTransfers((xs) =>
+          xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined, progress: undefined } : x))
+        );
+        return;
       }
+
+      const now = Math.floor(Date.now() / 1000);
+      const bytesPerSec = getRateLimitBytesPerSec();
+      const dlLimiter = makeLimiter(bytesPerSec);
+      const ulLimiter = makeLimiter(bytesPerSec);
+
+      // Prefer chunk-level copy (fetch missing chunks by hash) when the source manifest has chunk lists.
+      // Falls back to file download+chunk when needed.
+      setTransferProgress(id, { phase: "loading source manifest", pct: 0 });
+      let srcMeta:
+        | { size: number; mtime_unix: number; chunks: { hash: string; size: number }[] }
+        | null = null;
+      try {
+        const m = await getManifest(srcSettings, job.srcSnapshotId, ac.signal);
+        const e = (m.files ?? []).find((x) => x?.path === job.srcPath);
+        if (e && Array.isArray(e.chunks) && e.chunks.length > 0) {
+          srcMeta = {
+            size: e.size,
+            mtime_unix: e.mtime_unix,
+            chunks: e.chunks.map((c) => ({ hash: c.hash, size: c.size }))
+          };
+        }
+      } catch {
+        // ignore
+      }
+
+      let newSize = 0;
+      let newMtime = now;
+      let newChunks: { hash: string; size: number }[] = [];
+
+      if (srcMeta) {
+        newSize = srcMeta.size;
+        newMtime = srcMeta.mtime_unix;
+        newChunks = srcMeta.chunks;
+
+        // Presence (batched) on destination.
+        setTransferProgress(id, { phase: "checking chunks", pct: 0 });
+        const hashes = newChunks.map((c) => c.hash);
+        const missing = new Set<string>();
+        const batchSize = 1000;
+        for (let i = 0; i < hashes.length; i += batchSize) {
+          const batch = hashes.slice(i, i + batchSize);
+          const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
+          for (const h of resp.missing) missing.add(h);
+        }
+
+        const missingBytesTotal = newChunks.reduce((acc, c) => acc + (missing.has(c.hash) ? c.size : 0), 0);
+        let missingBytesDone = 0;
+        let dlDone = 0;
+        let ulDone = 0;
+
+        // Fetch missing chunks from source, upload to destination.
+        for (const c of newChunks) {
+          if (!missing.has(c.hash)) continue;
+          setTransferProgress(id, {
+            phase: `copying chunk ${c.hash.slice(0, 8)}`,
+            doneBytes: missingBytesDone,
+            totalBytes: missingBytesTotal,
+            pct: missingBytesTotal > 0 ? Math.floor((missingBytesDone / missingBytesTotal) * 100) : 100
+          });
+
+          const bytes = await withRetry(async () => {
+            return await getChunkBytes(srcSettings, c.hash, ac.signal);
+          });
+          dlDone += bytes.byteLength;
+          if (dlLimiter) await dlLimiter(dlDone);
+
+          await withRetry(async () => {
+            await putChunk(dstSettings, c.hash, bytes, ac.signal);
+          });
+          ulDone += bytes.byteLength;
+          if (ulLimiter) await ulLimiter(ulDone);
+
+          missingBytesDone += c.size;
+        }
+      } else {
+        // Fallback: download the file bytes, chunk locally, and upload missing chunks.
+        setTransferProgress(id, { phase: "downloading", pct: 0 });
+        const buf = await withRetry(async () => {
+          return await apiGetUint8Array(
+            srcSettings,
+            `/v1/snapshots/${encodeURIComponent(job.srcSnapshotId)}/file`,
+            { path: job.srcPath },
+            (done, total) => {
+              const pct = total && total > 0 ? Math.floor((done / total) * 100) : undefined;
+              setTransferProgress(id, { phase: "downloading", doneBytes: done, totalBytes: total ?? undefined, pct });
+            },
+            ac.signal,
+            dlLimiter ? async (_chunkBytes, doneBytes) => dlLimiter(doneBytes) : undefined
+          );
+        });
+
+        setTransferProgress(id, { phase: "hashing", pct: 0 });
+        const refs = chunkBytes(buf);
+        const hashes = refs.map((c) => c.hash);
+        newSize = buf.length;
+        newChunks = refs.map((c) => ({ hash: c.hash, size: c.size }));
+
+        setTransferProgress(id, { phase: "checking", pct: 0 });
+        const missing = new Set<string>();
+        const batchSize = 1000;
+        for (let i = 0; i < hashes.length; i += batchSize) {
+          const batch = hashes.slice(i, i + batchSize);
+          const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
+          for (const h of resp.missing) missing.add(h);
+        }
+
+        setTransferProgress(id, { phase: "uploading", pct: 0 });
+        let offset = 0;
+        let uploaded = 0;
+        for (const c of refs) {
+          const end = offset + c.size;
+          if (missing.has(c.hash)) {
+            await withRetry(async () => {
+              await putChunk(dstSettings, c.hash, buf.subarray(offset, end), ac.signal);
+            });
+            uploaded++;
+          }
+          offset = end;
+          if (ulLimiter) await ulLimiter(offset);
+          const pct = refs.length > 0 ? Math.floor((offset / buf.length) * 100) : 100;
+          setTransferProgress(id, { phase: `uploading (${uploaded}/${missing.size} chunks)`, pct });
+        }
+      }
+
+      // Create snapshot + manifest on destination (copy-on-write).
+      setTransferProgress(id, { phase: "finalizing", pct: 0 });
+      const snap = await createSnapshot(
+        dstSettings,
+        {
+          device_name: job.dstDeviceName,
+          device_id: job.dstDeviceId ?? null,
+          root_path: job.dstBaseSnapshotId ? `(transfer from ${job.dstBaseSnapshotId})` : "(transfer)"
+        },
+        ac.signal
+      );
+
+      fileMap.set(finalPath, {
+        path: finalPath,
+        size: newSize,
+        mtime_unix: newMtime,
+        chunks: newChunks
+      });
 
       const files = Array.from(fileMap.values()).sort((a, b) => a.path.localeCompare(b.path));
       await putManifest(
@@ -598,6 +676,27 @@ export default function App() {
 
       const bytesPerSec = getRateLimitBytesPerSec();
 
+      // Best-effort optimization: use the source manifest chunk lists to transfer by chunks (no full-file download).
+      // Falls back to file download if the source manifest is unavailable or missing chunk metadata.
+      let srcChunkMap: Map<
+        string,
+        { size: number; mtime_unix: number; chunks: { hash: string; size: number }[] }
+      > = new Map();
+      try {
+        setTransferProgress(id, { phase: "loading source manifest", pct: 0 });
+        const sm = await getManifest(srcSettings, job.srcSnapshotId, ac.signal);
+        for (const f of sm.files ?? []) {
+          if (!f?.path || !Array.isArray(f.chunks) || f.chunks.length === 0) continue;
+          srcChunkMap.set(f.path, {
+            size: f.size,
+            mtime_unix: f.mtime_unix,
+            chunks: f.chunks.map((c) => ({ hash: c.hash, size: c.size }))
+          });
+        }
+      } catch {
+        srcChunkMap = new Map();
+      }
+
       // 3) Copy files sequentially (per-job concurrency can come later; queue concurrency already exists).
       for (let i = nextIndex; i < total; i++) {
         const srcFilePath = filesList[i]!;
@@ -619,6 +718,81 @@ export default function App() {
             manifestFiles = manifestFiles.filter((f) => f.path !== dstFilePath);
             doneSet.delete(dstFilePath);
           }
+        }
+
+        const srcMeta = srcChunkMap.get(srcFilePath);
+        if (srcMeta) {
+          // Chunk-level copy: download missing chunks by hash and upload to destination.
+          const hashes = srcMeta.chunks.map((c) => c.hash);
+          const missing = new Set<string>();
+          const batchSize = 1000;
+          setTransferProgress(id, { phase: `checking chunks ${srcFilePath}`, pct: total > 0 ? Math.floor((i / total) * 100) : 0 });
+          for (let j = 0; j < hashes.length; j += batchSize) {
+            const batch = hashes.slice(j, j + batchSize);
+            const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
+            for (const h of resp.missing) missing.add(h);
+          }
+
+          const missingBytesTotal = srcMeta.chunks.reduce((acc, c) => acc + (missing.has(c.hash) ? c.size : 0), 0);
+          let missingBytesDone = 0;
+          let dlDone = 0;
+          let ulDone = 0;
+          const dlLimiter = makeLimiter(bytesPerSec);
+          const ulLimiter = makeLimiter(bytesPerSec);
+
+          for (const c of srcMeta.chunks) {
+            if (!missing.has(c.hash)) continue;
+            const frac = missingBytesTotal > 0 ? missingBytesDone / missingBytesTotal : 1;
+            const pct = total > 0 ? Math.floor(((i + frac) / total) * 100) : 0;
+            setTransferProgress(id, {
+              phase: `copying chunk ${c.hash.slice(0, 8)} (${srcFilePath})`,
+              doneBytes: missingBytesDone,
+              totalBytes: missingBytesTotal,
+              pct
+            });
+
+            const bytes = await withRetry(async () => {
+              return await getChunkBytes(srcSettings, c.hash, ac.signal);
+            });
+            dlDone += bytes.byteLength;
+            if (dlLimiter) await dlLimiter(dlDone);
+
+            await withRetry(async () => {
+              await putChunk(dstSettings, c.hash, bytes, ac.signal);
+            });
+            ulDone += bytes.byteLength;
+            if (ulLimiter) await ulLimiter(ulDone);
+
+            missingBytesDone += c.size;
+          }
+
+          // Update destination manifest (copy-on-write snapshot) for this file.
+          manifestFiles.push({
+            path: dstFilePath,
+            size: srcMeta.size,
+            mtime_unix: srcMeta.mtime_unix,
+            chunks: srcMeta.chunks
+          });
+          doneSet.add(dstFilePath);
+
+          patchTransfer(id, (x) => ({ ...(x as any), nextIndex: i + 1 }));
+          await putManifest(
+            dstSettings,
+            dstSnapshotId!,
+            {
+              snapshot_id: dstSnapshotId!,
+              created_unix: Math.floor(Date.now() / 1000),
+              files: manifestFiles.map((f) => ({
+                path: f.path,
+                size: f.size,
+                mtime_unix: f.mtime_unix,
+                chunk_hash: null,
+                chunks: f.chunks
+              }))
+            },
+            ac.signal
+          );
+          continue;
         }
 
         const dlLimiter = makeLimiter(bytesPerSec);
