@@ -22,6 +22,7 @@ use uuid::Uuid;
 use axum::extract::Query;
 use serde::Deserialize;
 use clap::Parser;
+use std::io;
 
 #[derive(Parser, Debug)]
 #[command(name = "filedock-server", version)]
@@ -536,20 +537,25 @@ async fn get_file_stream(
         return Err((StatusCode::BAD_REQUEST, "manifest missing chunk info".to_string()));
     };
 
-    // Note: this still loads each chunk into memory, but avoids buffering the whole file.
-    let mut parts = Vec::with_capacity(chunks.len());
-    for c in chunks {
-        let key = format!("chunks/{}", c.hash);
-        let data = state.storage.get(&key).await.map_err(|e| match e {
+    // Stream chunks sequentially without buffering all of them first.
+    // If a chunk read fails mid-stream, the client will observe a truncated response.
+    // This is acceptable for now (caller can retry / verify via hashes).
+    let storage = state.storage.clone();
+    let stream = futures_util::stream::try_unfold((storage, chunks, 0usize), |(storage, chunks, idx)| async move {
+        if idx >= chunks.len() {
+            return Ok::<_, io::Error>(None);
+        }
+        let key = format!("chunks/{}", chunks[idx].hash);
+        let data = storage.get(&key).await.map_err(|e| match e {
             filedock_storage::StorageError::NotFound => {
-                (StatusCode::NOT_FOUND, "chunk not found".to_string())
+                io::Error::new(io::ErrorKind::NotFound, "chunk not found")
             }
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            _ => io::Error::new(io::ErrorKind::Other, e.to_string()),
         })?;
-        parts.push(Ok::<Bytes, std::convert::Infallible>(data));
-    }
+        Ok(Some((data, (storage, chunks, idx + 1))))
+    });
 
-    Ok(axum::body::Body::from_stream(stream::iter(parts)))
+    Ok(axum::body::Body::from_stream(stream))
 }
 
 #[tokio::main]
