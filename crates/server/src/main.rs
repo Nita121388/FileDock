@@ -5,6 +5,7 @@ use axum::{
     Json, Router,
 };
 use bytes::Bytes;
+use futures_util::stream;
 use filedock_protocol::{
     is_valid_chunk_hash, is_valid_rel_path, ChunkPresenceRequest, ChunkPresenceResponse, ChunkRef,
     HealthResponse, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, TreeEntry,
@@ -352,6 +353,49 @@ async fn get_file_bytes(
     Ok(Bytes::from(out))
 }
 
+async fn get_file_stream(
+    State(state): State<AppState>,
+    Path(snapshot_id): Path<String>,
+    Query(q): Query<FileQuery>,
+) -> Result<axum::body::Body, (StatusCode, String)> {
+    if !is_valid_rel_path(&q.path) {
+        return Err((StatusCode::BAD_REQUEST, "invalid path".to_string()));
+    }
+
+    let manifest = load_manifest(&state, &snapshot_id).await?;
+    let entry = manifest
+        .files
+        .iter()
+        .find(|f| f.path == q.path)
+        .ok_or((StatusCode::NOT_FOUND, "file not found".to_string()))?;
+
+    let chunks: Vec<ChunkRef> = if let Some(chunks) = &entry.chunks {
+        chunks.clone()
+    } else if let Some(hash) = &entry.chunk_hash {
+        vec![ChunkRef {
+            hash: hash.clone(),
+            size: entry.size,
+        }]
+    } else {
+        return Err((StatusCode::BAD_REQUEST, "manifest missing chunk info".to_string()));
+    };
+
+    // Note: this still loads each chunk into memory, but avoids buffering the whole file.
+    let mut parts = Vec::with_capacity(chunks.len());
+    for c in chunks {
+        let key = format!("chunks/{}", c.hash);
+        let data = state.storage.get(&key).await.map_err(|e| match e {
+            filedock_storage::StorageError::NotFound => {
+                (StatusCode::NOT_FOUND, "chunk not found".to_string())
+            }
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
+        parts.push(Ok::<Bytes, std::convert::Infallible>(data));
+    }
+
+    Ok(axum::body::Body::from_stream(stream::iter(parts)))
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -372,7 +416,7 @@ async fn main() {
             put(put_manifest).get(get_manifest),
         )
         .route("/v1/snapshots/:snapshot_id/tree", get(get_tree))
-        .route("/v1/snapshots/:snapshot_id/file", get(get_file_bytes))
+        .route("/v1/snapshots/:snapshot_id/file", get(get_file_stream))
         .route("/v1/chunks/presence", post(chunks_presence))
         .route("/v1/chunks/:hash", put(put_chunk).get(get_chunk))
         .with_state(state);

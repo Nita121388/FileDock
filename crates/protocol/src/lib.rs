@@ -110,3 +110,27 @@ pub struct TreeResponse {
     pub path: String,
     pub entries: Vec<TreeEntry>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_hash_validation() {
+        assert!(!is_valid_chunk_hash(""));
+        assert!(!is_valid_chunk_hash("abc"));
+        assert!(is_valid_chunk_hash(&"a".repeat(64)));
+        assert!(is_valid_chunk_hash(&"ABCDEF0123456789".repeat(4)));
+        assert!(!is_valid_chunk_hash(&"g".repeat(64))); // non-hex
+    }
+
+    #[test]
+    fn rel_path_validation() {
+        assert!(!is_valid_rel_path(""));
+        assert!(!is_valid_rel_path("/abs"));
+        assert!(!is_valid_rel_path("../x"));
+        assert!(!is_valid_rel_path("a//b"));
+        assert!(is_valid_rel_path("a"));
+        assert!(is_valid_rel_path("a/b/c.txt"));
+    }
+}

@@ -156,3 +156,25 @@ impl Storage for DiskStorage {
         Ok(out)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn disk_storage_rejects_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = DiskStorage::new(dir.path());
+
+        let err = st
+            .put(
+                "../evil",
+                Bytes::from_static(b"x"),
+                PutOpts { content_type: None },
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, StorageError::InvalidKey));
+    }
+}

@@ -52,6 +52,7 @@ MVP (current implementation):
 Notes:
 
 - `GET /file` reconstructs data from one or more stored chunks.
+- `GET /file` is streamed (does not buffer the whole file in memory).
 
 ### Chunks
 

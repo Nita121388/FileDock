@@ -7,6 +7,8 @@ use filedock_protocol::{
 use std::path::PathBuf;
 use walkdir::WalkDir;
 
+const PRESENCE_BATCH: usize = 1000;
+
 #[derive(Parser, Debug)]
 #[command(name = "filedock", version, about = "FileDock CLI")]
 struct Cli {
@@ -444,18 +446,27 @@ async fn chunk_presence(
     hashes: Vec<String>,
 ) -> Result<ChunkPresenceResponse, String> {
     let presence_url = format!("{}/v1/chunks/presence", server.trim_end_matches('/'));
-    let pres_req = ChunkPresenceRequest { hashes };
-    client
-        .post(presence_url)
-        .json(&pres_req)
-        .send()
-        .await
-        .map_err(|e| format!("presence request: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("presence response: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("presence decode: {e}"))
+    let mut missing = Vec::new();
+
+    for batch in hashes.chunks(PRESENCE_BATCH) {
+        let pres_req = ChunkPresenceRequest {
+            hashes: batch.to_vec(),
+        };
+        let resp: ChunkPresenceResponse = client
+            .post(&presence_url)
+            .json(&pres_req)
+            .send()
+            .await
+            .map_err(|e| format!("presence request: {e}"))?
+            .error_for_status()
+            .map_err(|e| format!("presence response: {e}"))?
+            .json()
+            .await
+            .map_err(|e| format!("presence decode: {e}"))?;
+        missing.extend(resp.missing);
+    }
+
+    Ok(ChunkPresenceResponse { missing })
 }
 
 async fn put_chunk(
@@ -469,16 +480,35 @@ async fn put_chunk(
         server.trim_end_matches('/'),
         hash
     );
-    let resp = client
-        .put(put_url)
-        .body(data)
-        .send()
-        .await
-        .map_err(|e| format!("upload request: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("upload failed: {}", resp.status()));
+    // Retry with backoff on transient failures.
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        let resp = client
+            .put(put_url.clone())
+            .body(data.clone())
+            .send()
+            .await;
+
+        match resp {
+            Ok(r) if r.status().is_success() => return Ok(()),
+            Ok(r) => {
+                if attempt >= 4 {
+                    return Err(format!("upload failed: {}", r.status()));
+                }
+            }
+            Err(e) => {
+                if attempt >= 4 {
+                    return Err(format!("upload request: {e}"));
+                }
+            }
+        }
+
+        // 250ms, 500ms, 1000ms (+ jitter)
+        let base_ms = 250u64.saturating_mul(1u64 << (attempt - 1));
+        let jitter: u64 = rand::random::<u8>() as u64;
+        tokio::time::sleep(std::time::Duration::from_millis(base_ms + jitter)).await;
     }
-    Ok(())
 }
 
 const DEFAULT_CHUNK_SIZE: usize = 4 * 1024 * 1024;
