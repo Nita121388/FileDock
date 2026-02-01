@@ -29,3 +29,22 @@ jobs:
 
       - name: smoke (auth mode)
         run: FILEDOCK_SMOKE_PORT=18788 FILEDOCK_TOKEN="ci-token" ./scripts/smoke.sh
+
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: npm ci
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: desktop build (tsc + vite)
+        working-directory: apps/desktop
+        run: npm run build
