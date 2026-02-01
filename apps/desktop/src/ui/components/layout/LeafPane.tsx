@@ -134,6 +134,7 @@ export default function LeafPane(props: {
           aria-label="Pane type"
         >
           <option value="deviceBrowser">Device Browser</option>
+          <option value="sftpBrowser">SFTP (VPS)</option>
           <option value="transferQueue">Transfer Queue</option>
           <option value="notes">Notes</option>
         </select>

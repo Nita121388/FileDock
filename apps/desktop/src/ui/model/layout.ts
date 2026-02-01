@@ -1,6 +1,6 @@
 export type SplitDir = "row" | "col";
 
-export type PaneKind = "deviceBrowser" | "transferQueue" | "notes";
+export type PaneKind = "deviceBrowser" | "sftpBrowser" | "transferQueue" | "notes";
 
 export type DropZone = "center" | "left" | "right" | "top" | "bottom";
 
@@ -17,8 +17,32 @@ export type DeviceBrowserTabState = {
   path: string;
 };
 
+export type SftpBrowserTabState = {
+  host: string;
+  port: number;
+  user: string;
+
+  // auth
+  password: string;
+  keyPath: string;
+  useAgent: boolean;
+
+  // host key checking
+  knownHostsPolicy: "strict" | "accept-new" | "insecure";
+  knownHostsPath: string;
+
+  // navigation
+  basePath: string;
+  path: string;
+
+  // optional: filedock plugin runner configuration
+  filedockPath: string; // empty => default "filedock"
+  pluginDirs: string; // ":"-separated
+};
+
 export type PaneTab =
   | { id: string; pane: "deviceBrowser"; title?: string; state: DeviceBrowserTabState }
+  | { id: string; pane: "sftpBrowser"; title?: string; state: SftpBrowserTabState }
   | { id: string; pane: "transferQueue"; title?: string }
   | { id: string; pane: "notes"; title?: string };
 
@@ -77,6 +101,27 @@ export function makeTab(pane: PaneKind, title?: string): PaneTab {
       }
     };
   }
+  if (pane === "sftpBrowser") {
+    return {
+      id,
+      pane,
+      title,
+      state: {
+        host: "",
+        port: 22,
+        user: "",
+        password: "",
+        keyPath: "",
+        useAgent: false,
+        knownHostsPolicy: "strict",
+        knownHostsPath: "",
+        basePath: "",
+        path: "/",
+        filedockPath: "",
+        pluginDirs: ""
+      }
+    };
+  }
   return { id, pane: pane as any, title } as PaneTab;
 }
 
@@ -97,6 +142,13 @@ export function displayTabTitle(tab: PaneTab): string {
     const snap = tab.state.snapshotId ? ` ${tab.state.snapshotId}` : "";
     const p = tab.state.path ? ` /${tab.state.path}` : " /";
     return `${dev}${snap}${p}`;
+  }
+
+  if (tab.pane === "sftpBrowser") {
+    const host = tab.state.host || "VPS";
+    const user = tab.state.user ? `${tab.state.user}@` : "";
+    const p = tab.state.path ? ` ${tab.state.path}` : " /";
+    return `${user}${host}${p}`;
   }
 
   if (tab.pane === "transferQueue") return "Transfers";
@@ -157,6 +209,31 @@ export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
               deviceName: typeof st?.deviceName === "string" ? st.deviceName : "",
               snapshotId: typeof st?.snapshotId === "string" ? st.snapshotId : "",
               path: typeof st?.path === "string" ? st.path : ""
+            }
+          };
+        }
+        if (pane === "sftpBrowser") {
+          const st = t.state as Partial<SftpBrowserTabState> | undefined;
+          const khPolicy = (st?.knownHostsPolicy as any) ?? "strict";
+          const policy: "strict" | "accept-new" | "insecure" =
+            khPolicy === "accept-new" || khPolicy === "insecure" ? khPolicy : "strict";
+          return {
+            id: t.id,
+            pane,
+            title,
+            state: {
+              host: typeof st?.host === "string" ? st.host : "",
+              port: typeof st?.port === "number" && Number.isFinite(st.port) ? st.port : 22,
+              user: typeof st?.user === "string" ? st.user : "",
+              password: typeof st?.password === "string" ? st.password : "",
+              keyPath: typeof st?.keyPath === "string" ? st.keyPath : "",
+              useAgent: typeof st?.useAgent === "boolean" ? st.useAgent : false,
+              knownHostsPolicy: policy,
+              knownHostsPath: typeof st?.knownHostsPath === "string" ? st.knownHostsPath : "",
+              basePath: typeof st?.basePath === "string" ? st.basePath : "",
+              path: typeof st?.path === "string" ? st.path : "/",
+              filedockPath: typeof st?.filedockPath === "string" ? st.filedockPath : "",
+              pluginDirs: typeof st?.pluginDirs === "string" ? st.pluginDirs : ""
             }
           };
         }

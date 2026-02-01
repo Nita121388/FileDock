@@ -3,6 +3,7 @@ import type { Settings } from "../../model/settings";
 import type { TransferJob } from "../../model/transfers";
 import DeviceBrowserPane from "./device/DeviceBrowserPane";
 import NotesPane from "./notes/NotesPane";
+import SftpBrowserPane from "./sftp/SftpBrowserPane";
 import TransferQueuePane from "./transfer/TransferQueuePane";
 
 export function PaneView(props: {
@@ -51,6 +52,14 @@ export function PaneView(props: {
           onSetDeviceAuth={props.onSetDeviceAuth}
           onEnqueueCopy={props.onEnqueueCopy}
           onEnqueueCopyFolder={props.onEnqueueCopyFolder}
+        />
+      );
+    case "sftpBrowser":
+      return (
+        <SftpBrowserPane
+          tab={props.tab}
+          onTabChange={(next) => props.onUpdateTab(() => next)}
+          onEnqueueDownload={props.onEnqueueDownload}
         />
       );
     case "transferQueue":

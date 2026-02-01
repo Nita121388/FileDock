@@ -367,6 +367,92 @@ a {
   overflow: auto;
 }
 
+.pane-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pane-toolbar .toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.pane-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg2);
+  font-size: 12px;
+}
+
+.pane-toolbar input,
+.pane-toolbar select {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg0);
+  border-radius: 10px;
+  padding: 7px 9px;
+  outline: none;
+}
+
+.pane-toolbar input:focus,
+.pane-toolbar select:focus {
+  border-color: rgba(59, 228, 200, 0.55);
+}
+
+.pane-error {
+  border: 1px solid rgba(255, 77, 109, 0.45);
+  background: rgba(255, 77, 109, 0.10);
+  color: var(--fg0);
+  padding: 10px;
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+
+.pane-table {
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.pane-row {
+  display: grid;
+  grid-template-columns: 1fr 100px 140px 160px;
+  gap: 10px;
+  padding: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  align-items: center;
+}
+
+.pane-row.header {
+  border-top: none;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg1);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.linklike {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+}
+
+.linklike:hover {
+  text-decoration: underline;
+}
+
 .drop-overlay {
   position: absolute;
   inset: 44px 8px 8px 8px;
