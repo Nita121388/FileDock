@@ -27,6 +27,16 @@ cargo run -p filedock -- push-folder \
   --folder /home/you/Documents
 ```
 
+Optional: run a simple periodic backup loop (runs `push-folder`, sleeps, repeats):
+
+```bash
+cargo run -p filedock -- push-folder-loop \
+  --server http://127.0.0.1:8787 \
+  --device "laptop" \
+  --folder /home/you/Documents \
+  --interval-secs 900
+```
+
 List snapshots:
 
 ```bash

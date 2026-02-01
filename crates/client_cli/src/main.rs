@@ -6,7 +6,7 @@ use filedock_protocol::{
 };
 use futures_util::stream::{self, StreamExt};
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 use walkdir::WalkDir;
 
 const PRESENCE_BATCH: usize = 1000;
@@ -101,6 +101,34 @@ enum Command {
         exclude: Vec<String>,
     },
 
+    /// Periodically upload a folder as snapshots (simple scheduler).
+    PushFolderLoop {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
+
+        /// Device name to store in snapshot metadata (free-form).
+        #[arg(long)]
+        device: String,
+
+        /// Root folder to back up.
+        #[arg(long)]
+        folder: PathBuf,
+
+        /// Number of files to upload in parallel.
+        #[arg(long, default_value_t = DEFAULT_CONCURRENCY)]
+        concurrency: usize,
+
+        /// Exclude glob patterns (matched against relative POSIX paths).
+        /// Example: --exclude \"**/node_modules/**\" --exclude \"**/.git/**\"
+        #[arg(long)]
+        exclude: Vec<String>,
+
+        /// Seconds between runs. Use 0 to run once.
+        #[arg(long, default_value_t = 900)]
+        interval_secs: u64,
+    },
+
     /// List a snapshot directory (server-side) using the uploaded manifest.
     Tree {
         /// Server base URL, e.g. http://127.0.0.1:8787
@@ -162,6 +190,234 @@ enum Command {
     },
 }
 
+async fn push_folder_impl(
+    server: String,
+    device: String,
+    folder: PathBuf,
+    concurrency: usize,
+    exclude: Vec<String>,
+) -> Result<String, String> {
+    let client = build_client()?;
+
+    let root = folder
+        .canonicalize()
+        .map_err(|e| format!("canonicalize folder: {e}"))?;
+
+    let exclude_set = build_excludes(&exclude)?;
+
+    // Create snapshot id
+    let create_url = format!("{}/v1/snapshots", server.trim_end_matches('/'));
+    let device_id = std::env::var("FILEDOCK_DEVICE_ID")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    let create_req = SnapshotCreateRequest {
+        device_name: device,
+        device_id,
+        root_path: root.display().to_string(),
+    };
+    let create_resp: SnapshotCreateResponse = client
+        .post(create_url)
+        .json(&create_req)
+        .send()
+        .await
+        .map_err(|e| format!("create snapshot request: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("create snapshot response: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("create snapshot decode: {e}"))?;
+
+    let snapshot_id = create_resp.snapshot_id;
+    println!("snapshot: {snapshot_id}");
+
+    #[derive(Debug, Clone)]
+    struct FilePlan {
+        abs_path: PathBuf,
+        rel_path: String,
+        size: u64,
+        mtime_unix: i64,
+        chunks: Vec<ChunkRef>,
+    }
+
+    // Pass 1: build file plans and gather all chunk hashes.
+    let mut plans = Vec::<FilePlan>::new();
+    let mut all_hashes = Vec::<String>::new();
+    let mut total_bytes = 0u64;
+
+    for entry in WalkDir::new(&root).follow_links(false) {
+        let entry = entry.map_err(|e| format!("walkdir: {e}"))?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let abs_path = entry.path().to_path_buf();
+        let rel = abs_path
+            .strip_prefix(&root)
+            .map_err(|e| format!("strip prefix: {e}"))?;
+        let rel_str = rel
+            .iter()
+            .map(|s| s.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+
+        if exclude_set.is_match(&rel_str) {
+            continue;
+        }
+
+        let meta = tokio::fs::metadata(&abs_path)
+            .await
+            .map_err(|e| format!("stat file: {e}"))?;
+        let size = meta.len();
+        total_bytes = total_bytes.saturating_add(size);
+        let mtime_unix = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        // Read file once to compute chunk hashes.
+        let data = tokio::fs::read(&abs_path)
+            .await
+            .map_err(|e| format!("read file: {e}"))?;
+        let chunks = chunk_file(&data);
+        if chunks.is_empty() {
+            return Err(format!(
+                "chunking produced no chunks: {}",
+                abs_path.display()
+            ));
+        }
+
+        all_hashes.extend(chunks.iter().map(|c| c.hash.clone()));
+        plans.push(FilePlan {
+            abs_path,
+            rel_path: rel_str,
+            size,
+            mtime_unix,
+            chunks,
+        });
+    }
+
+    // Batch presence check for entire folder.
+    let pres_resp = chunk_presence(&client, &server, all_hashes).await?;
+    let missing: std::collections::HashSet<String> = pres_resp.missing.into_iter().collect();
+
+    let total_files = plans.len() as u64;
+    println!(
+        "files: {}  bytes: {}  missing_chunks: {}",
+        total_files,
+        total_bytes,
+        missing.len()
+    );
+
+    // Pass 2: upload missing chunks, concurrent by file.
+    let uploaded_files = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let uploaded_bytes = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let skipped_files = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let server_base = server.trim_end_matches('/').to_string();
+    let missing = std::sync::Arc::new(missing);
+
+    let results: Vec<Result<ManifestFileEntry, String>> = stream::iter(plans.into_iter())
+        .map(|plan| {
+            let client = client.clone();
+            let missing = missing.clone();
+            let uploaded_files = uploaded_files.clone();
+            let uploaded_bytes = uploaded_bytes.clone();
+            let skipped_files = skipped_files.clone();
+            let server_base = server_base.clone();
+            async move {
+                let needs_upload = plan.chunks.iter().any(|c| missing.contains(&c.hash));
+                if !needs_upload {
+                    let done_files =
+                        uploaded_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    let done_bytes = uploaded_bytes
+                        .fetch_add(plan.size, std::sync::atomic::Ordering::Relaxed)
+                        + plan.size;
+                    let done_skipped =
+                        skipped_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    if done_files % 25 == 0 || done_files == total_files {
+                        eprintln!(
+                            "uploaded files: {done_files}/{total_files}  bytes: {done_bytes}/{total_bytes}  skipped: {done_skipped}"
+                        );
+                    }
+
+                    return Ok(ManifestFileEntry {
+                        path: plan.rel_path,
+                        size: plan.size,
+                        mtime_unix: plan.mtime_unix,
+                        chunk_hash: None,
+                        chunks: Some(plan.chunks),
+                    });
+                }
+
+                let data = tokio::fs::read(&plan.abs_path)
+                    .await
+                    .map_err(|e| format!("read file: {e}"))?;
+
+                let mut offset = 0usize;
+                for c in &plan.chunks {
+                    let end = offset + c.size as usize;
+                    if missing.contains(&c.hash) {
+                        put_chunk(&client, &server_base, &c.hash, data[offset..end].to_vec()).await?;
+                    }
+                    offset = end;
+                }
+
+                let done_files =
+                    uploaded_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                let done_bytes =
+                    uploaded_bytes.fetch_add(plan.size, std::sync::atomic::Ordering::Relaxed)
+                        + plan.size;
+                if done_files % 25 == 0 || done_files == total_files {
+                    let done_skipped = skipped_files.load(std::sync::atomic::Ordering::Relaxed);
+                    eprintln!(
+                        "uploaded files: {done_files}/{total_files}  bytes: {done_bytes}/{total_bytes}  skipped: {done_skipped}"
+                    );
+                }
+
+                Ok(ManifestFileEntry {
+                    path: plan.rel_path,
+                    size: plan.size,
+                    mtime_unix: plan.mtime_unix,
+                    chunk_hash: None,
+                    chunks: Some(plan.chunks),
+                })
+            }
+        })
+        .buffer_unordered(concurrency.max(1))
+        .collect()
+        .await;
+
+    let mut files = Vec::new();
+    for r in results {
+        files.push(r?);
+    }
+
+    let manifest = SnapshotManifest {
+        snapshot_id: snapshot_id.clone(),
+        created_unix: now_unix(),
+        files,
+    };
+
+    let put_url = format!(
+        "{}/v1/snapshots/{}/manifest",
+        server.trim_end_matches('/'),
+        snapshot_id
+    );
+    client
+        .put(put_url)
+        .json(&manifest)
+        .send()
+        .await
+        .map_err(|e| format!("put manifest request: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("put manifest response: {e}"))?;
+
+    println!("manifest uploaded: {snapshot_id}");
+
+    Ok(snapshot_id)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), String> {
     let cli = Cli::parse();
@@ -213,219 +469,38 @@ async fn main() -> Result<(), String> {
             concurrency,
             exclude,
         } => {
-            let client = build_client()?;
+            let _ = push_folder_impl(server, device, folder, concurrency, exclude).await?;
+        }
 
-            let root = folder
-                .canonicalize()
-                .map_err(|e| format!("canonicalize folder: {e}"))?;
+        Command::PushFolderLoop {
+            server,
+            device,
+            folder,
+            concurrency,
+            exclude,
+            interval_secs,
+        } => {
+            loop {
+                let snap = push_folder_impl(
+                    server.clone(),
+                    device.clone(),
+                    folder.clone(),
+                    concurrency,
+                    exclude.clone(),
+                )
+                .await?;
+                eprintln!("completed snapshot: {snap}");
 
-            let exclude_set = build_excludes(&exclude)?;
-
-            // Create snapshot id
-            let create_url = format!("{}/v1/snapshots", server.trim_end_matches('/'));
-            let device_id = std::env::var("FILEDOCK_DEVICE_ID").ok().filter(|s| !s.trim().is_empty());
-            let create_req = SnapshotCreateRequest {
-                device_name: device,
-                device_id,
-                root_path: root.display().to_string(),
-            };
-            let create_resp: SnapshotCreateResponse = client
-                .post(create_url)
-                .json(&create_req)
-                .send()
-                .await
-                .map_err(|e| format!("create snapshot request: {e}"))?
-                .error_for_status()
-                .map_err(|e| format!("create snapshot response: {e}"))?
-                .json()
-                .await
-                .map_err(|e| format!("create snapshot decode: {e}"))?;
-
-            let snapshot_id = create_resp.snapshot_id;
-            println!("snapshot: {snapshot_id}");
-
-            #[derive(Debug, Clone)]
-            struct FilePlan {
-                abs_path: PathBuf,
-                rel_path: String,
-                size: u64,
-                mtime_unix: i64,
-                chunks: Vec<ChunkRef>,
-            }
-
-            // Pass 1: build file plans and gather all chunk hashes.
-            let mut plans = Vec::<FilePlan>::new();
-            let mut all_hashes = Vec::<String>::new();
-            let mut total_bytes = 0u64;
-
-            for entry in WalkDir::new(&root).follow_links(false) {
-                let entry = entry.map_err(|e| format!("walkdir: {e}"))?;
-                if !entry.file_type().is_file() {
-                    continue;
+                if interval_secs == 0 {
+                    break;
                 }
 
-                let abs_path = entry.path().to_path_buf();
-                let rel = abs_path
-                    .strip_prefix(&root)
-                    .map_err(|e| format!("strip prefix: {e}"))?;
-                let rel_str = rel
-                    .iter()
-                    .map(|s| s.to_string_lossy())
-                    .collect::<Vec<_>>()
-                    .join("/");
-
-                if exclude_set.is_match(&rel_str) {
-                    continue;
+                eprintln!("sleeping {interval_secs}s (Ctrl+C to stop)...");
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {},
+                    _ = tokio::signal::ctrl_c() => { eprintln!(\"stopped\"); break; }
                 }
-
-                let meta = tokio::fs::metadata(&abs_path)
-                    .await
-                    .map_err(|e| format!("stat file: {e}"))?;
-                let size = meta.len();
-                total_bytes = total_bytes.saturating_add(size);
-                let mtime_unix = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs() as i64)
-                    .unwrap_or(0);
-
-                // Read file once to compute chunk hashes.
-                let data = tokio::fs::read(&abs_path)
-                    .await
-                    .map_err(|e| format!("read file: {e}"))?;
-                let chunks = chunk_file(&data);
-                if chunks.is_empty() {
-                    return Err(format!("chunking produced no chunks: {}", abs_path.display()));
-                }
-
-                all_hashes.extend(chunks.iter().map(|c| c.hash.clone()));
-                plans.push(FilePlan {
-                    abs_path,
-                    rel_path: rel_str,
-                    size,
-                    mtime_unix,
-                    chunks,
-                });
             }
-
-            // Batch presence check for entire folder.
-            let pres_resp = chunk_presence(&client, &server, all_hashes).await?;
-            let missing: std::collections::HashSet<String> =
-                pres_resp.missing.into_iter().collect();
-
-            let total_files = plans.len() as u64;
-            println!(
-                "files: {}  bytes: {}  missing_chunks: {}",
-                total_files,
-                total_bytes,
-                missing.len()
-            );
-
-            // Pass 2: upload missing chunks, concurrent by file.
-            let uploaded_files = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-            let uploaded_bytes = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-            let skipped_files = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-            let server_base = server.trim_end_matches('/').to_string();
-            let missing = std::sync::Arc::new(missing);
-
-            let results: Vec<Result<ManifestFileEntry, String>> = stream::iter(plans.into_iter())
-                .map(|plan| {
-                    let client = client.clone();
-                    let missing = missing.clone();
-                    let uploaded_files = uploaded_files.clone();
-                    let uploaded_bytes = uploaded_bytes.clone();
-                    let skipped_files = skipped_files.clone();
-                    let server_base = server_base.clone();
-                    async move {
-                        let needs_upload = plan.chunks.iter().any(|c| missing.contains(&c.hash));
-                        if !needs_upload {
-                            let done_files =
-                                uploaded_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                                    + 1;
-                            let done_bytes = uploaded_bytes
-                                .fetch_add(plan.size, std::sync::atomic::Ordering::Relaxed)
-                                + plan.size;
-                            let done_skipped =
-                                skipped_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                                    + 1;
-                            if done_files % 25 == 0 || done_files == total_files {
-                                eprintln!(
-                                    "uploaded files: {done_files}/{total_files}  bytes: {done_bytes}/{total_bytes}  skipped: {done_skipped}"
-                                );
-                            }
-
-                            return Ok(ManifestFileEntry {
-                                path: plan.rel_path,
-                                size: plan.size,
-                                mtime_unix: plan.mtime_unix,
-                                chunk_hash: None,
-                                chunks: Some(plan.chunks),
-                            });
-                        }
-
-                        let data = tokio::fs::read(&plan.abs_path)
-                            .await
-                            .map_err(|e| format!("read file: {e}"))?;
-
-                        let mut offset = 0usize;
-                        for c in &plan.chunks {
-                            let end = offset + c.size as usize;
-                            if missing.contains(&c.hash) {
-                                put_chunk(&client, &server_base, &c.hash, data[offset..end].to_vec())
-                                    .await?;
-                            }
-                            offset = end;
-                        }
-
-                        let done_files = uploaded_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                        let done_bytes = uploaded_bytes.fetch_add(plan.size, std::sync::atomic::Ordering::Relaxed) + plan.size;
-                        if done_files % 25 == 0 || done_files == total_files {
-                            let done_skipped = skipped_files.load(std::sync::atomic::Ordering::Relaxed);
-                            eprintln!(
-                                "uploaded files: {done_files}/{total_files}  bytes: {done_bytes}/{total_bytes}  skipped: {done_skipped}"
-                            );
-                        }
-
-                        Ok(ManifestFileEntry {
-                            path: plan.rel_path,
-                            size: plan.size,
-                            mtime_unix: plan.mtime_unix,
-                            chunk_hash: None,
-                            chunks: Some(plan.chunks),
-                        })
-                    }
-                })
-                .buffer_unordered(concurrency.max(1))
-                .collect()
-                .await;
-
-            let mut files = Vec::new();
-            for r in results {
-                files.push(r?);
-            }
-
-            let manifest = SnapshotManifest {
-                snapshot_id: snapshot_id.clone(),
-                created_unix: now_unix(),
-                files,
-            };
-
-            let put_url = format!(
-                "{}/v1/snapshots/{}/manifest",
-                server.trim_end_matches('/'),
-                snapshot_id
-            );
-            client
-                .put(put_url)
-                .json(&manifest)
-                .send()
-                .await
-                .map_err(|e| format!("put manifest request: {e}"))?
-                .error_for_status()
-                .map_err(|e| format!("put manifest response: {e}"))?;
-
-            println!("manifest uploaded: {snapshot_id}");
         }
 
         Command::Tree {
