@@ -7,6 +7,7 @@ Notes:
 - If a script is not executable, run `chmod +x scripts/*.sh`.
 
 Common:
+- `scripts/bootstrap.sh` - sanity-check local prerequisites (Rust/Node/tooling)
 - `scripts/dev.sh` - run server + desktop UI (dev)
 - `scripts/build.sh` - build server + CLI + desktop UI
 - `scripts/release.sh` - build and collect local release artifacts into `dist/`
