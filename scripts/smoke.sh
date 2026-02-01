@@ -17,6 +17,7 @@ need mktemp
 PORT="${FILEDOCK_SMOKE_PORT:-8787}"
 ADDR="127.0.0.1:${PORT}"
 BASE="http://$ADDR"
+TOKEN="${FILEDOCK_TOKEN:-}"
 
 TMP="$(mktemp -d)"
 DATA="$TMP/data"
@@ -29,19 +30,19 @@ echo "[smoke] server: $BASE"
 
 run_server() {
   if [ -x "$ROOT/target/release/filedock-server" ]; then
-    "$ROOT/target/release/filedock-server" --listen "$ADDR" --storage-dir "$DATA"
+    FILEDOCK_TOKEN="$TOKEN" "$ROOT/target/release/filedock-server" --listen "$ADDR" --storage-dir "$DATA"
   else
     need cargo
-    (cd "$ROOT" && FILEDOCK_LISTEN="$ADDR" FILEDOCK_STORAGE_DIR="$DATA" cargo run -p filedock-server)
+    (cd "$ROOT" && FILEDOCK_LISTEN="$ADDR" FILEDOCK_STORAGE_DIR="$DATA" FILEDOCK_TOKEN="$TOKEN" cargo run -p filedock-server)
   fi
 }
 
 run_cli() {
   if [ -x "$ROOT/target/release/filedock" ]; then
-    "$ROOT/target/release/filedock" "$@"
+    FILEDOCK_TOKEN="$TOKEN" "$ROOT/target/release/filedock" "$@"
   else
     need cargo
-    (cd "$ROOT" && cargo run -p filedock -- "$@")
+    (cd "$ROOT" && FILEDOCK_TOKEN="$TOKEN" cargo run -p filedock -- "$@")
   fi
 }
 
@@ -97,4 +98,3 @@ echo "[smoke] comparing hashes..."
 
 diff -u "$TMP/src.sha256" "$TMP/out.sha256" >/dev/null
 echo "[smoke] OK"
-

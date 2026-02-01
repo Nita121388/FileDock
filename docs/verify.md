@@ -13,6 +13,13 @@ From repo root:
 ./scripts/smoke.sh
 ```
 
+To test auth mode, set a token:
+
+```bash
+export FILEDOCK_TOKEN="change-me"
+./scripts/smoke.sh
+```
+
 This script:
 - starts a local server on an ephemeral port
 - creates a small sample folder
@@ -21,4 +28,3 @@ This script:
 - compares file hashes
 
 If it exits with code 0, the basic end-to-end flow works.
-
