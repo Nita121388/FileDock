@@ -65,6 +65,27 @@ List snapshots:
 cargo run -p filedock -- snapshots --server http://127.0.0.1:8787
 ```
 
+Check whether your local folder is up-to-date with the newest snapshot:
+
+```bash
+cargo run -p filedock -- status \
+  --server http://127.0.0.1:8787 \
+  --latest \
+  --folder /home/you/Documents
+```
+
+Check a single file (relative path inside `--folder`):
+
+```bash
+cargo run -p filedock -- status \
+  --server http://127.0.0.1:8787 \
+  --latest \
+  --folder /home/you/Documents \
+  --path "notes/todo.md"
+```
+
+For an accurate (slower) content comparison, add `--verify`.
+
 If you enabled `FILEDOCK_TOKEN` on the server:
 
 ```bash

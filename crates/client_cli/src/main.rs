@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use filedock_protocol::{
-    is_valid_chunk_hash, ChunkPresenceRequest, ChunkPresenceResponse, HealthResponse,
+    is_valid_chunk_hash, is_valid_rel_path, ChunkPresenceRequest, ChunkPresenceResponse, HealthResponse,
     ChunkRef, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, ManifestFileEntry,
     TreeResponse, SnapshotMeta, SnapshotDeleteResponse, SnapshotPruneRequest, SnapshotPruneResponse,
     ChunkGcRequest, ChunkGcResponse,
@@ -9,6 +9,7 @@ use filedock_protocol::{
 use futures_util::stream::{self, StreamExt};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::Deserialize;
+use std::collections::{HashMap, HashSet};
 use std::{path::PathBuf, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use walkdir::WalkDir;
@@ -278,6 +279,39 @@ enum Command {
         /// Config file path.
         #[arg(long)]
         config: PathBuf,
+    },
+
+    /// Check whether local files match a server snapshot (a lightweight "sync status").
+    ///
+    /// This does NOT modify anything; it compares local files to the snapshot manifest.
+    Status {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
+
+        /// Snapshot id to compare against.
+        #[arg(long)]
+        snapshot: Option<String>,
+
+        /// Use the newest snapshot on the server (optionally filtered by device).
+        #[arg(long)]
+        latest: bool,
+
+        /// Optional filter used with --latest (matches snapshot meta device_name).
+        #[arg(long)]
+        device_name: Option<String>,
+
+        /// Local folder root.
+        #[arg(long)]
+        folder: PathBuf,
+
+        /// Optional relative path (within --folder) to check a single file.
+        #[arg(long)]
+        path: Option<String>,
+
+        /// If set, compute and compare chunk hashes (slower but accurate).
+        #[arg(long)]
+        verify: bool,
     },
 }
 
@@ -1111,6 +1145,290 @@ async fn main() -> Result<(), String> {
                     }
                 }
             }
+        }
+
+        Command::Status {
+            server,
+            snapshot,
+            latest,
+            device_name,
+            folder,
+            path,
+            verify,
+        } => {
+            #[derive(Debug, serde::Serialize)]
+            struct StatusItem {
+                path: String,
+                status: String,
+                reason: Option<String>,
+                local_size: Option<u64>,
+                server_size: Option<u64>,
+                local_mtime_unix: Option<i64>,
+                server_mtime_unix: Option<i64>,
+            }
+
+            let client = build_client()?;
+            let server_base = server.trim_end_matches('/').to_string();
+
+            let root = folder
+                .canonicalize()
+                .map_err(|e| format!("canonicalize folder: {e}"))?;
+
+            // Respect `.filedockignore` by default so status matches backup behavior.
+            let exclude_patterns = load_ignore_patterns(&root, None)?;
+            let exclude_set = build_excludes(&exclude_patterns)?;
+
+            let snapshot_id = if latest {
+                let url = format!("{}/v1/snapshots", server_base);
+                let metas: Vec<SnapshotMeta> = client
+                    .get(url)
+                    .send()
+                    .await
+                    .map_err(|e| format!("snapshots request: {e}"))?
+                    .error_for_status()
+                    .map_err(|e| format!("snapshots response: {e}"))?
+                    .json()
+                    .await
+                    .map_err(|e| format!("snapshots decode: {e}"))?;
+
+                let mut best: Option<SnapshotMeta> = None;
+                for m in metas {
+                    if let Some(dn) = device_name.as_ref() {
+                        if m.device_name != *dn {
+                            continue;
+                        }
+                    }
+                    match best.as_ref() {
+                        None => best = Some(m),
+                        Some(b) => {
+                            if m.created_unix > b.created_unix {
+                                best = Some(m);
+                            }
+                        }
+                    }
+                }
+
+                best.map(|m| m.snapshot_id).ok_or_else(|| {
+                    if device_name.is_some() {
+                        "no snapshots found for device_name".to_string()
+                    } else {
+                        "no snapshots found".to_string()
+                    }
+                })?
+            } else {
+                snapshot.ok_or_else(|| "snapshot required (or use --latest)".to_string())?
+            };
+
+            let url = format!("{}/v1/snapshots/{}/manifest", server_base, snapshot_id);
+            let manifest: SnapshotManifest = client
+                .get(url)
+                .send()
+                .await
+                .map_err(|e| format!("get manifest request: {e}"))?
+                .error_for_status()
+                .map_err(|e| format!("get manifest response: {e}"))?
+                .json()
+                .await
+                .map_err(|e| format!("get manifest decode: {e}"))?;
+
+            let mut by_path: HashMap<String, ManifestFileEntry> = HashMap::new();
+            for f in manifest.files {
+                by_path.insert(f.path.clone(), f);
+            }
+
+            let mut items: Vec<StatusItem> = Vec::new();
+
+            async fn check_one(
+                rel_path: String,
+                abs_path: PathBuf,
+                by_path: &HashMap<String, ManifestFileEntry>,
+                verify: bool,
+            ) -> Result<StatusItem, String> {
+                // Check local metadata.
+                let meta = tokio::fs::metadata(&abs_path).await;
+                let local_meta = match meta {
+                    Ok(m) => Some(m),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(e) => return Err(format!("stat {}: {e}", abs_path.display())),
+                };
+
+                let server_ent = by_path.get(&rel_path);
+
+                if local_meta.is_none() {
+                    if server_ent.is_some() {
+                        let s = server_ent.unwrap();
+                        return Ok(StatusItem {
+                            path: rel_path,
+                            status: "missing_local".to_string(),
+                            reason: Some("missing locally".to_string()),
+                            local_size: None,
+                            server_size: Some(s.size),
+                            local_mtime_unix: None,
+                            server_mtime_unix: Some(s.mtime_unix),
+                        });
+                    }
+                    return Ok(StatusItem {
+                        path: rel_path,
+                        status: "missing_local".to_string(),
+                        reason: Some("missing locally".to_string()),
+                        local_size: None,
+                        server_size: None,
+                        local_mtime_unix: None,
+                        server_mtime_unix: None,
+                    });
+                }
+
+                let lm = local_meta.unwrap();
+                let local_size = lm.len();
+                let local_mtime_unix = lm
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+
+                let Some(s) = server_ent else {
+                    return Ok(StatusItem {
+                        path: rel_path,
+                        status: "missing_on_server".to_string(),
+                        reason: Some("not in snapshot manifest".to_string()),
+                        local_size: Some(local_size),
+                        server_size: None,
+                        local_mtime_unix: Some(local_mtime_unix),
+                        server_mtime_unix: None,
+                    });
+                };
+
+                if local_size != s.size {
+                    return Ok(StatusItem {
+                        path: rel_path,
+                        status: "changed".to_string(),
+                        reason: Some("size differs".to_string()),
+                        local_size: Some(local_size),
+                        server_size: Some(s.size),
+                        local_mtime_unix: Some(local_mtime_unix),
+                        server_mtime_unix: Some(s.mtime_unix),
+                    });
+                }
+
+                if !verify {
+                    let ok = local_mtime_unix == s.mtime_unix;
+                    return Ok(StatusItem {
+                        path: rel_path,
+                        status: if ok { "up_to_date" } else { "changed" }.to_string(),
+                        reason: if ok { None } else { Some("mtime differs (use --verify to compare content)".to_string()) },
+                        local_size: Some(local_size),
+                        server_size: Some(s.size),
+                        local_mtime_unix: Some(local_mtime_unix),
+                        server_mtime_unix: Some(s.mtime_unix),
+                    });
+                }
+
+                // Verify mode: compare chunk hashes.
+                let expected: Vec<ChunkRef> = if let Some(chunks) = &s.chunks {
+                    chunks.clone()
+                } else if let Some(h) = &s.chunk_hash {
+                    vec![ChunkRef {
+                        hash: h.clone(),
+                        size: s.size,
+                    }]
+                } else {
+                    return Ok(StatusItem {
+                        path: rel_path,
+                        status: "changed".to_string(),
+                        reason: Some("server manifest missing chunk info".to_string()),
+                        local_size: Some(local_size),
+                        server_size: Some(s.size),
+                        local_mtime_unix: Some(local_mtime_unix),
+                        server_mtime_unix: Some(s.mtime_unix),
+                    });
+                };
+
+                let got = compute_chunks_for_file(&abs_path).await?;
+                let ok = got.len() == expected.len() && got.iter().zip(expected.iter()).all(|(a,b)| a.hash == b.hash && a.size == b.size);
+
+                Ok(StatusItem {
+                    path: rel_path,
+                    status: if ok { "up_to_date" } else { "changed" }.to_string(),
+                    reason: if ok { None } else { Some("content differs".to_string()) },
+                    local_size: Some(local_size),
+                    server_size: Some(s.size),
+                    local_mtime_unix: Some(local_mtime_unix),
+                    server_mtime_unix: Some(s.mtime_unix),
+                })
+            }
+
+            if let Some(p) = path {
+                if !is_valid_rel_path(&p) {
+                    return Err("invalid --path (expected relative POSIX path like a/b.txt)".to_string());
+                }
+                if exclude_set.is_match(&p) {
+                    items.push(StatusItem {
+                        path: p,
+                        status: "ignored".to_string(),
+                        reason: Some("matched .filedockignore".to_string()),
+                        local_size: None,
+                        server_size: None,
+                        local_mtime_unix: None,
+                        server_mtime_unix: None,
+                    });
+                } else {
+                    let abs = root.join(PathBuf::from(&p));
+                    items.push(check_one(p, abs, &by_path, verify).await?);
+                }
+            } else {
+                // Folder mode: check every local file.
+                for entry in WalkDir::new(&root).follow_links(false) {
+                    let entry = entry.map_err(|e| format!("walkdir: {e}"))?;
+                    if !entry.file_type().is_file() {
+                        continue;
+                    }
+
+                    let abs_path = entry.path().to_path_buf();
+                    let rel = abs_path
+                        .strip_prefix(&root)
+                        .map_err(|e| format!("strip prefix: {e}"))?;
+                    let rel_str = rel
+                        .iter()
+                        .map(|s| s.to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join("/");
+
+                    if exclude_set.is_match(&rel_str) {
+                        continue;
+                    }
+
+                    items.push(check_one(rel_str, abs_path, &by_path, verify).await?);
+                }
+
+                // Also report files that exist in the snapshot but are missing locally.
+                for rel_path in by_path.keys() {
+                    if exclude_set.is_match(rel_path) {
+                        continue;
+                    }
+                    let abs = root.join(PathBuf::from(rel_path));
+                    if tokio::fs::metadata(&abs).await.is_err() {
+                        let s = by_path.get(rel_path).unwrap();
+                        items.push(StatusItem {
+                            path: rel_path.clone(),
+                            status: "missing_local".to_string(),
+                            reason: Some("missing locally".to_string()),
+                            local_size: None,
+                            server_size: Some(s.size),
+                            local_mtime_unix: None,
+                            server_mtime_unix: Some(s.mtime_unix),
+                        });
+                    }
+                }
+            }
+
+            // Keep output stable.
+            items.sort_by(|a, b| a.path.cmp(&b.path));
+
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&items).map_err(|e| e.to_string())?
+            );
         }
     }
 
