@@ -5,6 +5,7 @@ use filedock_protocol::{
     TreeResponse, SnapshotMeta,
 };
 use futures_util::stream::{self, StreamExt};
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::path::PathBuf;
 use walkdir::WalkDir;
 
@@ -51,6 +52,11 @@ enum Command {
         /// Number of files to upload in parallel.
         #[arg(long, default_value_t = DEFAULT_CONCURRENCY)]
         concurrency: usize,
+
+        /// Exclude glob patterns (matched against relative POSIX paths).
+        /// Example: --exclude \"**/node_modules/**\" --exclude \"**/.git/**\"
+        #[arg(long)]
+        exclude: Vec<String>,
     },
 
     /// List a snapshot directory (server-side) using the uploaded manifest.
@@ -163,12 +169,15 @@ async fn main() -> Result<(), String> {
             device,
             folder,
             concurrency,
+            exclude,
         } => {
             let client = reqwest::Client::new();
 
             let root = folder
                 .canonicalize()
                 .map_err(|e| format!("canonicalize folder: {e}"))?;
+
+            let exclude_set = build_excludes(&exclude)?;
 
             // Create snapshot id
             let create_url = format!("{}/v1/snapshots", server.trim_end_matches('/'));
@@ -220,6 +229,10 @@ async fn main() -> Result<(), String> {
                     .map(|s| s.to_string_lossy())
                     .collect::<Vec<_>>()
                     .join("/");
+
+                if exclude_set.is_match(&rel_str) {
+                    continue;
+                }
 
                 let meta = tokio::fs::metadata(&abs_path)
                     .await
@@ -536,6 +549,16 @@ fn now_unix() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+fn build_excludes(patterns: &[String]) -> Result<GlobSet, String> {
+    let mut b = GlobSetBuilder::new();
+    for p in patterns {
+        let g = Glob::new(p).map_err(|e| format!("invalid exclude glob '{p}': {e}"))?;
+        b.add(g);
+    }
+    b.build()
+        .map_err(|e| format!("failed to build exclude set: {e}"))
 }
 
 async fn chunk_presence(

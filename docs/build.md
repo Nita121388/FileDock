@@ -34,7 +34,7 @@ cargo run -p filedock -- push-file --server http://127.0.0.1:8787 --file ./path/
 ### Push a Folder (snapshot + manifest MVP)
 
 ```bash
-cargo run -p filedock -- push-folder --server http://127.0.0.1:8787 --device my-laptop --folder ./some/folder --concurrency 4
+cargo run -p filedock -- push-folder --server http://127.0.0.1:8787 --device my-laptop --folder ./some/folder --concurrency 4 --exclude "**/.git/**" --exclude "**/node_modules/**"
 ```
 
 ### Browse a Snapshot (tree)
