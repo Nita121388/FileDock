@@ -103,6 +103,9 @@ export default function App() {
   };
 
   const removeTransfer = (id: string) => setTransfers((xs) => xs.filter((x) => x.id !== id));
+  const setTransferStatus = (id: string, status: import("./model/transfers").TransferStatus) => {
+    setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, status } : x)));
+  };
 
   const connToSettings = (c: Conn): Settings => ({
     serverBaseUrl: c.serverBaseUrl,
@@ -115,6 +118,7 @@ export default function App() {
     const job = transfers.find((x) => x.id === id);
     if (!job) return;
     if (job.kind !== "download") return;
+    setTransferStatus(id, "running");
     try {
       const eff = job.conn ? connToSettings(job.conn) : settings;
       const blob = await apiGetBytes(
@@ -139,6 +143,7 @@ export default function App() {
     const job = transfers.find((x) => x.id === id);
     if (!job) return;
     if (job.kind !== "copy_file") return;
+    setTransferStatus(id, "running");
 
     const srcSettings = connToSettings(job.src);
     const dstSettings = connToSettings(job.dst);

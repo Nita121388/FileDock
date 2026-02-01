@@ -150,10 +150,14 @@ export async function chunksPresence(settings: Settings, req: ChunkPresenceReque
 export async function putChunk(settings: Settings, hash: string, data: Uint8Array): Promise<void> {
   const base = settings.serverBaseUrl.replace(/\/+$/, "");
   const url = `${base}/v1/chunks/${encodeURIComponent(hash)}`;
+  const body: ArrayBuffer =
+    data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
+      ? (data.buffer as ArrayBuffer)
+      : (data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer);
   const resp = await fetch(url, {
     method: "PUT",
     headers: headers(settings),
-    body: data
+    body
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");

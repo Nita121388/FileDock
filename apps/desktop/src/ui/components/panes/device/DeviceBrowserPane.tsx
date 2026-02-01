@@ -16,7 +16,7 @@ import {
   type SnapshotMeta,
   type TreeEntry
 } from "../../../api/client";
-import { chunkBytes } from "../../../util/chunking";
+import { chunkFile } from "../../../util/chunking";
 
 type DeviceTab = Extract<PaneTab, { pane: "deviceBrowser" }>;
 
@@ -201,9 +201,13 @@ export default function DeviceBrowserPane(props: {
       if (!deviceName) return;
       setLoading(true);
       try {
-        const buf = new Uint8Array(await file.arrayBuffer());
-        const refs = chunkBytes(buf);
+        setStatus(`hashing ${file.name}...`);
+        const refs = await chunkFile(file, undefined, (done, total) => {
+          const pct = total > 0 ? Math.floor((done / total) * 100) : 0;
+          setStatus(`hashing ${file.name}... ${pct}%`);
+        });
         const hashes = refs.map((c) => c.hash);
+        const manifestChunks = refs.map((c) => ({ hash: c.hash, size: c.size }));
 
         // Presence (batched) to reduce requests.
         const missing = new Set<string>();
@@ -214,14 +218,16 @@ export default function DeviceBrowserPane(props: {
           for (const h of resp.missing) missing.add(h);
         }
 
-        // Upload missing chunks.
-        let offset = 0;
+        // Upload missing chunks (read slices on demand; avoids buffering whole file).
+        let doneBytes = 0;
         for (const c of refs) {
-          const end = offset + c.size;
-          if (missing.has(c.hash)) {
-            await putChunk(effSettings, c.hash, buf.subarray(offset, end));
-          }
-          offset = end;
+          doneBytes += c.size;
+          if (!missing.has(c.hash)) continue;
+          const end = c.offset + c.size;
+          const chunkBuf = new Uint8Array(await file.slice(c.offset, end).arrayBuffer());
+          await putChunk(effSettings, c.hash, chunkBuf);
+          const pct = file.size > 0 ? Math.floor((doneBytes / file.size) * 100) : 0;
+          setStatus(`uploading ${file.name}... ${pct}%`);
         }
 
         // Create a one-file snapshot manifest on destination.
@@ -238,10 +244,10 @@ export default function DeviceBrowserPane(props: {
           files: [
             {
               path: dstPath,
-              size: buf.length,
+              size: file.size,
               mtime_unix: now,
               chunk_hash: null,
-              chunks: refs
+              chunks: manifestChunks
             }
           ]
         });

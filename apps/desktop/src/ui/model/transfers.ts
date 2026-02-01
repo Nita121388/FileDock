@@ -1,4 +1,4 @@
-export type TransferStatus = "queued" | "done" | "failed";
+export type TransferStatus = "queued" | "running" | "done" | "failed";
 
 export type Conn = {
   serverBaseUrl: string;
@@ -49,8 +49,15 @@ export function loadTransfers(): TransferJob[] {
     return parsed
       .filter((j) => j && typeof j.id === "string" && typeof j.kind === "string")
       .map((j) => {
-        if (j.kind === "download") return j as DownloadJob;
-        if (j.kind === "copy_file") return j as CopyJob;
+        // Normalize unknown status values (older versions).
+        const status =
+          j.status === "queued" || j.status === "running" || j.status === "done" || j.status === "failed"
+            ? j.status
+            : "queued";
+        const withStatus = { ...j, status };
+
+        if (j.kind === "download") return withStatus as DownloadJob;
+        if (j.kind === "copy_file") return withStatus as CopyJob;
         return null;
       })
       .filter((j): j is TransferJob => j !== null);

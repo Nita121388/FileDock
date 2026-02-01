@@ -1,4 +1,5 @@
 import type { TransferJob } from "../../../model/transfers";
+import { useState } from "react";
 
 export default function TransferQueuePane(props: {
   transfers: TransferJob[];
@@ -7,6 +8,35 @@ export default function TransferQueuePane(props: {
   onRun: (id: string) => Promise<void>;
 }) {
   const { transfers, onEnqueueDownload, onRemove, onRun } = props;
+  const [busy, setBusy] = useState(false);
+
+  const runAll = async (mode: "queued" | "failed" | "all") => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const ids = transfers
+        .filter((j) => {
+          if (j.status === "running") return false;
+          if (mode === "queued") return j.status === "queued";
+          if (mode === "failed") return j.status === "failed";
+          return j.status === "queued" || j.status === "failed";
+        })
+        .map((j) => j.id);
+
+      // MVP: sequential execution keeps UI predictable and avoids overloading the server.
+      for (const id of ids) {
+        await onRun(id);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearDone = () => {
+    for (const j of transfers) {
+      if (j.status === "done") onRemove(j.id);
+    }
+  };
 
   return (
     <div
@@ -40,6 +70,42 @@ export default function TransferQueuePane(props: {
         <div className="db-empty">No transfers yet. Queue a file from Device Browser (+Q).</div>
       ) : null}
 
+      {transfers.length > 0 ? (
+        <div className="queue-row" style={{ justifyContent: "space-between" }}>
+          <div className="queue-main">
+            <div className="queue-title">Queue</div>
+            <div className="queue-sub">
+              <span className="pill pill-queued">
+                {transfers.filter((x) => x.status === "queued").length} queued
+              </span>
+              <span className="pill pill-running">
+                {transfers.filter((x) => x.status === "running").length} running
+              </span>
+              <span className="pill pill-failed">
+                {transfers.filter((x) => x.status === "failed").length} failed
+              </span>
+              <span className="pill pill-done">
+                {transfers.filter((x) => x.status === "done").length} done
+              </span>
+            </div>
+          </div>
+          <div className="queue-actions">
+            <button className="db-mini" disabled={busy} onClick={() => runAll("queued")} title="Run queued">
+              Run queued
+            </button>
+            <button className="db-mini" disabled={busy} onClick={() => runAll("failed")} title="Retry failed">
+              Retry failed
+            </button>
+            <button className="db-mini" disabled={busy} onClick={() => runAll("all")} title="Run all pending">
+              Run all
+            </button>
+            <button className="db-mini" disabled={busy} onClick={clearDone} title="Clear done">
+              Clear done
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {transfers.map((j) => (
         <div key={j.id} className="queue-row">
           <div className="queue-main">
@@ -64,7 +130,7 @@ export default function TransferQueuePane(props: {
           <div className="queue-actions">
             <button
               className="db-mini"
-              disabled={j.status === "done"}
+              disabled={busy || j.status === "done" || j.status === "running"}
               onClick={() => onRun(j.id)}
               title="Run transfer"
             >

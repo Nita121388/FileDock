@@ -21,6 +21,9 @@ export default function SplitNodeView(props: {
     const el = ref.current;
     if (!el) return;
 
+    const gutter = el.querySelector<HTMLDivElement>(`[data-split-gutter="${node.id}"]`);
+    if (!gutter) return;
+
     let dragging = false;
     let start = 0;
     let startRatio = node.ratio;
@@ -47,9 +50,6 @@ export default function SplitNodeView(props: {
       }
       pointerId = null;
     };
-
-    const gutter = el.querySelector<HTMLDivElement>(`[data-split-gutter="${node.id}"]`);
-    if (!gutter) return;
 
     const onDown = (ev: PointerEvent) => {
       dragging = true;
