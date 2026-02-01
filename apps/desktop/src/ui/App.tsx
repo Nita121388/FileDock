@@ -51,6 +51,19 @@ export default function App() {
     }
   };
 
+  const getCopyFolderFileConcurrency = (): number => {
+    try {
+      const raw = localStorage.getItem("filedock.desktop.queue.v1");
+      if (!raw) return 4;
+      const parsed = JSON.parse(raw) as any;
+      const n = Number(parsed?.copyFolderFileConcurrency);
+      if (!Number.isFinite(n) || n < 1) return 4;
+      return Math.min(8, Math.floor(n));
+    } catch {
+      return 4;
+    }
+  };
+
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   const makeLimiter = (bytesPerSec: number) => {
@@ -971,7 +984,7 @@ export default function App() {
         });
       };
 
-      const maxFileConcurrency = Math.min(4, Math.max(1, total - contigNext, 2));
+      const maxFileConcurrency = Math.min(getCopyFolderFileConcurrency(), Math.max(1, total - contigNext));
       let firstErr: any = null;
       let nextToStart = contigNext;
       await Promise.all(

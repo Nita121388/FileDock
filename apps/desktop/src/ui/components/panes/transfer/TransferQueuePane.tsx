@@ -3,25 +3,36 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const QUEUE_KEY = "filedock.desktop.queue.v1";
 
-type QueueSettings = { concurrency: number; paused: boolean; autoRun: boolean; maxMBps: number };
+type QueueSettings = {
+  concurrency: number;
+  paused: boolean;
+  autoRun: boolean;
+  maxMBps: number;
+  copyFolderFileConcurrency: number;
+};
 
 function loadQueueSettings(): QueueSettings {
   try {
     const raw = localStorage.getItem(QUEUE_KEY);
-    if (!raw) return { concurrency: 2, paused: false, autoRun: false, maxMBps: 0 };
+    if (!raw) return { concurrency: 2, paused: false, autoRun: false, maxMBps: 0, copyFolderFileConcurrency: 4 };
     const parsed = JSON.parse(raw) as any;
     const concurrency = Number(parsed?.concurrency);
     const paused = Boolean(parsed?.paused);
     const autoRun = Boolean(parsed?.autoRun);
     const maxMBps = Number(parsed?.maxMBps);
+    const copyFolderFileConcurrency = Number(parsed?.copyFolderFileConcurrency);
     return {
       concurrency: Number.isFinite(concurrency) && concurrency >= 1 ? Math.min(8, Math.floor(concurrency)) : 2,
       paused,
       autoRun,
-      maxMBps: Number.isFinite(maxMBps) && maxMBps >= 0 ? Math.min(2048, maxMBps) : 0
+      maxMBps: Number.isFinite(maxMBps) && maxMBps >= 0 ? Math.min(2048, maxMBps) : 0,
+      copyFolderFileConcurrency:
+        Number.isFinite(copyFolderFileConcurrency) && copyFolderFileConcurrency >= 1
+          ? Math.min(8, Math.floor(copyFolderFileConcurrency))
+          : 4
     };
   } catch {
-    return { concurrency: 2, paused: false, autoRun: false, maxMBps: 0 };
+    return { concurrency: 2, paused: false, autoRun: false, maxMBps: 0, copyFolderFileConcurrency: 4 };
   }
 }
 
@@ -183,6 +194,24 @@ export default function TransferQueuePane(props: {
                 disabled={busy}
                 onChange={(e) => setQueue((q) => ({ ...q, maxMBps: Math.max(0, Number(e.target.value) || 0) }))}
                 title="Bandwidth limit (0 = unlimited). Applied by the desktop client."
+              />
+              <span className="queue-path">copy-folder</span>
+              <input
+                className="conn-input"
+                style={{ width: 70 }}
+                type="number"
+                min={1}
+                max={8}
+                step={1}
+                value={queue.copyFolderFileConcurrency}
+                disabled={busy}
+                onChange={(e) =>
+                  setQueue((q) => ({
+                    ...q,
+                    copyFolderFileConcurrency: Math.max(1, Math.min(8, Number(e.target.value) || 1))
+                  }))
+                }
+                title="Max concurrent files within a copy-folder job"
               />
             </div>
           </div>
