@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 import type { PaneTab } from "../../../model/layout";
 import type { Settings } from "../../../model/settings";
 import type { Conn } from "../../../model/transfers";
@@ -69,6 +70,8 @@ export default function DeviceBrowserPane(props: {
   const [entries, setEntries] = useState<TreeEntry[]>([]);
   const [loadedKey, setLoadedKey] = useState<string>("");
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [lastSelIndex, setLastSelIndex] = useState<number | null>(null);
 
   const deviceName = tab.state.deviceName;
   const snapshotId = tab.state.snapshotId;
@@ -196,14 +199,58 @@ export default function DeviceBrowserPane(props: {
     if (!snapshotId) {
       setEntries([]);
       setLoadedKey("");
+      setSelected([]);
+      setLastSelIndex(null);
       return;
     }
     const wantKey = `${snapshotId}::${path}`;
     if (wantKey !== loadedKey) {
       setEntries([]);
+      setSelected([]);
+      setLastSelIndex(null);
       refreshTree(snapshotId, path);
     }
   }, [loadedKey, path, refreshTree, snapshotId]);
+
+  const items = useMemo(() => {
+    return entries.map((e, idx) => {
+      const itemPath = path ? `${path}/${e.name}` : e.name;
+      return { e, idx, itemPath };
+    });
+  }, [entries, path]);
+
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
+  const toggleSelect = (idx: number, itemPath: string, ev: MouseEvent) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+
+    setSelected((prev) => {
+      const prevSet = new Set(prev);
+      const shift = ev.shiftKey;
+      const multi = ev.ctrlKey || ev.metaKey;
+
+      if (shift && lastSelIndex !== null) {
+        const a = Math.min(lastSelIndex, idx);
+        const b = Math.max(lastSelIndex, idx);
+        // Shift-select range in current directory view.
+        for (let i = a; i <= b; i++) prevSet.add(items[i]!.itemPath);
+        return Array.from(prevSet);
+      }
+
+      if (multi) {
+        if (prevSet.has(itemPath)) prevSet.delete(itemPath);
+        else prevSet.add(itemPath);
+        return Array.from(prevSet);
+      }
+
+      // Single select.
+      if (prevSet.size === 1 && prevSet.has(itemPath)) return prev;
+      return [itemPath];
+    });
+
+    setLastSelIndex(idx);
+  };
 
   const uploadFile = useCallback(
     async (file: File) => {
@@ -492,12 +539,48 @@ export default function DeviceBrowserPane(props: {
               try {
                 const parsed = JSON.parse(raw) as {
                   kind?: "file" | "dir";
+                  items?: { kind: "file" | "dir"; path: string; name: string }[];
                   src: Conn;
                   snapshotId: string;
                   path: string;
                   name?: string;
                 };
                 if (!parsed?.src?.serverBaseUrl || !parsed.snapshotId || !parsed.path) return;
+
+                if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+                  let files = 0;
+                  let dirs = 0;
+                  for (const it of parsed.items) {
+                    if (!it?.path) continue;
+                    if (it.kind === "dir") {
+                      const dstDirPath = path ? `${path}/${it.name}` : it.name;
+                      onEnqueueCopyFolder({
+                        src: parsed.src,
+                        srcSnapshotId: parsed.snapshotId,
+                        srcDirPath: it.path,
+                        dst: effConn,
+                        dstDeviceName: deviceName || "device",
+                        dstDeviceId: tab.state.deviceId || undefined,
+                        dstDirPath
+                      });
+                      dirs++;
+                    } else {
+                      const dstPath = path ? `${path}/${it.name}` : it.name;
+                      onEnqueueCopy({
+                        src: parsed.src,
+                        srcSnapshotId: parsed.snapshotId,
+                        srcPath: it.path,
+                        dst: effConn,
+                        dstDeviceName: deviceName || "device",
+                        dstDeviceId: tab.state.deviceId || undefined,
+                        dstPath
+                      });
+                      files++;
+                    }
+                  }
+                  setStatus(`queued copy: ${files} files, ${dirs} dirs`);
+                  return;
+                }
 
                 if ((parsed.kind ?? "file") === "dir") {
                   const dirName = parsed.name || parsed.path.split("/").pop() || "folder";
@@ -545,8 +628,15 @@ export default function DeviceBrowserPane(props: {
             <div className="db-empty">Select a snapshot to browse</div>
           ) : (
             <div className="db-tree-list">
-              {entries.map((e) => (
+              {items.map(({ e, idx, itemPath }) => (
                 <div key={`${e.kind}:${e.name}`} className="db-row">
+                  <button
+                    className={selectedSet.has(itemPath) ? "db-mini" : "db-mini"}
+                    onClick={(ev) => toggleSelect(idx, itemPath, ev)}
+                    title={selectedSet.has(itemPath) ? "Deselect" : "Select"}
+                  >
+                    {selectedSet.has(itemPath) ? "[x]" : "[ ]"}
+                  </button>
                   <button
                     className={e.kind === "dir" ? "db-row-main dir" : "db-row-main file"}
                     draggable={true}
@@ -556,14 +646,30 @@ export default function DeviceBrowserPane(props: {
                       refreshTree(snapshotId, next);
                     }}
                     onDragStart={(ev) => {
-                      const itemPath = path ? `${path}/${e.name}` : e.name;
-                      const payload = JSON.stringify({
-                        kind: e.kind,
-                        src: effConn,
-                        snapshotId,
-                        path: itemPath,
-                        name: e.name
-                      });
+                      // If the dragged item is selected, drag the whole selection (current directory).
+                      const wantMulti = selectedSet.has(itemPath) && selected.length > 1;
+                      const payload = wantMulti
+                        ? JSON.stringify({
+                            kind: e.kind,
+                            items: selected
+                              .map((p) => {
+                                const found = items.find((x) => x.itemPath === p);
+                                if (!found) return null;
+                                return { kind: found.e.kind, path: found.itemPath, name: found.e.name };
+                              })
+                              .filter((x): x is { kind: "file" | "dir"; path: string; name: string } => x !== null),
+                            src: effConn,
+                            snapshotId,
+                            path: itemPath,
+                            name: e.name
+                          })
+                        : JSON.stringify({
+                            kind: e.kind,
+                            src: effConn,
+                            snapshotId,
+                            path: itemPath,
+                            name: e.name
+                          });
                       ev.dataTransfer.effectAllowed = "copy";
                       ev.dataTransfer.setData("application/x-filedock-file", payload);
                       ev.dataTransfer.setData("text/plain", itemPath);
