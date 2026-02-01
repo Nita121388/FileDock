@@ -40,6 +40,7 @@ export default function LeafPane(props: {
   onRemoveTransfer: (id: string) => void;
   onRunTransfer: (id: string) => Promise<void>;
   onCancelTransfer: (id: string) => void;
+  onUpdateTransfer: (id: string, updates: Partial<TransferJob>) => void;
   onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
   draggingLeafId: string | null;
   setDraggingLeafId: (id: string | null) => void;
@@ -62,6 +63,7 @@ export default function LeafPane(props: {
     onRemoveTransfer,
     onRunTransfer,
     onCancelTransfer,
+    onUpdateTransfer,
     onSetDeviceAuth,
     draggingLeafId,
     setDraggingLeafId,
@@ -186,6 +188,7 @@ export default function LeafPane(props: {
           onRemoveTransfer={onRemoveTransfer}
           onRunTransfer={onRunTransfer}
           onCancelTransfer={onCancelTransfer}
+          onUpdateTransfer={onUpdateTransfer}
           onSetDeviceAuth={onSetDeviceAuth}
         />
       </div>

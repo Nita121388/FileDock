@@ -11,6 +11,7 @@ export function PaneView(props: {
   onSetPane: (pane: PaneKind) => void;
   onUpdateTab: (updater: (tab: PaneTab) => PaneTab) => void;
   transfers: TransferJob[];
+  onUpdateTransfer: (id: string, updates: Partial<TransferJob>) => void;
   onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../../model/transfers").Conn) => void;
   onEnqueueCopy: (job: {
     src: import("../../model/transfers").Conn;
@@ -56,6 +57,7 @@ export function PaneView(props: {
       return (
         <TransferQueuePane
           transfers={props.transfers}
+          onUpdateTransfer={props.onUpdateTransfer}
           onEnqueueDownload={props.onEnqueueDownload}
           onRemove={props.onRemoveTransfer}
           onRun={props.onRunTransfer}

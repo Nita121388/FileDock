@@ -190,6 +190,10 @@ export default function App() {
     setTransfers((xs) => xs.map((x) => (x.id === id ? patch(x) : x)));
   };
 
+  const updateTransfer = (id: string, updates: Partial<TransferJob>) => {
+    setTransfers((xs) => xs.map((x) => (x.id === id ? ({ ...x, ...updates } as TransferJob) : x)));
+  };
+
   function isAbortError(e: unknown): boolean {
     const any = e as any;
     return any?.name === "AbortError" || String(any?.message ?? "").toLowerCase().includes("aborted");
@@ -825,6 +829,7 @@ export default function App() {
           onRemoveTransfer={removeTransfer}
           onRunTransfer={runTransfer}
           onCancelTransfer={cancelTransfer}
+          onUpdateTransfer={updateTransfer}
           onSetDeviceAuth={(deviceId, deviceToken) =>
             setSettings((s) => ({ ...s, deviceId, deviceToken }))
           }

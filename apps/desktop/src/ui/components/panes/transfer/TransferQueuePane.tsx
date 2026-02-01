@@ -35,12 +35,13 @@ function saveQueueSettings(next: QueueSettings) {
 
 export default function TransferQueuePane(props: {
   transfers: TransferJob[];
+  onUpdateTransfer: (id: string, updates: Partial<TransferJob>) => void;
   onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../../../model/transfers").Conn) => void;
   onRemove: (id: string) => void;
   onRun: (id: string) => Promise<void>;
   onCancel: (id: string) => void;
 }) {
-  const { transfers, onEnqueueDownload, onRemove, onRun, onCancel } = props;
+  const { transfers, onUpdateTransfer, onEnqueueDownload, onRemove, onRun, onCancel } = props;
   const [busy, setBusy] = useState(false);
   const [queue, setQueue] = useState<QueueSettings>(() => loadQueueSettings());
   const pausedRef = useRef(queue.paused);
@@ -249,6 +250,29 @@ export default function TransferQueuePane(props: {
               {j.progress?.phase ? <span className="queue-path">{j.progress.phase}</span> : null}
               {typeof j.progress?.pct === "number" ? (
                 <span className="pill pill-running">{j.progress.pct}%</span>
+              ) : null}
+              {j.kind === "copy_file" || j.kind === "copy_folder" ? (
+                <>
+                  {j.dstBaseSnapshotId ? (
+                    <span className="queue-path">base:{String(j.dstBaseSnapshotId).slice(0, 8)}</span>
+                  ) : null}
+                  <select
+                    className="pane-select"
+                    style={{ height: 28 }}
+                    disabled={busy || queue.paused || j.status === "running" || j.status === "done"}
+                    value={j.conflictPolicy ?? "overwrite"}
+                    onChange={(e) =>
+                      onUpdateTransfer(j.id, {
+                        conflictPolicy: e.target.value as any
+                      })
+                    }
+                    title="Conflict policy when destination already has the same path"
+                  >
+                    <option value="overwrite">overwrite</option>
+                    <option value="skip">skip</option>
+                    <option value="rename">rename</option>
+                  </select>
+                </>
               ) : null}
               {j.error ? <span className="queue-err">{j.error}</span> : null}
             </div>

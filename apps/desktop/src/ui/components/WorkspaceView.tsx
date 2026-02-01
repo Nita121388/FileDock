@@ -49,6 +49,7 @@ export function WorkspaceView(props: {
   onRemoveTransfer: (id: string) => void;
   onRunTransfer: (id: string) => Promise<void>;
   onCancelTransfer: (id: string) => void;
+  onUpdateTransfer: (id: string, updates: Partial<TransferJob>) => void;
   onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
   onTabChange: (tab: TabState) => void;
 }) {
@@ -62,6 +63,7 @@ export function WorkspaceView(props: {
     onRemoveTransfer,
     onRunTransfer,
     onCancelTransfer,
+    onUpdateTransfer,
     onSetDeviceAuth,
     onTabChange
   } = props;
@@ -88,6 +90,7 @@ export function WorkspaceView(props: {
           onRemoveTransfer={onRemoveTransfer}
           onRunTransfer={onRunTransfer}
           onCancelTransfer={onCancelTransfer}
+          onUpdateTransfer={onUpdateTransfer}
           onSetDeviceAuth={onSetDeviceAuth}
           draggingLeafId={draggingLeafId}
           setDraggingLeafId={setDraggingLeafId}
