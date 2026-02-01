@@ -11,7 +11,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::{path::PathBuf, time::Duration};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use walkdir::WalkDir;
 
 const PRESENCE_BATCH: usize = 1000;
@@ -312,6 +312,37 @@ enum Command {
         /// If set, compute and compare chunk hashes (slower but accurate).
         #[arg(long)]
         verify: bool,
+    },
+
+    /// Plugin system (external executables named `filedock-<name>`).
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum PluginCommand {
+    /// List available plugins (best-effort discovery from PATH and optional plugin dirs).
+    List,
+
+    /// Run a plugin by name and pass JSON on stdin.
+    Run {
+        /// Plugin name (maps to executable `filedock-<name>`).
+        #[arg(long)]
+        name: String,
+
+        /// JSON string to pass on stdin.
+        #[arg(long)]
+        json: String,
+
+        /// Timeout in seconds.
+        #[arg(long, default_value_t = 30)]
+        timeout_secs: u64,
+
+        /// If set, print plugin stdout as-is (instead of trying to pretty-print JSON).
+        #[arg(long)]
+        raw: bool,
     },
 }
 
@@ -1430,9 +1461,241 @@ async fn main() -> Result<(), String> {
                 serde_json::to_string_pretty(&items).map_err(|e| e.to_string())?
             );
         }
+
+        Command::Plugin { command } => match command {
+            PluginCommand::List => {
+                #[derive(Debug, serde::Serialize)]
+                struct PluginInfo {
+                    name: String,
+                    path: String,
+                }
+
+                let plugins = discover_plugins().map_err(|e| format!("plugin discovery: {e}"))?;
+                let out: Vec<PluginInfo> = plugins
+                    .into_iter()
+                    .map(|(name, path)| PluginInfo {
+                        name,
+                        path: path.display().to_string(),
+                    })
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?
+                );
+            }
+
+            PluginCommand::Run {
+                name,
+                json,
+                timeout_secs,
+                raw,
+            } => {
+                // Validate input JSON early so users get a clear error.
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&json).map_err(|e| format!("invalid --json: {e}"))?;
+                let json = serde_json::to_string(&parsed).map_err(|e| e.to_string())?;
+
+                let exe = resolve_plugin(&name).ok_or_else(|| {
+                    format!("plugin not found: {name} (expected executable: filedock-{name})")
+                })?;
+
+                let (stdout, stderr) = run_plugin(&exe, &json, timeout_secs).await?;
+
+                if !stderr.trim().is_empty() {
+                    eprintln!("{stderr}");
+                }
+
+                if raw {
+                    print!("{stdout}");
+                    if !stdout.ends_with('\n') {
+                        println!();
+                    }
+                    return Ok(());
+                }
+
+                // Best-effort: pretty print JSON if stdout looks like JSON, else print raw.
+                match serde_json::from_str::<serde_json::Value>(&stdout) {
+                    Ok(v) => println!(
+                        "{}",
+                        serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
+                    ),
+                    Err(_) => {
+                        print!("{stdout}");
+                        if !stdout.ends_with('\n') {
+                            println!();
+                        }
+                    }
+                }
+            }
+        },
     }
 
     Ok(())
+}
+
+fn plugin_dirs() -> Vec<std::path::PathBuf> {
+    let mut out = Vec::<std::path::PathBuf>::new();
+
+    // Optional explicit plugin dirs.
+    if let Ok(s) = std::env::var("FILEDOCK_PLUGIN_DIRS") {
+        for p in s.split(':') {
+            let p = p.trim();
+            if p.is_empty() {
+                continue;
+            }
+            out.push(std::path::PathBuf::from(p));
+        }
+    } else if let Ok(s) = std::env::var("FILEDOCK_PLUGIN_DIR") {
+        let p = s.trim();
+        if !p.is_empty() {
+            out.push(std::path::PathBuf::from(p));
+        }
+    }
+
+    // Repo-local convenience (works when running from the repo root).
+    out.push(std::path::PathBuf::from("./plugins/bin"));
+
+    // PATH dirs.
+    if let Some(path) = std::env::var_os("PATH") {
+        out.extend(std::env::split_paths(&path));
+    }
+
+    out
+}
+
+fn is_executable(path: &std::path::Path) -> bool {
+    let meta = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    if !meta.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        return (meta.permissions().mode() & 0o111) != 0;
+    }
+
+    #[cfg(not(unix))]
+    {
+        // Best-effort for Windows: accept common executable extensions.
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        return matches!(ext.as_str(), "exe" | "cmd" | "bat");
+    }
+}
+
+fn normalize_plugin_filename(name: &str) -> String {
+    #[cfg(windows)]
+    {
+        // On Windows, we might see `filedock-foo.exe`.
+        return name.trim_end_matches(".exe")
+            .trim_end_matches(".cmd")
+            .trim_end_matches(".bat")
+            .to_string();
+    }
+    #[cfg(not(windows))]
+    {
+        return name.to_string();
+    }
+}
+
+fn discover_plugins() -> Result<Vec<(String, std::path::PathBuf)>, String> {
+    let mut found: HashMap<String, std::path::PathBuf> = HashMap::new();
+
+    for dir in plugin_dirs() {
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        for ent in rd {
+            let ent = match ent {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let file_name = ent.file_name();
+            let Some(file_name) = file_name.to_str() else { continue };
+            if !file_name.starts_with("filedock-") {
+                continue;
+            }
+            let file_name = normalize_plugin_filename(file_name);
+            let Some(name) = file_name.strip_prefix("filedock-") else { continue };
+            if name.trim().is_empty() {
+                continue;
+            }
+
+            let p = ent.path();
+            if !is_executable(&p) {
+                continue;
+            }
+            found.entry(name.to_string()).or_insert(p);
+        }
+    }
+
+    let mut out: Vec<(String, std::path::PathBuf)> = found.into_iter().collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
+}
+
+fn resolve_plugin(name: &str) -> Option<std::path::PathBuf> {
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    if let Ok(list) = discover_plugins() {
+        for (n, p) in list {
+            if n == name {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+async fn run_plugin(
+    exe: &std::path::PathBuf,
+    stdin_json: &str,
+    timeout_secs: u64,
+) -> Result<(String, String), String> {
+    use tokio::process::Command;
+    use tokio::time::timeout;
+
+    let mut child = Command::new(exe)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn {}: {e}", exe.display()))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(stdin_json.as_bytes())
+            .await
+            .map_err(|e| format!("write plugin stdin: {e}"))?;
+    }
+
+    let output = timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
+        .await
+        .map_err(|_| format!("plugin timed out after {timeout_secs}s"))?
+        .map_err(|e| format!("wait plugin: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !output.status.success() {
+        return Err(format!(
+            "plugin exited with {}: {}",
+            output.status,
+            stderr.trim()
+        ));
+    }
+
+    Ok((stdout, stderr))
 }
 
 fn now_unix() -> i64 {
