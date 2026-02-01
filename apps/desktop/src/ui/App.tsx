@@ -745,34 +745,94 @@ export default function App() {
         srcChunkMap = new Map();
       }
 
-      // 3) Copy files sequentially (per-job concurrency can come later; queue concurrency already exists).
-      for (let i = nextIndex; i < total; i++) {
+      // 3) Copy files with bounded per-job concurrency.
+      // Data transfer can happen concurrently, but manifest updates + writes are serialized for correctness and resume.
+      let manifestLock = Promise.resolve<void>(undefined);
+      const withManifestLock = async <T,>(fn: () => Promise<T>) => {
+        const prev = manifestLock;
+        let release!: () => void;
+        manifestLock = new Promise<void>((res) => {
+          release = res;
+        });
+        await prev;
+        try {
+          return await fn();
+        } finally {
+          release();
+        }
+      };
+
+      let contigNext = nextIndex;
+      const completed = new Set<number>();
+      const markCompleted = async (i: number) => {
+        await withManifestLock(async () => {
+          completed.add(i);
+          while (completed.has(contigNext)) {
+            completed.delete(contigNext);
+            contigNext++;
+          }
+          patchTransfer(id, (x) => ({ ...(x as any), nextIndex: contigNext }));
+        });
+      };
+
+      const writeManifestNow = async () => {
+        await putManifest(
+          dstSettings,
+          dstSnapshotId!,
+          {
+            snapshot_id: dstSnapshotId!,
+            created_unix: Math.floor(Date.now() / 1000),
+            files: manifestFiles.map((f) => ({
+              path: f.path,
+              size: f.size,
+              mtime_unix: f.mtime_unix,
+              chunk_hash: null,
+              chunks: f.chunks
+            }))
+          },
+          ac.signal
+        );
+      };
+
+      const processOne = async (i: number) => {
         const srcFilePath = filesList[i]!;
         const rel = job.srcDirPath ? srcFilePath.slice(job.srcDirPath.length + 1) : srcFilePath;
         let dstFilePath = job.dstDirPath ? `${job.dstDirPath}/${rel}` : rel;
 
-        if (doneSet.has(dstFilePath)) {
-          if (pol === "skip") {
-            const pct = total > 0 ? Math.floor(((i + 1) / total) * 100) : 0;
-            setTransferProgress(id, { phase: `skipping ${dstFilePath}`, pct });
-            patchTransfer(id, (x) => ({ ...(x as any), nextIndex: i + 1 }));
-            continue;
+        // Choose a final destination path (and reserve it) under a lock to avoid rename collisions.
+        const plan = await withManifestLock(async () => {
+          if (doneSet.has(dstFilePath)) {
+            if (pol === "skip") return { kind: "skip" as const, dstFilePath };
+            if (pol === "rename") {
+              dstFilePath = uniquePath(dstFilePath);
+            } else if (pol === "overwrite") {
+              // Remove existing entry before rewriting.
+              manifestFiles = manifestFiles.filter((f) => f.path !== dstFilePath);
+              doneSet.delete(dstFilePath);
+            }
           }
-          if (pol === "rename") {
-            dstFilePath = uniquePath(dstFilePath);
-          }
-          if (pol === "overwrite") {
-            // Remove existing entry before rewriting.
-            manifestFiles = manifestFiles.filter((f) => f.path !== dstFilePath);
-            doneSet.delete(dstFilePath);
-          }
+          // Reserve so parallel workers won't pick the same name while the upload is in flight.
+          doneSet.add(dstFilePath);
+          return { kind: "copy" as const, dstFilePath };
+        });
+
+        if (plan.kind === "skip") {
+          const pct = total > 0 ? Math.floor(((i + 1) / total) * 100) : 0;
+          setTransferProgress(id, { phase: `skipping ${plan.dstFilePath}`, pct });
+          await markCompleted(i);
+          return;
         }
+
+        dstFilePath = plan.dstFilePath;
 
         const srcMeta = srcChunkMap.get(srcFilePath);
         if (srcMeta) {
           // Chunk-level copy: download missing chunks by hash and upload to destination.
           const hashes = srcMeta.chunks.map((c) => c.hash);
-          setTransferProgress(id, { phase: `checking chunks ${srcFilePath}`, pct: total > 0 ? Math.floor((i / total) * 100) : 0 });
+          setTransferProgress(id, {
+            phase: `checking chunks ${srcFilePath}`,
+            pct: total > 0 ? Math.floor((i / total) * 100) : 0
+          });
           const missing = new Set(await ensureMissingOnDest(hashes));
 
           const missingBytesTotal = srcMeta.chunks.reduce((acc, c) => acc + (missing.has(c.hash) ? c.size : 0), 0);
@@ -823,33 +883,23 @@ export default function App() {
             })
           );
 
-          // Update destination manifest (copy-on-write snapshot) for this file.
-          manifestFiles.push({
-            path: dstFilePath,
-            size: srcMeta.size,
-            mtime_unix: srcMeta.mtime_unix,
-            chunks: srcMeta.chunks
+          // Serialize manifest update + write so we don't race with other files.
+          await withManifestLock(async () => {
+            manifestFiles.push({
+              path: dstFilePath,
+              size: srcMeta.size,
+              mtime_unix: srcMeta.mtime_unix,
+              chunks: srcMeta.chunks
+            });
+            await writeManifestNow();
+            completed.add(i);
+            while (completed.has(contigNext)) {
+              completed.delete(contigNext);
+              contigNext++;
+            }
+            patchTransfer(id, (x) => ({ ...(x as any), nextIndex: contigNext }));
           });
-          doneSet.add(dstFilePath);
-
-          patchTransfer(id, (x) => ({ ...(x as any), nextIndex: i + 1 }));
-          await putManifest(
-            dstSettings,
-            dstSnapshotId!,
-            {
-              snapshot_id: dstSnapshotId!,
-              created_unix: Math.floor(Date.now() / 1000),
-              files: manifestFiles.map((f) => ({
-                path: f.path,
-                size: f.size,
-                mtime_unix: f.mtime_unix,
-                chunk_hash: null,
-                chunks: f.chunks
-              }))
-            },
-            ac.signal
-          );
-          continue;
+          return;
         }
 
         const dlLimiter = makeLimiter(bytesPerSec);
@@ -861,14 +911,22 @@ export default function App() {
             (done, totalBytes) => {
               const frac = totalBytes && totalBytes > 0 ? done / totalBytes : 0;
               const pct = total > 0 ? Math.floor(((i + frac) / total) * 100) : 0;
-              setTransferProgress(id, { phase: `downloading ${srcFilePath}`, doneBytes: done, totalBytes: totalBytes ?? undefined, pct });
+              setTransferProgress(id, {
+                phase: `downloading ${srcFilePath}`,
+                doneBytes: done,
+                totalBytes: totalBytes ?? undefined,
+                pct
+              });
             },
             ac.signal,
             dlLimiter ? async (_chunk, doneBytes) => dlLimiter(doneBytes) : undefined
           );
         });
 
-        setTransferProgress(id, { phase: `hashing ${srcFilePath}`, pct: total > 0 ? Math.floor(((i + 0.5) / total) * 100) : 0 });
+        setTransferProgress(id, {
+          phase: `hashing ${srcFilePath}`,
+          pct: total > 0 ? Math.floor(((i + 0.5) / total) * 100) : 0
+        });
         const refs = chunkBytes(buf);
         const hashes = refs.map((c) => c.hash);
         const manifestChunks = refs.map((c) => ({ hash: c.hash, size: c.size }));
@@ -890,38 +948,53 @@ export default function App() {
           }
           offset = end;
           if (ulLimiter) await ulLimiter(offset);
-          const pct = total > 0 ? Math.floor(((i + (offset / Math.max(1, buf.length))) / total) * 100) : 0;
+          const pct = total > 0 ? Math.floor(((i + offset / Math.max(1, buf.length)) / total) * 100) : 0;
           setTransferProgress(id, { phase: `uploading ${srcFilePath} (${uploaded}/${missing.size} chunks)`, pct });
         }
 
-        const now = Math.floor(Date.now() / 1000);
-        manifestFiles.push({
-          path: dstFilePath,
-          size: buf.length,
-          mtime_unix: now,
-          chunks: manifestChunks
+        // Serialize manifest update + write so we don't race with other files.
+        await withManifestLock(async () => {
+          const now = Math.floor(Date.now() / 1000);
+          manifestFiles.push({
+            path: dstFilePath,
+            size: buf.length,
+            mtime_unix: now,
+            chunks: manifestChunks
+          });
+          await writeManifestNow();
+          completed.add(i);
+          while (completed.has(contigNext)) {
+            completed.delete(contigNext);
+            contigNext++;
+          }
+          patchTransfer(id, (x) => ({ ...(x as any), nextIndex: contigNext }));
         });
-        doneSet.add(dstFilePath);
+      };
 
-        // Persist resume point after each file and write manifest for crash-resume.
-        patchTransfer(id, (x) => ({ ...(x as any), nextIndex: i + 1 }));
-        await putManifest(
-          dstSettings,
-          dstSnapshotId!,
-          {
-            snapshot_id: dstSnapshotId!,
-            created_unix: Math.floor(Date.now() / 1000),
-            files: manifestFiles.map((f) => ({
-              path: f.path,
-              size: f.size,
-              mtime_unix: f.mtime_unix,
-              chunk_hash: null,
-              chunks: f.chunks
-            }))
-          },
-          ac.signal
-        );
-      }
+      const maxFileConcurrency = Math.min(4, Math.max(1, total - contigNext, 2));
+      let firstErr: any = null;
+      let nextToStart = contigNext;
+      await Promise.all(
+        Array.from({ length: maxFileConcurrency }, async () => {
+          while (true) {
+            if (firstErr) return;
+            const i = nextToStart++;
+            if (i >= total) return;
+            try {
+              await processOne(i);
+            } catch (e: any) {
+              if (!firstErr) firstErr = e;
+              try {
+                ac.abort();
+              } catch {
+                // ignore
+              }
+              return;
+            }
+          }
+        })
+      );
+      if (firstErr) throw firstErr;
 
       setTransferProgress(id, { phase: "writing manifest", pct: 99 });
       await putManifest(
