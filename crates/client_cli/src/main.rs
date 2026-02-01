@@ -100,6 +100,11 @@ enum Command {
         /// Example: --exclude \"**/node_modules/**\" --exclude \"**/.git/**\"
         #[arg(long)]
         exclude: Vec<String>,
+
+        /// Optional ignore file (one glob per line). If not provided, `.filedockignore` in the root
+        /// folder is used when present.
+        #[arg(long)]
+        ignore_file: Option<PathBuf>,
     },
 
     /// Periodically upload a folder as snapshots (simple scheduler).
@@ -124,6 +129,11 @@ enum Command {
         /// Example: --exclude \"**/node_modules/**\" --exclude \"**/.git/**\"
         #[arg(long)]
         exclude: Vec<String>,
+
+        /// Optional ignore file (one glob per line). If not provided, `.filedockignore` in the root
+        /// folder is used when present.
+        #[arg(long)]
+        ignore_file: Option<PathBuf>,
 
         /// Seconds between runs. Use 0 to run once.
         #[arg(long, default_value_t = 900)]
@@ -197,6 +207,7 @@ async fn push_folder_impl(
     folder: PathBuf,
     concurrency: usize,
     exclude: Vec<String>,
+    ignore_file: Option<PathBuf>,
 ) -> Result<String, String> {
     let client = build_client()?;
 
@@ -204,7 +215,10 @@ async fn push_folder_impl(
         .canonicalize()
         .map_err(|e| format!("canonicalize folder: {e}"))?;
 
-    let exclude_set = build_excludes(&exclude)?;
+    let mut exclude_patterns = Vec::<String>::new();
+    exclude_patterns.extend(load_ignore_patterns(&root, ignore_file)?);
+    exclude_patterns.extend(exclude);
+    let exclude_set = build_excludes(&exclude_patterns)?;
 
     // Create snapshot id
     let create_url = format!("{}/v1/snapshots", server.trim_end_matches('/'));
@@ -479,8 +493,10 @@ async fn main() -> Result<(), String> {
             folder,
             concurrency,
             exclude,
+            ignore_file,
         } => {
-            let _ = push_folder_impl(server, device, folder, concurrency, exclude).await?;
+            let _ =
+                push_folder_impl(server, device, folder, concurrency, exclude, ignore_file).await?;
         }
 
         Command::PushFolderLoop {
@@ -489,6 +505,7 @@ async fn main() -> Result<(), String> {
             folder,
             concurrency,
             exclude,
+            ignore_file,
             interval_secs,
         } => {
             loop {
@@ -498,6 +515,7 @@ async fn main() -> Result<(), String> {
                     folder.clone(),
                     concurrency,
                     exclude.clone(),
+                    ignore_file.clone(),
                 )
                 .await?;
                 eprintln!("completed snapshot: {snap}");
@@ -689,6 +707,43 @@ fn build_excludes(patterns: &[String]) -> Result<GlobSet, String> {
     }
     b.build()
         .map_err(|e| format!("failed to build exclude set: {e}"))
+}
+
+fn load_ignore_patterns(root: &PathBuf, ignore_file: Option<PathBuf>) -> Result<Vec<String>, String> {
+    let p = match ignore_file {
+        Some(p) => {
+            if p.is_absolute() {
+                p
+            } else {
+                root.join(p)
+            }
+        }
+        None => root.join(".filedockignore"),
+    };
+
+    let content = match std::fs::read_to_string(&p) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("read ignore file {}: {e}", p.display())),
+    };
+
+    let mut out = Vec::<String>::new();
+    for line in content.lines() {
+        let s = line.trim();
+        if s.is_empty() || s.starts_with('#') {
+            continue;
+        }
+        // Keep raw glob text; validation happens when building the GlobSet.
+        out.push(s.to_string());
+        if out.len() > 10_000 {
+            return Err(format!(
+                "ignore file too large (>10000 patterns): {}",
+                p.display()
+            ));
+        }
+    }
+
+    Ok(out)
 }
 
 async fn chunk_presence(

@@ -27,6 +27,14 @@ cargo run -p filedock -- push-folder \
   --folder /home/you/Documents
 ```
 
+Optional: add a `.filedockignore` file in the root folder (one glob per line, `#` comments):
+
+```text
+# common ignores
+**/.git/**
+**/node_modules/**
+```
+
 Optional: run a simple periodic backup loop (runs `push-folder`, sleeps, repeats):
 
 ```bash
