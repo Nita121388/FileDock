@@ -8,6 +8,7 @@ import {
   closeLeaf,
   closeLeafTab,
   moveLeaf,
+  updateLeafTabState,
   setLeafActiveTab,
   setLeafPane,
   splitLeaf,
@@ -48,6 +49,9 @@ export function WorkspaceView(props: {
           onAddTab={(pane) => onRootChange(addLeafTab(tab.root, node.id, pane))}
           onSetActiveTab={(tabId) => onRootChange(setLeafActiveTab(tab.root, node.id, tabId))}
           onCloseTab={(tabId) => onRootChange(closeLeafTab(tab.root, node.id, tabId))}
+          onUpdateActiveTab={(updater) =>
+            onRootChange(updateLeafTabState(tab.root, node.id, node.activeTabId, updater))
+          }
         />
       );
     }

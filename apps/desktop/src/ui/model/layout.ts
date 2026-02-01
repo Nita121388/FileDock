@@ -6,11 +6,16 @@ export type DropZone = "center" | "left" | "right" | "top" | "bottom";
 
 export type LayoutNode = SplitNode | LeafNode;
 
-export interface PaneTab {
-  id: string;
-  pane: PaneKind;
-  title?: string;
-}
+export type DeviceBrowserTabState = {
+  deviceName: string;
+  snapshotId: string;
+  path: string;
+};
+
+export type PaneTab =
+  | { id: string; pane: "deviceBrowser"; title?: string; state: DeviceBrowserTabState }
+  | { id: string; pane: "transferQueue"; title?: string }
+  | { id: string; pane: "notes"; title?: string };
 
 export interface SplitNode {
   kind: "split";
@@ -50,7 +55,11 @@ export function uid(prefix: string): string {
 }
 
 export function makeTab(pane: PaneKind, title?: string): PaneTab {
-  return { id: uid("tab"), pane, title };
+  const id = uid("tab");
+  if (pane === "deviceBrowser") {
+    return { id, pane, title, state: { deviceName: "", snapshotId: "", path: "" } };
+  }
+  return { id, pane: pane as any, title } as PaneTab;
 }
 
 export function leafFromPane(pane: PaneKind): LeafNode {
@@ -60,6 +69,20 @@ export function leafFromPane(pane: PaneKind): LeafNode {
 
 export function activeTab(leaf: LeafNode): PaneTab {
   return leaf.tabs.find((t) => t.id === leaf.activeTabId) ?? leaf.tabs[0]!;
+}
+
+export function displayTabTitle(tab: PaneTab): string {
+  if (tab.title && tab.title.trim()) return tab.title.trim();
+
+  if (tab.pane === "deviceBrowser") {
+    const dev = tab.state.deviceName || "Device";
+    const snap = tab.state.snapshotId ? ` ${tab.state.snapshotId}` : "";
+    const p = tab.state.path ? ` /${tab.state.path}` : " /";
+    return `${dev}${snap}${p}`;
+  }
+
+  if (tab.pane === "transferQueue") return "Transfers";
+  return "Notes";
 }
 
 export function mapNode(node: LayoutNode, f: (n: LayoutNode) => LayoutNode): LayoutNode {
@@ -89,17 +112,49 @@ export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
   }
 
   // Migration: legacy leaf schema had {pane}.
-  const anyLeaf = node as unknown as { pane?: PaneKind; tabs?: PaneTab[]; activeTabId?: string };
+  const anyLeaf = node as unknown as {
+    pane?: PaneKind;
+    tabs?: any[];
+    activeTabId?: string;
+  };
+
   if (anyLeaf.tabs && Array.isArray(anyLeaf.tabs) && anyLeaf.tabs.length > 0) {
-    const tabs = anyLeaf.tabs.filter((t) => t && typeof t.id === "string" && typeof t.pane === "string");
-    const activeTabId = typeof anyLeaf.activeTabId === "string" ? anyLeaf.activeTabId : tabs[0]!.id;
-    const activeExists = tabs.some((t) => t.id === activeTabId);
-    return {
-      kind: "leaf",
-      id: node.id,
-      tabs,
-      activeTabId: activeExists ? activeTabId : tabs[0]!.id
-    };
+    const tabs: PaneTab[] = anyLeaf.tabs
+      .map((t) => {
+        if (!t || typeof t !== "object") return null;
+        if (typeof t.id !== "string" || typeof t.pane !== "string") return null;
+        const pane = t.pane as PaneKind;
+        const title = typeof t.title === "string" ? t.title : undefined;
+        if (pane === "deviceBrowser") {
+          const st = t.state as Partial<DeviceBrowserTabState> | undefined;
+          return {
+            id: t.id,
+            pane,
+            title,
+            state: {
+              deviceName: typeof st?.deviceName === "string" ? st.deviceName : "",
+              snapshotId: typeof st?.snapshotId === "string" ? st.snapshotId : "",
+              path: typeof st?.path === "string" ? st.path : ""
+            }
+          };
+        }
+        if (pane === "transferQueue" || pane === "notes") {
+          return { id: t.id, pane, title } as PaneTab;
+        }
+        return null;
+      })
+      .filter((x): x is PaneTab => x !== null);
+
+    if (tabs.length > 0) {
+      const activeTabId = typeof anyLeaf.activeTabId === "string" ? anyLeaf.activeTabId : tabs[0]!.id;
+      const activeExists = tabs.some((t) => t.id === activeTabId);
+      return {
+        kind: "leaf",
+        id: node.id,
+        tabs,
+        activeTabId: activeExists ? activeTabId : tabs[0]!.id
+      };
+    }
   }
 
   const pane: PaneKind = anyLeaf.pane ?? "notes";
@@ -139,7 +194,16 @@ export function setLeafPane(node: LayoutNode, leafId: string, pane: PaneKind): L
     const a = activeTab(n);
     return {
       ...n,
-      tabs: n.tabs.map((t) => (t.id === a.id ? { ...t, pane } : t))
+      tabs: n.tabs.map((t) => {
+        if (t.id !== a.id) return t;
+        const title = (t as any).title as string | undefined;
+        if (pane === "deviceBrowser") {
+          const prev = t.pane === "deviceBrowser" ? t.state : { deviceName: "", snapshotId: "", path: "" };
+          return { id: t.id, pane, title, state: { ...prev } };
+        }
+        if (pane === "transferQueue") return { id: t.id, pane, title };
+        return { id: t.id, pane: "notes", title };
+      })
     };
   });
 }
@@ -150,6 +214,22 @@ export function addLeafTab(node: LayoutNode, leafId: string, pane: PaneKind): La
     if (n.id !== leafId) return n;
     const t = makeTab(pane);
     return { ...n, tabs: [...n.tabs, t], activeTabId: t.id };
+  });
+}
+
+export function updateLeafTabState(
+  node: LayoutNode,
+  leafId: string,
+  tabId: string,
+  updater: (tab: PaneTab) => PaneTab
+): LayoutNode {
+  return mapNode(node, (n) => {
+    if (n.kind !== "leaf") return n;
+    if (n.id !== leafId) return n;
+    return {
+      ...n,
+      tabs: n.tabs.map((t) => (t.id === tabId ? updater(t) : t))
+    };
   });
 }
 

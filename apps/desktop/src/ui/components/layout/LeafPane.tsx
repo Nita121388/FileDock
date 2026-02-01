@@ -1,5 +1,5 @@
-import type { DropZone, LeafNode, PaneKind, SplitDir } from "../../model/layout";
-import { activeTab } from "../../model/layout";
+import type { DropZone, LeafNode, PaneKind, SplitDir, PaneTab } from "../../model/layout";
+import { activeTab, displayTabTitle } from "../../model/layout";
 import type { Settings } from "../../model/settings";
 import { PaneView } from "../panes/PaneView";
 
@@ -21,6 +21,7 @@ export default function LeafPane(props: {
   onAddTab: (pane: PaneKind) => void;
   onSetActiveTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  onUpdateActiveTab: (updater: (tab: PaneTab) => PaneTab) => void;
 }) {
   const {
     node,
@@ -33,7 +34,8 @@ export default function LeafPane(props: {
     onSetPane,
     onAddTab,
     onSetActiveTab,
-    onCloseTab
+    onCloseTab,
+    onUpdateActiveTab
   } = props;
 
   const dragging = draggingLeafId !== null;
@@ -62,9 +64,9 @@ export default function LeafPane(props: {
               key={t.id}
               className={t.id === node.activeTabId ? "pane-tab active" : "pane-tab"}
               onClick={() => onSetActiveTab(t.id)}
-              title={t.title ?? PANE_LABELS[t.pane]}
+              title={displayTabTitle(t as any)}
             >
-              <span className="pane-tab-label">{t.title ?? PANE_LABELS[t.pane]}</span>
+              <span className="pane-tab-label">{displayTabTitle(t as any)}</span>
               {node.tabs.length > 1 ? (
                 <span
                   className="pane-tab-close"
@@ -79,7 +81,7 @@ export default function LeafPane(props: {
               ) : null}
             </button>
           ))}
-          <button className="pane-tab add" onClick={() => onAddTab("deviceBrowser")} title="New tab">
+          <button className="pane-tab add" onClick={() => onAddTab(tab.pane)} title="New tab">
             +
           </button>
         </div>
@@ -135,7 +137,12 @@ export default function LeafPane(props: {
       ) : null}
 
       <div className="pane-body">
-        <PaneView pane={tab.pane} settings={settings} />
+        <PaneView
+          tab={tab}
+          settings={settings}
+          onSetPane={onSetPane}
+          onUpdateTab={onUpdateActiveTab}
+        />
       </div>
     </div>
   );
