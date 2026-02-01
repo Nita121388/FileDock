@@ -10,6 +10,7 @@ Common:
 - `scripts/bootstrap.sh` - sanity-check local prerequisites (Rust/Node/tooling)
 - `scripts/dev.sh` - run server + desktop UI (dev)
 - `scripts/build.sh` - build server + CLI + desktop UI
+- `scripts/build-plugins.sh` - build optional plugins (currently: `filedock-sftp` if Go is installed)
 - `scripts/release.sh` - build and collect local release artifacts into `dist/`
 - `scripts/smoke.sh` - end-to-end server+CLI smoke test (push-folder + pull-folder + hash compare)
 - `scripts/check.sh` - local "CI-like" checks (fmt/clippy/test + desktop build + smoke)

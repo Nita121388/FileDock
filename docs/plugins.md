@@ -50,3 +50,15 @@ Output:
 
 See `plugins/examples/filedock-notify` for a tiny example that echoes the input JSON.
 
+## SFTP (SSH) plugin
+
+This repo also contains a work-in-progress SFTP connector plugin (Go):
+
+- source: `plugins/sftp/`
+- docs: `docs/sftp.md`
+
+Build it (requires Go):
+
+```bash
+go build -o plugins/bin/filedock-sftp ./plugins/sftp
+```

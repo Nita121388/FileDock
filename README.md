@@ -23,6 +23,7 @@ Status: active development (MVP features working; still evolving).
 - Retention / prune: `docs/retention.md`
 - Chunk GC: `docs/gc.md`
 - Plugins: `docs/plugins.md`
+- SFTP (SSH) connector: `docs/sftp.md`
 - Architecture: `docs/architecture.md`
 - Roadmap: `docs/roadmap.md`
 - Development: `docs/development.md`
