@@ -48,8 +48,13 @@ export default function App() {
   >(new Map());
   const inflightChunksRef = useRef<Map<string, Map<string, Promise<void>>>>(new Map());
 
+  const connKey = (c: Conn): string => {
+    // Key caches by connection identity, not just base URL, to avoid accidental cross-auth reuse.
+    return `${c.serverBaseUrl}::${c.token}::${c.deviceId}::${c.deviceToken}`;
+  };
+
   const getPresenceCache = (dst: Conn) => {
-    const key = dst.serverBaseUrl;
+    const key = connKey(dst);
     let ent = presenceCacheRef.current.get(key);
     if (!ent) {
       ent = { haveLRU: new Map(), missingUntilMs: new Map() };
@@ -59,7 +64,7 @@ export default function App() {
   };
 
   const getInflightChunks = (dst: Conn) => {
-    const key = dst.serverBaseUrl;
+    const key = connKey(dst);
     let ent = inflightChunksRef.current.get(key);
     if (!ent) {
       ent = new Map();
@@ -161,11 +166,23 @@ export default function App() {
     return missing;
   };
 
+  const awaitWithAbort = async <T,>(p: Promise<T>, signal: AbortSignal): Promise<T> => {
+    if (signal.aborted) throw new DOMException("aborted", "AbortError");
+    return await Promise.race([
+      p,
+      new Promise<T>((_, rej) => {
+        const onAbort = () => rej(new DOMException("aborted", "AbortError"));
+        signal.addEventListener("abort", onAbort, { once: true });
+      })
+    ]);
+  };
+
   const putChunkDedup = async (dst: Conn, hash: string, bytes: Uint8Array, signal: AbortSignal) => {
     const inflight = getInflightChunks(dst);
     const existing = inflight.get(hash);
     if (existing) {
-      await existing;
+      // Followers should still respond to cancellation quickly.
+      await awaitWithAbort(existing, signal);
       return;
     }
 
