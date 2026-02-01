@@ -9,8 +9,15 @@ import {
 } from "./model/state";
 import { loadState, saveState } from "./model/storage";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "./model/settings";
-import { basename, loadTransfers, saveTransfers, uid, type TransferJob } from "./model/transfers";
-import { apiGetBytes } from "./api/client";
+import { basename, loadTransfers, saveTransfers, uid, type Conn, type TransferJob } from "./model/transfers";
+import {
+  apiGetBytes,
+  chunksPresence,
+  createSnapshot,
+  putChunk,
+  putManifest
+} from "./api/client";
+import { chunkBytes } from "./util/chunking";
 
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadState() ?? DEFAULT_APP_STATE);
@@ -56,12 +63,13 @@ export default function App() {
     });
   };
 
-  const enqueueDownload = (snapshotId: string, path: string) => {
+  const enqueueDownload = (snapshotId: string, path: string, conn?: Conn) => {
     const job: TransferJob = {
       id: uid("xfer"),
       kind: "download",
       createdAt: Date.now(),
       status: "queued",
+      conn,
       snapshotId,
       path,
       fileName: basename(path)
@@ -69,14 +77,48 @@ export default function App() {
     setTransfers((xs) => [job, ...xs]);
   };
 
+  const enqueueCopy = (req: {
+    src: Conn;
+    srcSnapshotId: string;
+    srcPath: string;
+    dst: Conn;
+    dstDeviceName: string;
+    dstDeviceId?: string;
+    dstPath: string;
+  }) => {
+    const job: TransferJob = {
+      id: uid("xfer"),
+      kind: "copy_file",
+      createdAt: Date.now(),
+      status: "queued",
+      src: req.src,
+      dst: req.dst,
+      srcSnapshotId: req.srcSnapshotId,
+      srcPath: req.srcPath,
+      dstDeviceName: req.dstDeviceName,
+      dstDeviceId: req.dstDeviceId,
+      dstPath: req.dstPath
+    };
+    setTransfers((xs) => [job, ...xs]);
+  };
+
   const removeTransfer = (id: string) => setTransfers((xs) => xs.filter((x) => x.id !== id));
+
+  const connToSettings = (c: Conn): Settings => ({
+    serverBaseUrl: c.serverBaseUrl,
+    token: c.token,
+    deviceId: c.deviceId,
+    deviceToken: c.deviceToken
+  });
 
   const downloadNow = async (id: string) => {
     const job = transfers.find((x) => x.id === id);
     if (!job) return;
+    if (job.kind !== "download") return;
     try {
+      const eff = job.conn ? connToSettings(job.conn) : settings;
       const blob = await apiGetBytes(
-        settings,
+        eff,
         `/v1/snapshots/${encodeURIComponent(job.snapshotId)}/file`,
         { path: job.path }
       );
@@ -91,6 +133,81 @@ export default function App() {
       const msg = String(e?.message ?? e);
       setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, status: "failed", error: msg } : x)));
     }
+  };
+
+  const copyNow = async (id: string) => {
+    const job = transfers.find((x) => x.id === id);
+    if (!job) return;
+    if (job.kind !== "copy_file") return;
+
+    const srcSettings = connToSettings(job.src);
+    const dstSettings = connToSettings(job.dst);
+
+    try {
+      // 1) Download bytes from source server.
+      const blob = await apiGetBytes(
+        srcSettings,
+        `/v1/snapshots/${encodeURIComponent(job.srcSnapshotId)}/file`,
+        { path: job.srcPath }
+      );
+      const buf = new Uint8Array(await blob.arrayBuffer());
+
+      // 2) Chunk + hash.
+      const refs = chunkBytes(buf);
+      const hashes = refs.map((c) => c.hash);
+
+      // 3) Presence (batched) on destination.
+      const missing = new Set<string>();
+      const batchSize = 1000;
+      for (let i = 0; i < hashes.length; i += batchSize) {
+        const batch = hashes.slice(i, i + batchSize);
+        const resp = await chunksPresence(dstSettings, { hashes: batch });
+        for (const h of resp.missing) missing.add(h);
+      }
+
+      // 4) Upload missing chunks.
+      let offset = 0;
+      for (const c of refs) {
+        const end = offset + c.size;
+        if (missing.has(c.hash)) {
+          await putChunk(dstSettings, c.hash, buf.subarray(offset, end));
+        }
+        offset = end;
+      }
+
+      // 5) Create snapshot + manifest on destination.
+      const now = Math.floor(Date.now() / 1000);
+      const snap = await createSnapshot(dstSettings, {
+        device_name: job.dstDeviceName,
+        device_id: job.dstDeviceId ?? null,
+        root_path: "(transfer)"
+      });
+      await putManifest(dstSettings, snap.snapshot_id, {
+        snapshot_id: snap.snapshot_id,
+        created_unix: now,
+        files: [
+          {
+            path: job.dstPath,
+            size: buf.length,
+            mtime_unix: now,
+            chunk_hash: null,
+            chunks: refs
+          }
+        ]
+      });
+
+      setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined } : x)));
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, status: "failed", error: msg } : x)));
+    }
+  };
+
+  const runTransfer = async (id: string) => {
+    const job = transfers.find((x) => x.id === id);
+    if (!job) return;
+    if (job.kind === "download") return downloadNow(id);
+    if (job.kind === "copy_file") return copyNow(id);
   };
 
   return (
@@ -174,8 +291,9 @@ export default function App() {
           settings={settings}
           transfers={transfers}
           onEnqueueDownload={enqueueDownload}
+          onEnqueueCopy={enqueueCopy}
           onRemoveTransfer={removeTransfer}
-          onDownloadTransfer={downloadNow}
+          onRunTransfer={runTransfer}
           onSetDeviceAuth={(deviceId, deviceToken) =>
             setSettings((s) => ({ ...s, deviceId, deviceToken }))
           }

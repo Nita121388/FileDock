@@ -14,9 +14,18 @@ export default function LeafPane(props: {
   node: LeafNode;
   settings: Settings;
   transfers: TransferJob[];
-  onEnqueueDownload: (snapshotId: string, path: string) => void;
+  onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../../model/transfers").Conn) => void;
+  onEnqueueCopy: (job: {
+    src: import("../../model/transfers").Conn;
+    srcSnapshotId: string;
+    srcPath: string;
+    dst: import("../../model/transfers").Conn;
+    dstDeviceName: string;
+    dstDeviceId?: string;
+    dstPath: string;
+  }) => void;
   onRemoveTransfer: (id: string) => void;
-  onDownloadTransfer: (id: string) => Promise<void>;
+  onRunTransfer: (id: string) => Promise<void>;
   onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
   draggingLeafId: string | null;
   setDraggingLeafId: (id: string | null) => void;
@@ -34,8 +43,9 @@ export default function LeafPane(props: {
     settings,
     transfers,
     onEnqueueDownload,
+    onEnqueueCopy,
     onRemoveTransfer,
-    onDownloadTransfer,
+    onRunTransfer,
     onSetDeviceAuth,
     draggingLeafId,
     setDraggingLeafId,
@@ -155,8 +165,9 @@ export default function LeafPane(props: {
           onUpdateTab={onUpdateActiveTab}
           transfers={transfers}
           onEnqueueDownload={onEnqueueDownload}
+          onEnqueueCopy={onEnqueueCopy}
           onRemoveTransfer={onRemoveTransfer}
-          onDownloadTransfer={onDownloadTransfer}
+          onRunTransfer={onRunTransfer}
           onSetDeviceAuth={onSetDeviceAuth}
         />
       </div>

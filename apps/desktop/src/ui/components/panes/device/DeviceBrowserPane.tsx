@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PaneTab } from "../../../model/layout";
 import type { Settings } from "../../../model/settings";
+import type { Conn } from "../../../model/transfers";
 import {
   apiGetBytes,
   getTree,
@@ -31,10 +32,19 @@ export default function DeviceBrowserPane(props: {
   settings: Settings;
   tab: DeviceTab;
   onTabChange: (tab: DeviceTab) => void;
-  onEnqueueDownload: (snapshotId: string, path: string) => void;
+  onEnqueueDownload: (snapshotId: string, path: string, conn?: Conn) => void;
   onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
+  onEnqueueCopy: (job: {
+    src: Conn;
+    srcSnapshotId: string;
+    srcPath: string;
+    dst: Conn;
+    dstDeviceName: string;
+    dstDeviceId?: string;
+    dstPath: string;
+  }) => void;
 }) {
-  const { settings, tab, onTabChange, onEnqueueDownload, onSetDeviceAuth } = props;
+  const { settings, tab, onTabChange, onEnqueueDownload, onSetDeviceAuth, onEnqueueCopy } = props;
 
   const [status, setStatus] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -68,6 +78,15 @@ export default function DeviceBrowserPane(props: {
     tab.state.deviceId,
     tab.state.deviceToken
   ]);
+
+  const effConn: Conn = useMemo(() => {
+    return {
+      serverBaseUrl: effSettings.serverBaseUrl,
+      token: effSettings.token,
+      deviceId: effSettings.deviceId,
+      deviceToken: effSettings.deviceToken
+    };
+  }, [effSettings.deviceId, effSettings.deviceToken, effSettings.serverBaseUrl, effSettings.token]);
 
   const [regName, setRegName] = useState<string>("");
   const [regOs, setRegOs] = useState<string>(() => detectOs());
@@ -349,7 +368,42 @@ export default function DeviceBrowserPane(props: {
           </span>
         </div>
 
-        <div className="db-tree">
+        <div
+          className="db-tree"
+          onDragOver={(e) => {
+            const t = Array.from(e.dataTransfer.types);
+            if (t.includes("application/x-filedock-file")) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            const raw = e.dataTransfer.getData("application/x-filedock-file");
+            if (!raw) return;
+            e.preventDefault();
+            try {
+              const parsed = JSON.parse(raw) as {
+                src: Conn;
+                snapshotId: string;
+                path: string;
+              };
+              if (!parsed?.src?.serverBaseUrl || !parsed.snapshotId || !parsed.path) return;
+
+              // Drop means: copy file from source server into this destination server/device context.
+              // For MVP we create a new snapshot on destination (one-file manifest) under this device.
+              const dstPath = parsed.path; // keep relative path same
+              onEnqueueCopy({
+                src: parsed.src,
+                srcSnapshotId: parsed.snapshotId,
+                srcPath: parsed.path,
+                dst: effConn,
+                dstDeviceName: deviceName || "device",
+                dstDeviceId: tab.state.deviceId || undefined,
+                dstPath
+              });
+              setStatus(`queued copy: ${parsed.path}`);
+            } catch {
+              // ignore
+            }
+          }}
+        >
           {!snapshotId ? (
             <div className="db-empty">Select a snapshot to browse</div>
           ) : (
@@ -367,7 +421,7 @@ export default function DeviceBrowserPane(props: {
                     onDragStart={(ev) => {
                       if (e.kind !== "file") return;
                       const filePath = path ? `${path}/${e.name}` : e.name;
-                      const payload = JSON.stringify({ snapshotId, path: filePath, name: e.name });
+                      const payload = JSON.stringify({ src: effConn, snapshotId, path: filePath, name: e.name });
                       ev.dataTransfer.effectAllowed = "copy";
                       ev.dataTransfer.setData("application/x-filedock-file", payload);
                       ev.dataTransfer.setData("text/plain", filePath);
@@ -384,7 +438,7 @@ export default function DeviceBrowserPane(props: {
                         className="db-mini"
                         onClick={() => {
                           const filePath = path ? `${path}/${e.name}` : e.name;
-                          onEnqueueDownload(snapshotId, filePath);
+                          onEnqueueDownload(snapshotId, filePath, effConn);
                           setStatus(`queued ${filePath}`);
                         }}
                         title="Add to transfer queue"

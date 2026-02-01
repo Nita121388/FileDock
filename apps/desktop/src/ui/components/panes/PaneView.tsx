@@ -11,9 +11,18 @@ export function PaneView(props: {
   onSetPane: (pane: PaneKind) => void;
   onUpdateTab: (updater: (tab: PaneTab) => PaneTab) => void;
   transfers: TransferJob[];
-  onEnqueueDownload: (snapshotId: string, path: string) => void;
+  onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../../model/transfers").Conn) => void;
+  onEnqueueCopy: (job: {
+    src: import("../../model/transfers").Conn;
+    srcSnapshotId: string;
+    srcPath: string;
+    dst: import("../../model/transfers").Conn;
+    dstDeviceName: string;
+    dstDeviceId?: string;
+    dstPath: string;
+  }) => void;
   onRemoveTransfer: (id: string) => void;
-  onDownloadTransfer: (id: string) => Promise<void>;
+  onRunTransfer: (id: string) => Promise<void>;
   onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
 }) {
   switch (props.tab.pane) {
@@ -25,6 +34,7 @@ export function PaneView(props: {
           onTabChange={(next) => props.onUpdateTab(() => next)}
           onEnqueueDownload={props.onEnqueueDownload}
           onSetDeviceAuth={props.onSetDeviceAuth}
+          onEnqueueCopy={props.onEnqueueCopy}
         />
       );
     case "transferQueue":
@@ -33,7 +43,7 @@ export function PaneView(props: {
           transfers={props.transfers}
           onEnqueueDownload={props.onEnqueueDownload}
           onRemove={props.onRemoveTransfer}
-          onDownload={props.onDownloadTransfer}
+          onRun={props.onRunTransfer}
         />
       );
     case "notes":

@@ -2,11 +2,11 @@ import type { TransferJob } from "../../../model/transfers";
 
 export default function TransferQueuePane(props: {
   transfers: TransferJob[];
-  onEnqueueDownload: (snapshotId: string, path: string) => void;
+  onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../../../model/transfers").Conn) => void;
   onRemove: (id: string) => void;
-  onDownload: (id: string) => Promise<void>;
+  onRun: (id: string) => Promise<void>;
 }) {
-  const { transfers, onEnqueueDownload, onRemove, onDownload } = props;
+  const { transfers, onEnqueueDownload, onRemove, onRun } = props;
 
   return (
     <div
@@ -21,8 +21,14 @@ export default function TransferQueuePane(props: {
         if (!raw) return;
         e.preventDefault();
         try {
-          const parsed = JSON.parse(raw) as { snapshotId: string; path: string };
-          if (parsed.snapshotId && parsed.path) {
+          const parsed = JSON.parse(raw) as any;
+          // New format: { src: Conn, snapshotId, path }
+          if (parsed?.src && parsed.snapshotId && parsed.path) {
+            onEnqueueDownload(parsed.snapshotId, parsed.path, parsed.src);
+            return;
+          }
+          // Legacy format: { snapshotId, path }
+          if (parsed?.snapshotId && parsed?.path) {
             onEnqueueDownload(parsed.snapshotId, parsed.path);
           }
         } catch {
@@ -39,9 +45,15 @@ export default function TransferQueuePane(props: {
           <div className="queue-main">
             <div className="queue-title">
               <span className="accent">{j.id}</span>{" "}
-              <span className="queue-path">
-                {j.snapshotId}:{j.path}
-              </span>
+              {j.kind === "download" ? (
+                <span className="queue-path">
+                  dl {j.snapshotId}:{j.path}
+                </span>
+              ) : (
+                <span className="queue-path">
+                  copy {j.src.serverBaseUrl} {j.srcSnapshotId}:{j.srcPath} → {j.dst.serverBaseUrl} {j.dstPath}
+                </span>
+              )}
             </div>
             <div className="queue-sub">
               <span className={`pill pill-${j.status}`}>{j.status}</span>
@@ -53,10 +65,10 @@ export default function TransferQueuePane(props: {
             <button
               className="db-mini"
               disabled={j.status === "done"}
-              onClick={() => onDownload(j.id)}
-              title="Download now"
+              onClick={() => onRun(j.id)}
+              title="Run transfer"
             >
-              Download
+              Run
             </button>
             <button className="db-mini" onClick={() => onRemove(j.id)} title="Remove">
               Remove

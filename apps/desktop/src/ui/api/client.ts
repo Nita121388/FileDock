@@ -21,6 +21,7 @@ export type SnapshotMeta = {
   device_name: string;
   root_path: string;
   created_unix: number;
+  device_id?: string | null;
 };
 
 export type TreeEntry = {
@@ -35,6 +36,33 @@ export type TreeResponse = {
   path: string;
   entries: TreeEntry[];
 };
+
+export type ChunkPresenceRequest = { hashes: string[] };
+export type ChunkPresenceResponse = { missing: string[] };
+
+export type ChunkRef = { hash: string; size: number };
+
+export type ManifestFileEntry = {
+  path: string;
+  size: number;
+  mtime_unix: number;
+  chunk_hash?: string | null;
+  chunks?: ChunkRef[] | null;
+};
+
+export type SnapshotManifest = {
+  snapshot_id: string;
+  created_unix: number;
+  files: ManifestFileEntry[];
+};
+
+export type SnapshotCreateRequest = {
+  device_name: string;
+  device_id?: string | null;
+  root_path: string;
+};
+
+export type SnapshotCreateResponse = { snapshot_id: string };
 
 function headers(settings: Settings): HeadersInit {
   const h: Record<string, string> = {
@@ -113,4 +141,40 @@ export async function listDevices(settings: Settings): Promise<DeviceInfo[]> {
 
 export async function registerDevice(settings: Settings, req: DeviceRegisterRequest): Promise<DeviceRegisterResponse> {
   return apiPostJson<DeviceRegisterResponse>(settings, "/v1/auth/device/register", req);
+}
+
+export async function chunksPresence(settings: Settings, req: ChunkPresenceRequest): Promise<ChunkPresenceResponse> {
+  return apiPostJson<ChunkPresenceResponse>(settings, "/v1/chunks/presence", req);
+}
+
+export async function putChunk(settings: Settings, hash: string, data: Uint8Array): Promise<void> {
+  const base = settings.serverBaseUrl.replace(/\/+$/, "");
+  const url = `${base}/v1/chunks/${encodeURIComponent(hash)}`;
+  const resp = await fetch(url, {
+    method: "PUT",
+    headers: headers(settings),
+    body: data
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`PUT /v1/chunks/${hash} failed: ${resp.status} ${text}`.trim());
+  }
+}
+
+export async function createSnapshot(settings: Settings, req: SnapshotCreateRequest): Promise<SnapshotCreateResponse> {
+  return apiPostJson<SnapshotCreateResponse>(settings, "/v1/snapshots", req);
+}
+
+export async function putManifest(settings: Settings, snapshotId: string, manifest: SnapshotManifest): Promise<void> {
+  const base = settings.serverBaseUrl.replace(/\/+$/, "");
+  const url = `${base}/v1/snapshots/${encodeURIComponent(snapshotId)}/manifest`;
+  const resp = await fetch(url, {
+    method: "PUT",
+    headers: headers(settings),
+    body: JSON.stringify(manifest)
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`PUT /v1/snapshots/${snapshotId}/manifest failed: ${resp.status} ${text}`.trim());
+  }
 }
