@@ -17,5 +17,7 @@ Common:
 - `scripts/gc.sh` - chunk garbage-collection helper (calls `filedock gc-chunks`)
 - `scripts/agent.sh` - run the agent via cargo using a TOML config file
 - `scripts/docker-up.sh` - start server via docker compose
+  - `./scripts/docker-up.sh` uses disk backend compose
+  - `./scripts/docker-up.sh minio` uses MinIO (S3-compatible) compose
 - `scripts/fmt.sh` - rustfmt + prettier (if available)
 - `scripts/lint.sh` - clippy (if available)

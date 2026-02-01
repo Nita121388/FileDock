@@ -14,6 +14,12 @@ if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>
 fi
 
 cd "$ROOT"
-echo "[docker-up] starting via deploy/docker-compose.yml"
-docker compose -f deploy/docker-compose.yml up --build
+FILE="deploy/docker-compose.yml"
+if [ "${1:-}" = "minio" ]; then
+  FILE="deploy/docker-compose.minio.yml"
+elif [ -n "${1:-}" ]; then
+  FILE="$1"
+fi
 
+echo "[docker-up] starting via $FILE"
+docker compose -f "$FILE" up --build
