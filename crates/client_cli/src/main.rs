@@ -7,6 +7,7 @@ use filedock_protocol::{
 use futures_util::stream::{self, StreamExt};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::{path::PathBuf, time::Duration};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use walkdir::WalkDir;
 
 const PRESENCE_BATCH: usize = 1000;
@@ -241,7 +242,8 @@ async fn push_folder_impl(
 
     // Pass 1: build file plans and gather all chunk hashes.
     let mut plans = Vec::<FilePlan>::new();
-    let mut all_hashes = Vec::<String>::new();
+    // Use a set to avoid sending huge duplicated hash lists to the presence endpoint.
+    let mut all_hashes = std::collections::HashSet::<String>::new();
     let mut total_bytes = 0u64;
 
     for entry in WalkDir::new(&root).follow_links(false) {
@@ -276,19 +278,13 @@ async fn push_folder_impl(
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
 
-        // Read file once to compute chunk hashes.
-        let data = tokio::fs::read(&abs_path)
-            .await
-            .map_err(|e| format!("read file: {e}"))?;
-        let chunks = chunk_file(&data);
-        if chunks.is_empty() {
-            return Err(format!(
-                "chunking produced no chunks: {}",
-                abs_path.display()
-            ));
-        }
+        // Compute chunk hashes without loading the whole file into memory.
+        // Note: empty files are allowed (zero chunks).
+        let chunks = compute_chunks_for_file(&abs_path).await?;
 
-        all_hashes.extend(chunks.iter().map(|c| c.hash.clone()));
+        for c in &chunks {
+            all_hashes.insert(c.hash.clone());
+        }
         plans.push(FilePlan {
             abs_path,
             rel_path: rel_str,
@@ -299,7 +295,7 @@ async fn push_folder_impl(
     }
 
     // Batch presence check for entire folder.
-    let pres_resp = chunk_presence(&client, &server, all_hashes).await?;
+    let pres_resp = chunk_presence(&client, &server, all_hashes.into_iter().collect()).await?;
     let missing: std::collections::HashSet<String> = pres_resp.missing.into_iter().collect();
 
     let total_files = plans.len() as u64;
@@ -350,17 +346,31 @@ async fn push_folder_impl(
                     });
                 }
 
-                let data = tokio::fs::read(&plan.abs_path)
+                let mut file = tokio::fs::File::open(&plan.abs_path)
                     .await
-                    .map_err(|e| format!("read file: {e}"))?;
+                    .map_err(|e| format!("open file: {e}"))?;
 
-                let mut offset = 0usize;
+                // Upload missing chunks while reading the file sequentially.
+                // For non-missing chunks we seek forward to avoid reading data we won't upload.
                 for c in &plan.chunks {
-                    let end = offset + c.size as usize;
-                    if missing.contains(&c.hash) {
-                        put_chunk(&client, &server_base, &c.hash, data[offset..end].to_vec()).await?;
+                    if c.size == 0 {
+                        continue;
                     }
-                    offset = end;
+                    if missing.contains(&c.hash) {
+                        let mut buf = vec![0u8; c.size as usize];
+                        file.read_exact(&mut buf)
+                            .await
+                            .map_err(|e| format!("read chunk: {e}"))?;
+                        put_chunk(&client, &server_base, &c.hash, buf).await?;
+                    } else {
+                        let off: i64 = c
+                            .size
+                            .try_into()
+                            .map_err(|_| "chunk too large to seek".to_string())?;
+                        file.seek(std::io::SeekFrom::Current(off))
+                            .await
+                            .map_err(|e| format!("seek: {e}"))?;
+                    }
                 }
 
                 let done_files =
@@ -439,7 +449,8 @@ async fn main() -> Result<(), String> {
                 .map_err(|e| format!("read file: {e}"))?;
             let chunks = chunk_file(&data);
             if chunks.is_empty() {
-                return Err("chunking produced no chunks".to_string());
+                println!("empty file; nothing to upload");
+                return Ok(());
             }
             let hashes: Vec<String> = chunks.iter().map(|c| c.hash.clone()).collect();
 
@@ -786,6 +797,36 @@ async fn get_bytes_with_retry(
 }
 
 const DEFAULT_CHUNK_SIZE: usize = 4 * 1024 * 1024;
+
+async fn compute_chunks_for_file(path: &PathBuf) -> Result<Vec<ChunkRef>, String> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|e| format!("open file: {e}"))?;
+
+    let mut out = Vec::<ChunkRef>::new();
+    let mut buf = vec![0u8; DEFAULT_CHUNK_SIZE];
+
+    loop {
+        let n = file
+            .read(&mut buf)
+            .await
+            .map_err(|e| format!("read file: {e}"))?;
+        if n == 0 {
+            break;
+        }
+
+        let hash = blake3::hash(&buf[..n]).to_hex().to_string();
+        if !is_valid_chunk_hash(&hash) {
+            return Err(format!("invalid chunk hash for file: {}", path.display()));
+        }
+        out.push(ChunkRef {
+            hash,
+            size: n as u64,
+        });
+    }
+
+    Ok(out)
+}
 
 fn chunk_file(data: &[u8]) -> Vec<ChunkRef> {
     let mut out = Vec::new();
