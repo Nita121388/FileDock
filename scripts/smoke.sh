@@ -13,6 +13,7 @@ need() {
 need curl
 need sha256sum
 need mktemp
+need python3
 
 PORT="${FILEDOCK_SMOKE_PORT:-8787}"
 ADDR="127.0.0.1:${PORT}"
@@ -79,6 +80,7 @@ mkdir -p "$SRC/a/b"
 echo "hello" > "$SRC/hello.txt"
 echo "nested" > "$SRC/a/b/nested.txt"
 dd if=/dev/urandom of="$SRC/blob.bin" bs=1024 count=16 status=none
+touch "$SRC/empty.txt"
 
 echo "[smoke] pushing folder..."
 PUSH_OUT="$(run_cli push-folder --server "$BASE" --device smoke --folder "$SRC")"
@@ -101,4 +103,46 @@ echo "[smoke] comparing hashes..."
 (cd "$OUT" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$TMP/out.sha256"
 
 diff -u "$TMP/src.sha256" "$TMP/out.sha256" >/dev/null
+
+echo "[smoke] testing ignore file (.filedockignore)..."
+SRC2="$TMP/src2"
+OUT2="$TMP/out2"
+mkdir -p "$SRC2" "$OUT2"
+echo "keep" > "$SRC2/keep.txt"
+dd if=/dev/urandom of="$SRC2/skip.bin" bs=1024 count=4 status=none
+cat > "$SRC2/.filedockignore" <<'EOF'
+# ignore binary
+skip.bin
+EOF
+
+PUSH_OUT2="$(run_cli push-folder --server "$BASE" --device smoke --folder "$SRC2")"
+SNAPSHOT_ID2="$(echo "$PUSH_OUT2" | sed -n 's/^snapshot:[[:space:]]*//p' | head -n1)"
+if [ -z "$SNAPSHOT_ID2" ]; then
+  echo "[smoke] could not parse snapshot id (ignore test)" >&2
+  exit 1
+fi
+run_cli pull-folder --server "$BASE" --snapshot "$SNAPSHOT_ID2" --out "$OUT2" --concurrency 4 >/dev/null
+test -f "$OUT2/keep.txt"
+test ! -f "$OUT2/skip.bin"
+
+echo "[smoke] testing delete + GC..."
+run_cli delete-snapshot --server "$BASE" --snapshot "$SNAPSHOT_ID" >/dev/null
+run_cli delete-snapshot --server "$BASE" --snapshot "$SNAPSHOT_ID2" >/dev/null
+
+GC_DRY="$(run_cli gc-chunks --server "$BASE" --dry-run)"
+python3 - <<PY
+import json, sys
+obj=json.loads("""$GC_DRY""")
+assert obj["unreferenced_chunks"] >= 1, obj
+PY
+
+# Actually delete chunks (cap to keep this bounded even on reused tmp dirs).
+run_cli gc-chunks --server "$BASE" --max-delete 100000 >/dev/null
+GC_DRY2="$(run_cli gc-chunks --server "$BASE" --dry-run)"
+python3 - <<PY
+import json, sys
+obj=json.loads("""$GC_DRY2""")
+assert obj["unreferenced_chunks"] == 0, obj
+PY
+
 echo "[smoke] OK"

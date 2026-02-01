@@ -26,5 +26,7 @@ This script:
 - pushes it as a snapshot
 - restores it to a new folder
 - compares file hashes
+- exercises `.filedockignore`
+- exercises snapshot delete + chunk GC
 
 If it exits with code 0, the basic end-to-end flow works.
