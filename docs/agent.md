@@ -70,14 +70,15 @@ You can also run the config-file agent via systemd using:
 
 Recommended pattern:
 - Create `/etc/filedock/<name>.env` to hold env vars (tokens).
-- Enable the timer instance: `filedock-backup@<name>.timer`.
+- If you use `filedock-backup@.timer`, the schedule is owned by systemd and `--interval-secs` should be `0`.
+- If you use `filedock-agent@.service`, the schedule is owned by `agent.toml` (`interval_secs`).
 
 ## macOS (launchd) template
 
-See `deploy/launchd/com.filedock.backup.plist`.
+See `deploy/launchd/com.filedock.backup.plist` (runs `filedock agent --config ...` and keeps it alive).
 
 ## Windows (Task Scheduler) example
 
-See `deploy/windows/backup.ps1`.
+See `deploy/windows/backup.ps1` (runs `filedock agent --config ...`).
 
 Create a Task Scheduler entry that runs the script every N minutes.
