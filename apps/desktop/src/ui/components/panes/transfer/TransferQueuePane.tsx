@@ -1,5 +1,31 @@
 import type { TransferJob } from "../../../model/transfers";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+const QUEUE_KEY = "filedock.desktop.queue.v1";
+
+function loadQueueSettings(): { concurrency: number; paused: boolean } {
+  try {
+    const raw = localStorage.getItem(QUEUE_KEY);
+    if (!raw) return { concurrency: 2, paused: false };
+    const parsed = JSON.parse(raw) as any;
+    const concurrency = Number(parsed?.concurrency);
+    const paused = Boolean(parsed?.paused);
+    return {
+      concurrency: Number.isFinite(concurrency) && concurrency >= 1 ? Math.min(8, Math.floor(concurrency)) : 2,
+      paused
+    };
+  } catch {
+    return { concurrency: 2, paused: false };
+  }
+}
+
+function saveQueueSettings(next: { concurrency: number; paused: boolean }) {
+  try {
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+}
 
 export default function TransferQueuePane(props: {
   transfers: TransferJob[];
@@ -9,9 +35,26 @@ export default function TransferQueuePane(props: {
 }) {
   const { transfers, onEnqueueDownload, onRemove, onRun } = props;
   const [busy, setBusy] = useState(false);
+  const [queue, setQueue] = useState(() => loadQueueSettings());
+  const pausedRef = useRef(queue.paused);
+
+  useEffect(() => {
+    pausedRef.current = queue.paused;
+    saveQueueSettings(queue);
+  }, [queue]);
+
+  const counts = useMemo(() => {
+    return {
+      queued: transfers.filter((x) => x.status === "queued").length,
+      running: transfers.filter((x) => x.status === "running").length,
+      failed: transfers.filter((x) => x.status === "failed").length,
+      done: transfers.filter((x) => x.status === "done").length
+    };
+  }, [transfers]);
 
   const runAll = async (mode: "queued" | "failed" | "all") => {
     if (busy) return;
+    if (queue.paused) return;
     setBusy(true);
     try {
       const ids = transfers
@@ -23,10 +66,21 @@ export default function TransferQueuePane(props: {
         })
         .map((j) => j.id);
 
-      // MVP: sequential execution keeps UI predictable and avoids overloading the server.
-      for (const id of ids) {
-        await onRun(id);
-      }
+      const limit = Math.max(1, Math.min(8, Math.floor(queue.concurrency || 1)));
+      let next = 0;
+
+      // MVP: "pause" stops scheduling new jobs; current running jobs finish.
+      const worker = async () => {
+        while (true) {
+          if (pausedRef.current) return;
+          const i = next++;
+          if (i >= ids.length) return;
+          await onRun(ids[i]!);
+        }
+      };
+
+      const workers = Array.from({ length: Math.min(limit, ids.length) }, () => worker());
+      await Promise.all(workers);
     } finally {
       setBusy(false);
     }
@@ -76,27 +130,50 @@ export default function TransferQueuePane(props: {
             <div className="queue-title">Queue</div>
             <div className="queue-sub">
               <span className="pill pill-queued">
-                {transfers.filter((x) => x.status === "queued").length} queued
+                {counts.queued} queued
               </span>
               <span className="pill pill-running">
-                {transfers.filter((x) => x.status === "running").length} running
+                {counts.running} running
               </span>
               <span className="pill pill-failed">
-                {transfers.filter((x) => x.status === "failed").length} failed
+                {counts.failed} failed
               </span>
               <span className="pill pill-done">
-                {transfers.filter((x) => x.status === "done").length} done
+                {counts.done} done
               </span>
+              <span className="queue-path">concurrency</span>
+              <input
+                className="conn-input"
+                style={{ width: 70 }}
+                type="number"
+                min={1}
+                max={8}
+                step={1}
+                value={queue.concurrency}
+                disabled={busy}
+                onChange={(e) =>
+                  setQueue((q) => ({ ...q, concurrency: Math.max(1, Math.min(8, Number(e.target.value) || 1)) }))
+                }
+                title="Max concurrent jobs"
+              />
             </div>
           </div>
           <div className="queue-actions">
-            <button className="db-mini" disabled={busy} onClick={() => runAll("queued")} title="Run queued">
+            <button
+              className="db-mini"
+              disabled={busy || counts.running > 0}
+              onClick={() => setQueue((q) => ({ ...q, paused: !q.paused }))}
+              title={queue.paused ? "Resume scheduling" : "Pause scheduling (running jobs will finish)"}
+            >
+              {queue.paused ? "Resume" : "Pause"}
+            </button>
+            <button className="db-mini" disabled={busy || queue.paused} onClick={() => runAll("queued")} title="Run queued">
               Run queued
             </button>
-            <button className="db-mini" disabled={busy} onClick={() => runAll("failed")} title="Retry failed">
+            <button className="db-mini" disabled={busy || queue.paused} onClick={() => runAll("failed")} title="Retry failed">
               Retry failed
             </button>
-            <button className="db-mini" disabled={busy} onClick={() => runAll("all")} title="Run all pending">
+            <button className="db-mini" disabled={busy || queue.paused} onClick={() => runAll("all")} title="Run all pending">
               Run all
             </button>
             <button className="db-mini" disabled={busy} onClick={clearDone} title="Clear done">
@@ -139,7 +216,7 @@ export default function TransferQueuePane(props: {
           <div className="queue-actions">
             <button
               className="db-mini"
-              disabled={busy || j.status === "done" || j.status === "running"}
+              disabled={busy || queue.paused || j.status === "done" || j.status === "running"}
               onClick={() => onRun(j.id)}
               title="Run transfer"
             >
