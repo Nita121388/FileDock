@@ -4,10 +4,12 @@ use filedock_protocol::{
     ChunkRef, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, ManifestFileEntry,
     TreeResponse, SnapshotMeta,
 };
+use futures_util::stream::{self, StreamExt};
 use std::path::PathBuf;
 use walkdir::WalkDir;
 
 const PRESENCE_BATCH: usize = 1000;
+const DEFAULT_CONCURRENCY: usize = 4;
 
 #[derive(Parser, Debug)]
 #[command(name = "filedock", version, about = "FileDock CLI")]
@@ -45,6 +47,10 @@ enum Command {
         /// Root folder to back up.
         #[arg(long)]
         folder: PathBuf,
+
+        /// Number of files to upload in parallel.
+        #[arg(long, default_value_t = DEFAULT_CONCURRENCY)]
+        concurrency: usize,
     },
 
     /// List a snapshot directory (server-side) using the uploaded manifest.
@@ -94,6 +100,10 @@ enum Command {
         /// Output folder.
         #[arg(long)]
         out: PathBuf,
+
+        /// Number of files to download in parallel.
+        #[arg(long, default_value_t = DEFAULT_CONCURRENCY)]
+        concurrency: usize,
     },
 
     /// List snapshots known to the server.
@@ -152,6 +162,7 @@ async fn main() -> Result<(), String> {
             server,
             device,
             folder,
+            concurrency,
         } => {
             let client = reqwest::Client::new();
 
@@ -192,6 +203,7 @@ async fn main() -> Result<(), String> {
             // Pass 1: build file plans and gather all chunk hashes.
             let mut plans = Vec::<FilePlan>::new();
             let mut all_hashes = Vec::<String>::new();
+            let mut total_bytes = 0u64;
 
             for entry in WalkDir::new(&root).follow_links(false) {
                 let entry = entry.map_err(|e| format!("walkdir: {e}"))?;
@@ -213,6 +225,7 @@ async fn main() -> Result<(), String> {
                     .await
                     .map_err(|e| format!("stat file: {e}"))?;
                 let size = meta.len();
+                total_bytes = total_bytes.saturating_add(size);
                 let mtime_unix = meta
                     .modified()
                     .ok()
@@ -244,29 +257,64 @@ async fn main() -> Result<(), String> {
             let missing: std::collections::HashSet<String> =
                 pres_resp.missing.into_iter().collect();
 
-            // Pass 2: upload missing chunks.
-            let mut files = Vec::new();
-            for plan in plans {
-                let data = tokio::fs::read(&plan.abs_path)
-                    .await
-                    .map_err(|e| format!("read file: {e}"))?;
+            let total_files = plans.len() as u64;
+            println!(
+                "files: {}  bytes: {}  missing_chunks: {}",
+                total_files,
+                total_bytes,
+                missing.len()
+            );
 
-                let mut offset = 0usize;
-                for c in &plan.chunks {
-                    let end = offset + c.size as usize;
-                    if missing.contains(&c.hash) {
-                        put_chunk(&client, &server, &c.hash, data[offset..end].to_vec()).await?;
+            // Pass 2: upload missing chunks, concurrent by file.
+            let uploaded_files = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let uploaded_bytes = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let server_base = server.trim_end_matches('/').to_string();
+            let missing = std::sync::Arc::new(missing);
+
+            let results: Vec<Result<ManifestFileEntry, String>> = stream::iter(plans.into_iter())
+                .map(|plan| {
+                    let client = client.clone();
+                    let missing = missing.clone();
+                    let uploaded_files = uploaded_files.clone();
+                    let uploaded_bytes = uploaded_bytes.clone();
+                    let server_base = server_base.clone();
+                    async move {
+                        let data = tokio::fs::read(&plan.abs_path)
+                            .await
+                            .map_err(|e| format!("read file: {e}"))?;
+
+                        let mut offset = 0usize;
+                        for c in &plan.chunks {
+                            let end = offset + c.size as usize;
+                            if missing.contains(&c.hash) {
+                                put_chunk(&client, &server_base, &c.hash, data[offset..end].to_vec())
+                                    .await?;
+                            }
+                            offset = end;
+                        }
+
+                        let done_files = uploaded_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                        let done_bytes = uploaded_bytes.fetch_add(plan.size, std::sync::atomic::Ordering::Relaxed) + plan.size;
+                        if done_files % 25 == 0 || done_files == total_files {
+                            eprintln!("uploaded files: {done_files}/{total_files}  bytes: {done_bytes}/{total_bytes}");
+                        }
+
+                        Ok(ManifestFileEntry {
+                            path: plan.rel_path,
+                            size: plan.size,
+                            mtime_unix: plan.mtime_unix,
+                            chunk_hash: None,
+                            chunks: Some(plan.chunks),
+                        })
                     }
-                    offset = end;
-                }
+                })
+                .buffer_unordered(concurrency.max(1))
+                .collect()
+                .await;
 
-                files.push(ManifestFileEntry {
-                    path: plan.rel_path,
-                    size: plan.size,
-                    mtime_unix: plan.mtime_unix,
-                    chunk_hash: None,
-                    chunks: Some(plan.chunks),
-                });
+            let mut files = Vec::new();
+            for r in results {
+                files.push(r?);
             }
 
             let manifest = SnapshotManifest {
@@ -358,6 +406,7 @@ async fn main() -> Result<(), String> {
             server,
             snapshot,
             out,
+            concurrency,
         } => {
             let client = reqwest::Client::new();
 
@@ -377,34 +426,52 @@ async fn main() -> Result<(), String> {
                 .await
                 .map_err(|e| format!("manifest decode: {e}"))?;
 
-            for f in manifest.files {
-                let rel_path = f.path;
-                let out_path = out.join(rel_path.replace('/', std::path::MAIN_SEPARATOR_STR));
-                let url = format!(
-                    "{}/v1/snapshots/{}/file",
-                    server.trim_end_matches('/'),
-                    snapshot
-                );
-                let bytes = client
-                    .get(url)
-                    .query(&[("path", rel_path)])
-                    .send()
-                    .await
-                    .map_err(|e| format!("file request: {e}"))?
-                    .error_for_status()
-                    .map_err(|e| format!("file response: {e}"))?
-                    .bytes()
-                    .await
-                    .map_err(|e| format!("read bytes: {e}"))?;
+            let total_files = manifest.files.len() as u64;
+            let downloaded_files = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
 
-                if let Some(parent) = out_path.parent() {
-                    tokio::fs::create_dir_all(parent)
-                        .await
-                        .map_err(|e| format!("mkdir: {e}"))?;
-                }
-                tokio::fs::write(&out_path, &bytes)
-                    .await
-                    .map_err(|e| format!("write out: {e}"))?;
+            let server_base = server.trim_end_matches('/').to_string();
+            let snapshot_id = snapshot.clone();
+            let out_root = out.clone();
+
+            let results: Vec<Result<(), String>> = stream::iter(manifest.files.into_iter())
+                .map(|f| {
+                    let client = client.clone();
+                    let downloaded_files = downloaded_files.clone();
+                    let server_base = server_base.clone();
+                    let snapshot_id = snapshot_id.clone();
+                    let out_root = out_root.clone();
+                    async move {
+                        let rel_path = f.path;
+                        let out_path = out_root.join(rel_path.replace('/', std::path::MAIN_SEPARATOR_STR));
+                        let url = format!(
+                            "{}/v1/snapshots/{}/file",
+                            server_base,
+                            snapshot_id
+                        );
+                        let bytes = get_bytes_with_retry(&client, &url, &[("path", rel_path.as_str())]).await?;
+
+                        if let Some(parent) = out_path.parent() {
+                            tokio::fs::create_dir_all(parent)
+                                .await
+                                .map_err(|e| format!("mkdir: {e}"))?;
+                        }
+                        tokio::fs::write(&out_path, &bytes)
+                            .await
+                            .map_err(|e| format!("write out: {e}"))?;
+
+                        let done = downloaded_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                        if done % 25 == 0 || done == total_files {
+                            eprintln!("downloaded files: {done}/{total_files}");
+                        }
+                        Ok(())
+                    }
+                })
+                .buffer_unordered(concurrency.max(1))
+                .collect()
+                .await;
+
+            for r in results {
+                r?;
             }
 
             println!("restored to: {}", out.display());
@@ -505,6 +572,40 @@ async fn put_chunk(
         }
 
         // 250ms, 500ms, 1000ms (+ jitter)
+        let base_ms = 250u64.saturating_mul(1u64 << (attempt - 1));
+        let jitter: u64 = rand::random::<u8>() as u64;
+        tokio::time::sleep(std::time::Duration::from_millis(base_ms + jitter)).await;
+    }
+}
+
+async fn get_bytes_with_retry(
+    client: &reqwest::Client,
+    url: &str,
+    query: &[(&str, &str)],
+) -> Result<bytes::Bytes, String> {
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        let resp = client.get(url).query(query).send().await;
+        match resp {
+            Ok(r) if r.status().is_success() => {
+                return r
+                    .bytes()
+                    .await
+                    .map_err(|e| format!("read bytes: {e}"));
+            }
+            Ok(r) => {
+                if attempt >= 4 {
+                    return Err(format!("download failed: {}", r.status()));
+                }
+            }
+            Err(e) => {
+                if attempt >= 4 {
+                    return Err(format!("download request: {e}"));
+                }
+            }
+        }
+
         let base_ms = 250u64.saturating_mul(1u64 << (attempt - 1));
         let jitter: u64 = rand::random::<u8>() as u64;
         tokio::time::sleep(std::time::Duration::from_millis(base_ms + jitter)).await;

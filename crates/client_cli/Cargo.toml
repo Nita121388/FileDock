@@ -12,5 +12,6 @@ blake3 = "1"
 bytes = "1"
 walkdir = "2"
 rand = "0.8"
+futures-util = "0.3"
 
 filedock-protocol = { path = "../protocol" }

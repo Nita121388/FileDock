@@ -34,7 +34,7 @@ cargo run -p filedock -- push-file --server http://127.0.0.1:8787 --file ./path/
 ### Push a Folder (snapshot + manifest MVP)
 
 ```bash
-cargo run -p filedock -- push-folder --server http://127.0.0.1:8787 --device my-laptop --folder ./some/folder
+cargo run -p filedock -- push-folder --server http://127.0.0.1:8787 --device my-laptop --folder ./some/folder --concurrency 4
 ```
 
 ### Browse a Snapshot (tree)
@@ -52,7 +52,7 @@ cargo run -p filedock -- pull-file --server http://127.0.0.1:8787 --snapshot <sn
 ### Restore a Snapshot (download folder)
 
 ```bash
-cargo run -p filedock -- pull-folder --server http://127.0.0.1:8787 --snapshot <snapshot_id> --out ./restored_snapshot
+cargo run -p filedock -- pull-folder --server http://127.0.0.1:8787 --snapshot <snapshot_id> --out ./restored_snapshot --concurrency 4
 ```
 
 ### List Snapshots
