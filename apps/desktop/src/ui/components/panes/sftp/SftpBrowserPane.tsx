@@ -188,6 +188,64 @@ export default function SftpBrowserPane(props: {
     }
   }
 
+  async function onRenameEntry(ent: Entry) {
+    const nextName = prompt("Rename to?", ent.name);
+    if (!nextName) return;
+    if (nextName.includes("/")) {
+      setErr("Invalid name: must not contain '/'");
+      return;
+    }
+
+    const from = st.path && st.path !== "/" ? joinPosix(st.path, ent.name) : `/${ent.name}`;
+    const to = st.path && st.path !== "/" ? joinPosix(st.path, nextName) : `/${nextName}`;
+    if (from === to) return;
+
+    setErr(null);
+    setLoading(true);
+    try {
+      await call("mv", { from, to });
+      await refresh();
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onMoveEntry(ent: Entry) {
+    const from = st.path && st.path !== "/" ? joinPosix(st.path, ent.name) : `/${ent.name}`;
+    const to = prompt("Move to (absolute POSIX path)?", from);
+    if (!to) return;
+
+    setErr(null);
+    setLoading(true);
+    try {
+      await call("mv", { from, to });
+      await refresh();
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onDeleteEntry(ent: Entry) {
+    const p = st.path && st.path !== "/" ? joinPosix(st.path, ent.name) : `/${ent.name}`;
+    const ok = confirm(`Delete ${ent.kind} ${p}? (recursive delete is disabled)`);
+    if (!ok) return;
+
+    setErr(null);
+    setLoading(true);
+    try {
+      await call("rm", { path: p, recursive: false });
+      await refresh();
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="pane sftp-pane">
       <div className="pane-toolbar">
@@ -352,11 +410,22 @@ export default function SftpBrowserPane(props: {
             <div>{e.kind}</div>
             <div className="mono">{typeof e.size === "number" ? e.size : ""}</div>
             <div>
-              {e.kind === "file" ? (
-                <button className="pane-btn" onClick={() => onDownloadFile(e.name)} disabled={loading}>
-                  Download
+              <div className="pane-actions">
+                {e.kind === "file" ? (
+                  <button className="pane-btn" onClick={() => onDownloadFile(e.name)} disabled={loading}>
+                    Download
+                  </button>
+                ) : null}
+                <button className="pane-btn" onClick={() => onRenameEntry(e)} disabled={loading}>
+                  Rename
                 </button>
-              ) : null}
+                <button className="pane-btn" onClick={() => onMoveEntry(e)} disabled={loading}>
+                  Move
+                </button>
+                <button className="pane-btn danger" onClick={() => onDeleteEntry(e)} disabled={loading}>
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
         ))}
@@ -364,4 +433,3 @@ export default function SftpBrowserPane(props: {
     </div>
   );
 }
-
