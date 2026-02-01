@@ -49,3 +49,22 @@ export async function restoreSnapshotToFolder(
 export async function cancelRestoreSnapshot(snapshotId: string): Promise<boolean> {
   return await invoke<boolean>("cancel_restore_snapshot", { snapshotId });
 }
+
+export type RunFiledockPluginRequest = {
+  name: string;
+  json: string;
+  timeout_secs?: number;
+  filedock_path?: string;
+  plugin_dirs?: string[];
+};
+
+export type RunFiledockPluginResponse = {
+  stdout: string;
+  stderr: string;
+};
+
+export async function runFiledockPlugin(
+  req: RunFiledockPluginRequest
+): Promise<RunFiledockPluginResponse> {
+  return await invoke<RunFiledockPluginResponse>("run_filedock_plugin", { req });
+}

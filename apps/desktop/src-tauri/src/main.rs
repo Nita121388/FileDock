@@ -380,8 +380,82 @@ fn main() {
         .manage(RestoreManager::default())
         .invoke_handler(tauri::generate_handler![
             restore_snapshot_to_folder,
-            cancel_restore_snapshot
+            cancel_restore_snapshot,
+            run_filedock_plugin
         ])
         .run(tauri::generate_context!())
         .expect("error while running filedock desktop");
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct RunFiledockPluginRequest {
+    name: String,
+    json: String,
+    timeout_secs: Option<u64>,
+    filedock_path: Option<String>,
+    plugin_dirs: Option<Vec<String>>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct RunFiledockPluginResponse {
+    stdout: String,
+    stderr: String,
+}
+
+#[tauri::command]
+async fn run_filedock_plugin(req: RunFiledockPluginRequest) -> Result<RunFiledockPluginResponse, String> {
+    let name = req.name.trim().to_string();
+    if name.is_empty() {
+        return Err("name required".to_string());
+    }
+
+    // Validate JSON early so the UI gets clean errors.
+    let _: serde_json::Value =
+        serde_json::from_str(&req.json).map_err(|e| format!("invalid json: {e}"))?;
+
+    let filedock = req
+        .filedock_path
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "filedock".to_string());
+
+    let timeout_secs = req.timeout_secs.unwrap_or(30).max(1);
+
+    let mut cmd = tokio::process::Command::new(filedock);
+    cmd.arg("plugin")
+        .arg("run")
+        .arg("--name")
+        .arg(&name)
+        .arg("--json")
+        .arg(&req.json)
+        .arg("--raw")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    if let Some(dirs) = req.plugin_dirs.as_ref() {
+        let joined = dirs
+            .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(":");
+        if !joined.is_empty() {
+            cmd.env("FILEDOCK_PLUGIN_DIRS", joined);
+        }
+    }
+
+    let output = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output())
+        .await
+        .map_err(|_| format!("plugin timed out after {timeout_secs}s"))?
+        .map_err(|e| format!("spawn filedock: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() {
+        return Err(format!("plugin failed: {} {}", output.status, stderr.trim()));
+    }
+
+    Ok(RunFiledockPluginResponse { stdout, stderr })
 }
