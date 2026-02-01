@@ -1,17 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PaneTab } from "../../../model/layout";
 import type { Settings } from "../../../model/settings";
 import type { Conn } from "../../../model/transfers";
 import {
   apiGetBytes,
+  chunksPresence,
+  createSnapshot,
   getTree,
   listDevices,
   listSnapshots,
+  putChunk,
+  putManifest,
   registerDevice,
   type DeviceInfo,
   type SnapshotMeta,
   type TreeEntry
 } from "../../../api/client";
+import { chunkBytes } from "../../../util/chunking";
 
 type DeviceTab = Extract<PaneTab, { pane: "deviceBrowser" }>;
 
@@ -53,6 +58,7 @@ export default function DeviceBrowserPane(props: {
   const [snapshots, setSnapshots] = useState<SnapshotMeta[]>([]);
   const [entries, setEntries] = useState<TreeEntry[]>([]);
   const [loadedKey, setLoadedKey] = useState<string>("");
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const deviceName = tab.state.deviceName;
   const snapshotId = tab.state.snapshotId;
@@ -188,6 +194,72 @@ export default function DeviceBrowserPane(props: {
       refreshTree(snapshotId, path);
     }
   }, [loadedKey, path, refreshTree, snapshotId]);
+
+  const uploadFile = useCallback(
+    async (file: File) => {
+      if (!file) return;
+      if (!deviceName) return;
+      setLoading(true);
+      try {
+        const buf = new Uint8Array(await file.arrayBuffer());
+        const refs = chunkBytes(buf);
+        const hashes = refs.map((c) => c.hash);
+
+        // Presence (batched) to reduce requests.
+        const missing = new Set<string>();
+        const batchSize = 1000;
+        for (let i = 0; i < hashes.length; i += batchSize) {
+          const batch = hashes.slice(i, i + batchSize);
+          const resp = await chunksPresence(effSettings, { hashes: batch });
+          for (const h of resp.missing) missing.add(h);
+        }
+
+        // Upload missing chunks.
+        let offset = 0;
+        for (const c of refs) {
+          const end = offset + c.size;
+          if (missing.has(c.hash)) {
+            await putChunk(effSettings, c.hash, buf.subarray(offset, end));
+          }
+          offset = end;
+        }
+
+        // Create a one-file snapshot manifest on destination.
+        const now = Math.floor(Date.now() / 1000);
+        const snap = await createSnapshot(effSettings, {
+          device_name: deviceName,
+          device_id: tab.state.deviceId?.trim() ? tab.state.deviceId.trim() : null,
+          root_path: "(upload)"
+        });
+        const dstPath = path ? `${path}/${file.name}` : file.name;
+        await putManifest(effSettings, snap.snapshot_id, {
+          snapshot_id: snap.snapshot_id,
+          created_unix: now,
+          files: [
+            {
+              path: dstPath,
+              size: buf.length,
+              mtime_unix: now,
+              chunk_hash: null,
+              chunks: refs
+            }
+          ]
+        });
+
+        setStatus(`uploaded ${file.name} -> /${dstPath} (snapshot ${snap.snapshot_id})`);
+        await refreshSnapshots();
+
+        // Jump into the new snapshot at the current directory.
+        onTabChange({ ...tab, state: { ...tab.state, snapshotId: snap.snapshot_id } });
+        await refreshTree(snap.snapshot_id, path);
+      } catch (e: any) {
+        setStatus(String(e?.message ?? e));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [deviceName, effSettings, onTabChange, path, refreshSnapshots, refreshTree, tab]
+  );
 
   return (
     <div className="device-browser">
@@ -353,6 +425,29 @@ export default function DeviceBrowserPane(props: {
           Tree
           <span className="db-head-right">
             <span className="db-path">/{path || ""}</span>
+            <input
+              ref={uploadInputRef}
+              type="file"
+              style={{ display: "none" }}
+              onChange={async (e) => {
+                const f = e.currentTarget.files?.[0];
+                if (f) await uploadFile(f);
+                // Reset so picking the same file again still triggers onChange.
+                e.currentTarget.value = "";
+              }}
+            />
+            <button
+              className="db-mini"
+              disabled={loading || !deviceName}
+              onClick={() => uploadInputRef.current?.click()}
+              title={
+                deviceName
+                  ? "Upload a local file into this device/path (creates a new snapshot)"
+                  : "Select a device first"
+              }
+            >
+              UL
+            </button>
             <button
               className="db-mini"
               disabled={!snapshotId || loading}
@@ -372,38 +467,46 @@ export default function DeviceBrowserPane(props: {
           className="db-tree"
           onDragOver={(e) => {
             const t = Array.from(e.dataTransfer.types);
-            if (t.includes("application/x-filedock-file")) e.preventDefault();
+            if (t.includes("application/x-filedock-file") || t.includes("Files")) e.preventDefault();
           }}
-          onDrop={(e) => {
+          onDrop={async (e) => {
             const raw = e.dataTransfer.getData("application/x-filedock-file");
-            if (!raw) return;
-            e.preventDefault();
-            try {
-              const parsed = JSON.parse(raw) as {
-                src: Conn;
-                snapshotId: string;
-                path: string;
-                name?: string;
-              };
-              if (!parsed?.src?.serverBaseUrl || !parsed.snapshotId || !parsed.path) return;
+            if (raw) {
+              e.preventDefault();
+              try {
+                const parsed = JSON.parse(raw) as {
+                  src: Conn;
+                  snapshotId: string;
+                  path: string;
+                  name?: string;
+                };
+                if (!parsed?.src?.serverBaseUrl || !parsed.snapshotId || !parsed.path) return;
 
-              // Drop means: copy file from source server into this destination server/device context.
-              // For MVP we create a new snapshot on destination (one-file manifest) under this device.
-              const fileName = parsed.name || parsed.path.split("/").pop() || "file";
-              const dstPath = path ? `${path}/${fileName}` : fileName;
-              onEnqueueCopy({
-                src: parsed.src,
-                srcSnapshotId: parsed.snapshotId,
-                srcPath: parsed.path,
-                dst: effConn,
-                dstDeviceName: deviceName || "device",
-                dstDeviceId: tab.state.deviceId || undefined,
-                dstPath
-              });
-              setStatus(`queued copy: ${parsed.path} -> ${dstPath}`);
-            } catch {
-              // ignore
+                // Drop means: copy file from source server into this destination server/device context.
+                // For MVP we create a new snapshot on destination (one-file manifest) under this device.
+                const fileName = parsed.name || parsed.path.split("/").pop() || "file";
+                const dstPath = path ? `${path}/${fileName}` : fileName;
+                onEnqueueCopy({
+                  src: parsed.src,
+                  srcSnapshotId: parsed.snapshotId,
+                  srcPath: parsed.path,
+                  dst: effConn,
+                  dstDeviceName: deviceName || "device",
+                  dstDeviceId: tab.state.deviceId || undefined,
+                  dstPath
+                });
+                setStatus(`queued copy: ${parsed.path} -> ${dstPath}`);
+              } catch {
+                // ignore
+              }
+              return;
             }
+
+            // Local file drop: upload into this device/path (one-file snapshot).
+            const f = e.dataTransfer.files?.[0];
+            if (!f || !deviceName) return;
+            e.preventDefault();
+            await uploadFile(f);
           }}
         >
           {!snapshotId ? (
