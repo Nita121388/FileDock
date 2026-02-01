@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Example FileDock plugin.
+# Reads a JSON document from stdin and prints a JSON response on stdout.
+
+IN="$(cat)"
+
+# Best-effort: validate that input is JSON.
+if command -v python3 >/dev/null 2>&1; then
+  python3 - <<PY >/dev/null
+import json, sys
+json.loads(sys.stdin.read())
+PY
+fi
+
+cat <<EOF
+{"ok":true,"plugin":"notify","received":$IN}
+EOF
+

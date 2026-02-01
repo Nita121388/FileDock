@@ -130,3 +130,17 @@ Open two Device Browser panes (either in tabs or split panes), connect each to a
 
 - Rust/Tauri prerequisites vary by platform. See `docs/build.md` for details.
 - This repo is developed in small "phase" commits; see `progress/` for a running diary.
+
+## Plugins (optional)
+
+List plugins:
+
+```bash
+cargo run -p filedock -- plugin list
+```
+
+Run the example plugin shipped in this repo:
+
+```bash
+cargo run -p filedock -- plugin run --name notify --json '{"event":"hello","ts":123}'
+```
