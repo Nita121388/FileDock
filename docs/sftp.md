@@ -147,3 +147,7 @@ From the repo root:
 go build -o plugins/bin/filedock-sftp ./plugins/sftp
 ```
 
+## Desktop app bundling
+
+For packaged desktop builds, bundle `filedock` and `filedock-sftp` as Tauri sidecar binaries.
+See `docs/desktop.md`.

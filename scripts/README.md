@@ -11,6 +11,7 @@ Common:
 - `scripts/dev.sh` - run server + desktop UI (dev)
 - `scripts/build.sh` - build server + CLI + desktop UI
 - `scripts/build-plugins.sh` - build optional plugins (currently: `filedock-sftp` if Go is installed)
+- `scripts/build-desktop-sidecars.sh` - build desktop sidecar binaries for Tauri bundling (`filedock`, optional `filedock-sftp`)
 - `scripts/release.sh` - build and collect local release artifacts into `dist/`
 - `scripts/smoke.sh` - end-to-end server+CLI smoke test (push-folder + pull-folder + hash compare)
 - `scripts/check.sh` - local "CI-like" checks (fmt/clippy/test + desktop build + smoke)

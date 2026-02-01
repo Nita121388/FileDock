@@ -402,6 +402,43 @@ struct RunFiledockPluginResponse {
     stderr: String,
 }
 
+fn resolve_filedock_path(explicit: Option<&str>) -> (String, Option<PathBuf>) {
+    if let Some(p) = explicit.map(str::trim).filter(|s| !s.is_empty()) {
+        let pb = PathBuf::from(p);
+        return (p.to_string(), pb.parent().map(Path::to_path_buf));
+    }
+
+    // For packaged apps, prefer a sidecar binary next to the main executable.
+    // Fall back to "filedock" on PATH.
+    let exe = tauri::process::current_binary().ok();
+    let exe_dir = exe.as_deref().and_then(|p| p.parent()).map(Path::to_path_buf);
+    if let Some(dir) = exe_dir {
+        let mut candidates = vec![dir.join("filedock")];
+        if cfg!(windows) {
+            candidates.push(dir.join("filedock.exe"));
+        }
+
+        // Also accept any file matching filedock-<triple> in the same dir (best-effort).
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                let p = e.path();
+                let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                if name.starts_with("filedock-") {
+                    candidates.push(p);
+                }
+            }
+        }
+
+        for c in candidates {
+            if c.is_file() {
+                return (c.to_string_lossy().to_string(), c.parent().map(Path::to_path_buf));
+            }
+        }
+    }
+
+    ("filedock".to_string(), None)
+}
+
 #[tauri::command]
 async fn run_filedock_plugin(req: RunFiledockPluginRequest) -> Result<RunFiledockPluginResponse, String> {
     let name = req.name.trim().to_string();
@@ -413,12 +450,7 @@ async fn run_filedock_plugin(req: RunFiledockPluginRequest) -> Result<RunFiledoc
     let _: serde_json::Value =
         serde_json::from_str(&req.json).map_err(|e| format!("invalid json: {e}"))?;
 
-    let filedock = req
-        .filedock_path
-        .as_ref()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "filedock".to_string());
+    let (filedock, filedock_dir) = resolve_filedock_path(req.filedock_path.as_deref());
 
     let timeout_secs = req.timeout_secs.unwrap_or(30).max(1);
 
@@ -444,6 +476,9 @@ async fn run_filedock_plugin(req: RunFiledockPluginRequest) -> Result<RunFiledoc
         if !joined.is_empty() {
             cmd.env("FILEDOCK_PLUGIN_DIRS", joined);
         }
+    } else if let Some(dir) = filedock_dir {
+        // Default to the filedock sidecar directory so plugins (e.g. filedock-sftp) can live alongside it.
+        cmd.env("FILEDOCK_PLUGIN_DIRS", dir.to_string_lossy().to_string());
     }
 
     let output = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output())
