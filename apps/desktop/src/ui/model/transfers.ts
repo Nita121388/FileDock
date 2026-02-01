@@ -44,7 +44,36 @@ export type CopyJob = {
   progress?: TransferProgress;
 };
 
-export type TransferJob = DownloadJob | CopyJob;
+export type ManifestChunkRef = { hash: string; size: number };
+export type ManifestFileEntry = {
+  path: string;
+  size: number;
+  mtime_unix: number;
+  chunks: ManifestChunkRef[];
+};
+
+export type CopyFolderJob = {
+  id: string;
+  kind: "copy_folder";
+  createdAt: number;
+  status: TransferStatus;
+  src: Conn;
+  dst: Conn;
+  srcSnapshotId: string;
+  srcDirPath: string; // snapshot-relative dir ("" means root)
+  dstDeviceName: string;
+  dstDeviceId?: string;
+  dstDirPath: string; // destination dir ("" means root)
+  dstSnapshotId?: string;
+  // Persisted resume state.
+  filePaths?: string[];
+  nextIndex?: number;
+  manifestEntries?: ManifestFileEntry[];
+  error?: string;
+  progress?: TransferProgress;
+};
+
+export type TransferJob = DownloadJob | CopyJob | CopyFolderJob;
 
 const KEY = "filedock.desktop.transfers.v1";
 
@@ -63,10 +92,13 @@ export function loadTransfers(): TransferJob[] {
           j.status === "queued" || j.status === "running" || j.status === "done" || j.status === "failed"
             ? j.status
             : "queued";
-        const withStatus = { ...j, status, progress: undefined };
+        // If the app was restarted mid-transfer, don't leave jobs stuck as "running".
+        const normalizedStatus = status === "running" ? "failed" : status;
+        const withStatus = { ...j, status: normalizedStatus, progress: undefined };
 
         if (j.kind === "download") return withStatus as DownloadJob;
         if (j.kind === "copy_file") return withStatus as CopyJob;
+        if (j.kind === "copy_folder") return withStatus as CopyFolderJob;
         return null;
       })
       .filter((j): j is TransferJob => j !== null);

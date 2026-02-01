@@ -24,6 +24,7 @@ import {
   apiGetUint8Array,
   chunksPresence,
   createSnapshot,
+  getTree,
   putChunk,
   putManifest
 } from "./api/client";
@@ -138,6 +139,34 @@ export default function App() {
     setTransfers((xs) => [job, ...xs]);
   };
 
+  const enqueueCopyFolder = (req: {
+    src: Conn;
+    srcSnapshotId: string;
+    srcDirPath: string;
+    dst: Conn;
+    dstDeviceName: string;
+    dstDeviceId?: string;
+    dstDirPath: string;
+  }) => {
+    const job: TransferJob = {
+      id: uid("xfer"),
+      kind: "copy_folder",
+      createdAt: Date.now(),
+      status: "queued",
+      src: req.src,
+      dst: req.dst,
+      srcSnapshotId: req.srcSnapshotId,
+      srcDirPath: req.srcDirPath,
+      dstDeviceName: req.dstDeviceName,
+      dstDeviceId: req.dstDeviceId,
+      dstDirPath: req.dstDirPath,
+      nextIndex: 0,
+      filePaths: undefined,
+      manifestEntries: undefined
+    } as any;
+    setTransfers((xs) => [job, ...xs]);
+  };
+
   const removeTransfer = (id: string) => setTransfers((xs) => xs.filter((x) => x.id !== id));
   const setTransferStatus = (id: string, status: TransferStatus) => {
     setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, status } : x)));
@@ -147,6 +176,10 @@ export default function App() {
   };
   const setTransferError = (id: string, error: string | undefined) => {
     setTransfers((xs) => xs.map((x) => (x.id === id ? { ...x, error } : x)));
+  };
+
+  const patchTransfer = (id: string, patch: (j: TransferJob) => TransferJob) => {
+    setTransfers((xs) => xs.map((x) => (x.id === id ? patch(x) : x)));
   };
 
   function isAbortError(e: unknown): boolean {
@@ -374,11 +407,175 @@ export default function App() {
     }
   };
 
+  const copyFolderNow = async (id: string) => {
+    const job = transfers.find((x) => x.id === id);
+    if (!job) return;
+    if (job.kind !== "copy_folder") return;
+    if (job.status === "running" || job.status === "done") return;
+
+    const ac = newAborter(id);
+    setTransferStatus(id, "running");
+    setTransferError(id, undefined);
+
+    const srcSettings = connToSettings(job.src);
+    const dstSettings = connToSettings(job.dst);
+    let dstSnapshotId = job.dstSnapshotId;
+    let filesList: string[] = (job.filePaths ?? []) as any;
+    let nextIndex: number = job.nextIndex ?? 0;
+    let entries: any[] = job.manifestEntries ? [...job.manifestEntries] : [];
+
+    try {
+      // 1) Ensure destination snapshot exists.
+      if (!dstSnapshotId) {
+        setTransferProgress(id, { phase: "creating snapshot", pct: 0 });
+        const snap = await createSnapshot(
+          dstSettings,
+          {
+            device_name: job.dstDeviceName,
+            device_id: job.dstDeviceId ?? null,
+            root_path: "(transfer-folder)"
+          },
+          ac.signal
+        );
+        patchTransfer(id, (x) => ({ ...(x as any), dstSnapshotId: snap.snapshot_id }));
+        dstSnapshotId = snap.snapshot_id;
+      }
+
+      // 2) Enumerate all files under the source directory (once; persist for resume).
+      if (!filesList || filesList.length === 0) {
+        setTransferProgress(id, { phase: "enumerating files", pct: 0 });
+        const files: string[] = [];
+        const stack: string[] = [job.srcDirPath || ""];
+        while (stack.length > 0) {
+          const cur = stack.pop()!;
+          const tr = await getTree(srcSettings, job.srcSnapshotId, cur, ac.signal);
+          for (const e of tr.entries) {
+            const child = cur ? `${cur}/${e.name}` : e.name;
+            if (e.kind === "dir") stack.push(child);
+            else files.push(child);
+          }
+          if (stack.length + files.length > 200000) throw new Error("too many files for desktop copy");
+        }
+        files.sort();
+        patchTransfer(id, (x) => ({ ...(x as any), filePaths: files, nextIndex: 0, manifestEntries: [] }));
+        filesList = files;
+        nextIndex = 0;
+        entries = [];
+      }
+
+      const total = filesList.length;
+
+      const bytesPerSec = getRateLimitBytesPerSec();
+
+      // 3) Copy files sequentially (per-job concurrency can come later; queue concurrency already exists).
+      for (let i = nextIndex; i < total; i++) {
+        const srcFilePath = filesList[i]!;
+        const rel = job.srcDirPath ? srcFilePath.slice(job.srcDirPath.length + 1) : srcFilePath;
+        const dstFilePath = job.dstDirPath ? `${job.dstDirPath}/${rel}` : rel;
+
+        const dlLimiter = makeLimiter(bytesPerSec);
+        const buf = await withRetry(async () => {
+          return await apiGetUint8Array(
+            srcSettings,
+            `/v1/snapshots/${encodeURIComponent(job.srcSnapshotId)}/file`,
+            { path: srcFilePath },
+            (done, totalBytes) => {
+              const frac = totalBytes && totalBytes > 0 ? done / totalBytes : 0;
+              const pct = total > 0 ? Math.floor(((i + frac) / total) * 100) : 0;
+              setTransferProgress(id, { phase: `downloading ${srcFilePath}`, doneBytes: done, totalBytes: totalBytes ?? undefined, pct });
+            },
+            ac.signal,
+            dlLimiter ? async (_chunk, doneBytes) => dlLimiter(doneBytes) : undefined
+          );
+        });
+
+        setTransferProgress(id, { phase: `hashing ${srcFilePath}`, pct: total > 0 ? Math.floor(((i + 0.5) / total) * 100) : 0 });
+        const refs = chunkBytes(buf);
+        const hashes = refs.map((c) => c.hash);
+        const manifestChunks = refs.map((c) => ({ hash: c.hash, size: c.size }));
+
+        // Presence on destination.
+        const missing = new Set<string>();
+        const batchSize = 1000;
+        for (let j = 0; j < hashes.length; j += batchSize) {
+          const batch = hashes.slice(j, j + batchSize);
+          const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
+          for (const h of resp.missing) missing.add(h);
+        }
+
+        // Upload missing chunks.
+        const ulLimiter = makeLimiter(bytesPerSec);
+        let offset = 0;
+        let uploaded = 0;
+        for (const c of refs) {
+          const end = offset + c.size;
+          if (missing.has(c.hash)) {
+            await withRetry(async () => {
+              await putChunk(dstSettings, c.hash, buf.subarray(offset, end), ac.signal);
+            });
+            uploaded++;
+          }
+          offset = end;
+          if (ulLimiter) await ulLimiter(offset);
+          const pct = total > 0 ? Math.floor(((i + (offset / Math.max(1, buf.length))) / total) * 100) : 0;
+          setTransferProgress(id, { phase: `uploading ${srcFilePath} (${uploaded}/${missing.size} chunks)`, pct });
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+        entries.push({
+          path: dstFilePath,
+          size: buf.length,
+          mtime_unix: now,
+          chunks: manifestChunks
+        });
+
+        // Persist resume point after each file.
+        patchTransfer(id, (x) => ({ ...(x as any), nextIndex: i + 1, manifestEntries: entries }));
+      }
+
+      setTransferProgress(id, { phase: "writing manifest", pct: 99 });
+      await putManifest(
+        dstSettings,
+        dstSnapshotId!,
+        {
+          snapshot_id: dstSnapshotId!,
+          created_unix: Math.floor(Date.now() / 1000),
+          files: entries.map((e) => ({
+            path: e.path,
+            size: e.size,
+            mtime_unix: e.mtime_unix,
+            chunk_hash: null,
+            chunks: e.chunks
+          }))
+        },
+        ac.signal
+      );
+
+      setTransfers((xs) =>
+        xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined, progress: undefined } : x))
+      );
+    } catch (e: any) {
+      if (isAbortError(e)) {
+        setTransfers((xs) =>
+          xs.map((x) => (x.id === id ? { ...x, status: "failed", error: "canceled", progress: undefined } : x))
+        );
+        return;
+      }
+      const msg = String(e?.message ?? e);
+      setTransfers((xs) =>
+        xs.map((x) => (x.id === id ? { ...x, status: "failed", error: msg, progress: undefined } : x))
+      );
+    } finally {
+      clearAborter(id);
+    }
+  };
+
   const runTransfer = async (id: string) => {
     const job = transfers.find((x) => x.id === id);
     if (!job) return;
     if (job.kind === "download") return downloadNow(id);
     if (job.kind === "copy_file") return copyNow(id);
+    if (job.kind === "copy_folder") return copyFolderNow(id);
   };
 
   return (
@@ -463,6 +660,7 @@ export default function App() {
           transfers={transfers}
           onEnqueueDownload={enqueueDownload}
           onEnqueueCopy={enqueueCopy}
+          onEnqueueCopyFolder={enqueueCopyFolder}
           onRemoveTransfer={removeTransfer}
           onRunTransfer={runTransfer}
           onCancelTransfer={cancelTransfer}

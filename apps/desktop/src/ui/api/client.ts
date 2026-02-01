@@ -208,8 +208,13 @@ export async function listSnapshots(settings: Settings): Promise<SnapshotMeta[]>
   return apiGetJson<SnapshotMeta[]>(settings, "/v1/snapshots");
 }
 
-export async function getTree(settings: Settings, snapshotId: string, path: string): Promise<TreeResponse> {
-  return apiGetJson<TreeResponse>(settings, `/v1/snapshots/${encodeURIComponent(snapshotId)}/tree`, { path });
+export async function getTree(
+  settings: Settings,
+  snapshotId: string,
+  path: string,
+  signal?: AbortSignal
+): Promise<TreeResponse> {
+  return apiGetJson<TreeResponse>(settings, `/v1/snapshots/${encodeURIComponent(snapshotId)}/tree`, { path }, signal);
 }
 
 export async function listDevices(settings: Settings): Promise<DeviceInfo[]> {

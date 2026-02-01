@@ -48,8 +48,18 @@ export default function DeviceBrowserPane(props: {
     dstDeviceId?: string;
     dstPath: string;
   }) => void;
+  onEnqueueCopyFolder: (job: {
+    src: Conn;
+    srcSnapshotId: string;
+    srcDirPath: string;
+    dst: Conn;
+    dstDeviceName: string;
+    dstDeviceId?: string;
+    dstDirPath: string;
+  }) => void;
 }) {
-  const { settings, tab, onTabChange, onEnqueueDownload, onSetDeviceAuth, onEnqueueCopy } = props;
+  const { settings, tab, onTabChange, onEnqueueDownload, onSetDeviceAuth, onEnqueueCopy, onEnqueueCopyFolder } =
+    props;
 
   const [status, setStatus] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -481,6 +491,7 @@ export default function DeviceBrowserPane(props: {
               e.preventDefault();
               try {
                 const parsed = JSON.parse(raw) as {
+                  kind?: "file" | "dir";
                   src: Conn;
                   snapshotId: string;
                   path: string;
@@ -488,20 +499,35 @@ export default function DeviceBrowserPane(props: {
                 };
                 if (!parsed?.src?.serverBaseUrl || !parsed.snapshotId || !parsed.path) return;
 
-                // Drop means: copy file from source server into this destination server/device context.
-                // For MVP we create a new snapshot on destination (one-file manifest) under this device.
-                const fileName = parsed.name || parsed.path.split("/").pop() || "file";
-                const dstPath = path ? `${path}/${fileName}` : fileName;
-                onEnqueueCopy({
-                  src: parsed.src,
-                  srcSnapshotId: parsed.snapshotId,
-                  srcPath: parsed.path,
-                  dst: effConn,
-                  dstDeviceName: deviceName || "device",
-                  dstDeviceId: tab.state.deviceId || undefined,
-                  dstPath
-                });
-                setStatus(`queued copy: ${parsed.path} -> ${dstPath}`);
+                if ((parsed.kind ?? "file") === "dir") {
+                  const dirName = parsed.name || parsed.path.split("/").pop() || "folder";
+                  const dstDirPath = path ? `${path}/${dirName}` : dirName;
+                  onEnqueueCopyFolder({
+                    src: parsed.src,
+                    srcSnapshotId: parsed.snapshotId,
+                    srcDirPath: parsed.path,
+                    dst: effConn,
+                    dstDeviceName: deviceName || "device",
+                    dstDeviceId: tab.state.deviceId || undefined,
+                    dstDirPath
+                  });
+                  setStatus(`queued copy dir: ${parsed.path} -> ${dstDirPath}`);
+                } else {
+                  // Drop means: copy file from source server into this destination server/device context.
+                  // For MVP we create a new snapshot on destination (one-file manifest) under this device.
+                  const fileName = parsed.name || parsed.path.split("/").pop() || "file";
+                  const dstPath = path ? `${path}/${fileName}` : fileName;
+                  onEnqueueCopy({
+                    src: parsed.src,
+                    srcSnapshotId: parsed.snapshotId,
+                    srcPath: parsed.path,
+                    dst: effConn,
+                    dstDeviceName: deviceName || "device",
+                    dstDeviceId: tab.state.deviceId || undefined,
+                    dstPath
+                  });
+                  setStatus(`queued copy: ${parsed.path} -> ${dstPath}`);
+                }
               } catch {
                 // ignore
               }
@@ -523,19 +549,24 @@ export default function DeviceBrowserPane(props: {
                 <div key={`${e.kind}:${e.name}`} className="db-row">
                   <button
                     className={e.kind === "dir" ? "db-row-main dir" : "db-row-main file"}
-                    draggable={e.kind === "file"}
+                    draggable={true}
                     onClick={() => {
                       if (e.kind !== "dir") return;
                       const next = path ? `${path}/${e.name}` : e.name;
                       refreshTree(snapshotId, next);
                     }}
                     onDragStart={(ev) => {
-                      if (e.kind !== "file") return;
-                      const filePath = path ? `${path}/${e.name}` : e.name;
-                      const payload = JSON.stringify({ src: effConn, snapshotId, path: filePath, name: e.name });
+                      const itemPath = path ? `${path}/${e.name}` : e.name;
+                      const payload = JSON.stringify({
+                        kind: e.kind,
+                        src: effConn,
+                        snapshotId,
+                        path: itemPath,
+                        name: e.name
+                      });
                       ev.dataTransfer.effectAllowed = "copy";
                       ev.dataTransfer.setData("application/x-filedock-file", payload);
-                      ev.dataTransfer.setData("text/plain", filePath);
+                      ev.dataTransfer.setData("text/plain", itemPath);
                     }}
                     title={e.name}
                   >

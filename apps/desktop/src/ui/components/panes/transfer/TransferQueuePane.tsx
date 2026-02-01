@@ -233,9 +233,14 @@ export default function TransferQueuePane(props: {
                 <span className="queue-path">
                   dl {j.snapshotId}:{j.path}
                 </span>
-              ) : (
+              ) : j.kind === "copy_file" ? (
                 <span className="queue-path">
                   copy {j.src.serverBaseUrl} {j.srcSnapshotId}:{j.srcPath} → {j.dst.serverBaseUrl} {j.dstPath}
+                </span>
+              ) : (
+                <span className="queue-path">
+                  copy-dir {j.src.serverBaseUrl} {j.srcSnapshotId}:{j.srcDirPath || "/"} → {j.dst.serverBaseUrl}{" "}
+                  {j.dstDirPath || "/"}
                 </span>
               )}
             </div>

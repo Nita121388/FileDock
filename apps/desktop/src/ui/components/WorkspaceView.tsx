@@ -33,6 +33,15 @@ export function WorkspaceView(props: {
     dstDeviceId?: string;
     dstPath: string;
   }) => void;
+  onEnqueueCopyFolder: (job: {
+    src: import("../model/transfers").Conn;
+    srcSnapshotId: string;
+    srcDirPath: string;
+    dst: import("../model/transfers").Conn;
+    dstDeviceName: string;
+    dstDeviceId?: string;
+    dstDirPath: string;
+  }) => void;
   onRemoveTransfer: (id: string) => void;
   onRunTransfer: (id: string) => Promise<void>;
   onCancelTransfer: (id: string) => void;
@@ -45,6 +54,7 @@ export function WorkspaceView(props: {
     transfers,
     onEnqueueDownload,
     onEnqueueCopy,
+    onEnqueueCopyFolder,
     onRemoveTransfer,
     onRunTransfer,
     onCancelTransfer,
@@ -70,6 +80,7 @@ export function WorkspaceView(props: {
           transfers={transfers}
           onEnqueueDownload={onEnqueueDownload}
           onEnqueueCopy={onEnqueueCopy}
+          onEnqueueCopyFolder={onEnqueueCopyFolder}
           onRemoveTransfer={onRemoveTransfer}
           onRunTransfer={onRunTransfer}
           onCancelTransfer={onCancelTransfer}

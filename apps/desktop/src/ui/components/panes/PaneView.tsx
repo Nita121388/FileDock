@@ -21,6 +21,15 @@ export function PaneView(props: {
     dstDeviceId?: string;
     dstPath: string;
   }) => void;
+  onEnqueueCopyFolder: (job: {
+    src: import("../../model/transfers").Conn;
+    srcSnapshotId: string;
+    srcDirPath: string;
+    dst: import("../../model/transfers").Conn;
+    dstDeviceName: string;
+    dstDeviceId?: string;
+    dstDirPath: string;
+  }) => void;
   onRemoveTransfer: (id: string) => void;
   onRunTransfer: (id: string) => Promise<void>;
   onCancelTransfer: (id: string) => void;
@@ -36,6 +45,7 @@ export function PaneView(props: {
           onEnqueueDownload={props.onEnqueueDownload}
           onSetDeviceAuth={props.onSetDeviceAuth}
           onEnqueueCopy={props.onEnqueueCopy}
+          onEnqueueCopyFolder={props.onEnqueueCopyFolder}
         />
       );
     case "transferQueue":
