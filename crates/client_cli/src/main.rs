@@ -8,6 +8,7 @@ use filedock_protocol::{
 };
 use futures_util::stream::{self, StreamExt};
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use serde::Deserialize;
 use std::{path::PathBuf, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use walkdir::WalkDir;
@@ -269,6 +270,121 @@ enum Command {
         #[arg(long)]
         status: Option<String>,
     },
+
+    /// Run a simple "device agent" from a config file (TOML).
+    ///
+    /// This runs periodic `push-folder` snapshots and (optionally) sends device heartbeats.
+    Agent {
+        /// Config file path.
+        #[arg(long)]
+        config: PathBuf,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AgentConfig {
+    /// Server base URL, e.g. http://127.0.0.1:8787
+    server: String,
+    /// Device name stored in snapshot metadata.
+    device_name: String,
+    /// Root folder to back up.
+    folder: PathBuf,
+
+    /// Seconds between snapshot runs.
+    #[serde(default = "default_agent_interval")]
+    interval_secs: u64,
+
+    /// Upload concurrency (files in parallel).
+    #[serde(default = "default_agent_concurrency")]
+    concurrency: usize,
+
+    /// Exclude glob patterns (matched against relative POSIX paths).
+    #[serde(default)]
+    exclude: Vec<String>,
+
+    /// Optional ignore file (one glob per line). If omitted, `.filedockignore` in the folder root is used if present.
+    #[serde(default)]
+    ignore_file: Option<PathBuf>,
+
+    /// Optional token auth (maps to FILEDOCK_TOKEN).
+    #[serde(default)]
+    token: Option<String>,
+
+    /// Optional device auth (maps to FILEDOCK_DEVICE_ID / FILEDOCK_DEVICE_TOKEN).
+    #[serde(default)]
+    device_id: Option<String>,
+    #[serde(default)]
+    device_token: Option<String>,
+
+    /// Heartbeat interval in seconds (0 disables). Requires device auth when server token is set.
+    #[serde(default = "default_heartbeat_interval")]
+    heartbeat_secs: u64,
+
+    /// Optional free-form heartbeat status string.
+    #[serde(default)]
+    heartbeat_status: Option<String>,
+}
+
+fn default_agent_interval() -> u64 {
+    900
+}
+
+fn default_heartbeat_interval() -> u64 {
+    300
+}
+
+fn default_agent_concurrency() -> usize {
+    DEFAULT_CONCURRENCY
+}
+
+fn apply_agent_env(cfg: &AgentConfig) {
+    if let Some(tok) = cfg.token.as_deref() {
+        let t = tok.trim();
+        if !t.is_empty() {
+            std::env::set_var("FILEDOCK_TOKEN", t);
+        }
+    }
+    if let Some(id) = cfg.device_id.as_deref() {
+        let s = id.trim();
+        if !s.is_empty() {
+            std::env::set_var("FILEDOCK_DEVICE_ID", s);
+        }
+    }
+    if let Some(tok) = cfg.device_token.as_deref() {
+        let s = tok.trim();
+        if !s.is_empty() {
+            std::env::set_var("FILEDOCK_DEVICE_TOKEN", s);
+        }
+    }
+}
+
+async fn send_heartbeat_impl(server: &str, status: Option<String>) -> Result<(), String> {
+    let client = build_client()?;
+    let dev_id = std::env::var("FILEDOCK_DEVICE_ID").unwrap_or_default();
+    if dev_id.trim().is_empty() {
+        return Err("FILEDOCK_DEVICE_ID required for heartbeat".to_string());
+    }
+    let url = format!(
+        "{}/v1/devices/{}/heartbeat",
+        server.trim_end_matches('/'),
+        dev_id.trim()
+    );
+    let req = DeviceHeartbeatRequest {
+        agent_version: env!("CARGO_PKG_VERSION").to_string(),
+        status,
+    };
+    let _resp: DeviceHeartbeatResponse = client
+        .post(url)
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| format!("heartbeat request: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("heartbeat response: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("heartbeat decode: {e}"))?;
+    Ok(())
 }
 
 async fn push_folder_impl(
@@ -877,6 +993,65 @@ async fn main() -> Result<(), String> {
                 "{}",
                 serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?
             );
+        }
+
+        Command::Agent { config } => {
+            let raw = tokio::fs::read_to_string(&config)
+                .await
+                .map_err(|e| format!("read config {}: {e}", config.display()))?;
+            let cfg: AgentConfig = toml::from_str(&raw)
+                .map_err(|e| format!("parse config {}: {e}", config.display()))?;
+
+            apply_agent_env(&cfg);
+
+            eprintln!(
+                "agent: server={} device_name={} folder={} interval={}s concurrency={} heartbeat={}s",
+                cfg.server,
+                cfg.device_name,
+                cfg.folder.display(),
+                cfg.interval_secs,
+                cfg.concurrency,
+                cfg.heartbeat_secs
+            );
+
+            // Initial heartbeat (best-effort).
+            if cfg.heartbeat_secs > 0 {
+                if let Err(e) = send_heartbeat_impl(&cfg.server, cfg.heartbeat_status.clone()).await {
+                    eprintln!("heartbeat: {e}");
+                }
+            }
+
+            loop {
+                let snap = push_folder_impl(
+                    cfg.server.clone(),
+                    cfg.device_name.clone(),
+                    cfg.folder.clone(),
+                    cfg.concurrency,
+                    cfg.exclude.clone(),
+                    cfg.ignore_file.clone(),
+                )
+                .await?;
+                eprintln!("agent: completed snapshot: {snap}");
+
+                if cfg.heartbeat_secs > 0 {
+                    let st = cfg
+                        .heartbeat_status
+                        .clone()
+                        .or_else(|| Some(format!("snapshot {snap}")));
+                    if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
+                        eprintln!("heartbeat: {e}");
+                    }
+                }
+
+                if cfg.interval_secs == 0 {
+                    break;
+                }
+
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(cfg.interval_secs)) => {},
+                    _ = tokio::signal::ctrl_c() => { eprintln!(\"agent: stopped\"); break; }
+                }
+            }
         }
     }
 

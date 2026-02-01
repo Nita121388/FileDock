@@ -4,6 +4,16 @@ FileDock's Rust CLI (`filedock`) can run as a simple "agent" by using `push-fold
 
 This document shows practical ways to schedule it on common platforms.
 
+## Config-file agent mode (recommended)
+
+Instead of wiring many env vars/flags into schedulers, you can run the agent from a config file:
+
+```bash
+filedock agent --config ./agent.toml
+```
+
+Example config: `deploy/agent-config.example.toml`.
+
 ## CLI mode (works everywhere)
 
 Run once:
@@ -54,6 +64,9 @@ filedock device-heartbeat --server http://127.0.0.1:8787 --status "online"
 See:
 - `deploy/systemd/filedock-backup@.service`
 - `deploy/systemd/filedock-backup@.timer`
+
+You can also run the config-file agent via systemd using:
+- `deploy/systemd/filedock-agent@.service`
 
 Recommended pattern:
 - Create `/etc/filedock/<name>.env` to hold env vars (tokens).

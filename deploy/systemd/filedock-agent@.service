@@ -1,0 +1,19 @@
+[Unit]
+Description=FileDock agent (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+
+# Create as: /etc/filedock/<name>.env (contains FILEDOCK_CONFIG=/path/to/agent.toml)
+EnvironmentFile=-/etc/filedock/%i.env
+
+ExecStart=filedock agent --config ${FILEDOCK_CONFIG}
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

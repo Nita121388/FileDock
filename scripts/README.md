@@ -14,6 +14,7 @@ Common:
 - `scripts/check.sh` - local "CI-like" checks (fmt/clippy/test + desktop build + smoke)
 - `scripts/prune.sh` - snapshot retention helper (calls `filedock prune-snapshots`)
 - `scripts/gc.sh` - chunk garbage-collection helper (calls `filedock gc-chunks`)
+- `scripts/agent.sh` - run the agent via cargo using a TOML config file
 - `scripts/docker-up.sh` - start server via docker compose
 - `scripts/fmt.sh` - rustfmt + prettier (if available)
 - `scripts/lint.sh` - clippy (if available)

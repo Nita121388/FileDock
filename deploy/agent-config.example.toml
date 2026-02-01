@@ -1,0 +1,28 @@
+# FileDock agent config (TOML)
+#
+# Usage:
+#   filedock agent --config agent.toml
+
+server = "http://127.0.0.1:8787"
+device_name = "laptop"
+folder = "/home/you/Documents"
+
+# snapshot interval (seconds)
+interval_secs = 900
+
+# upload concurrency (files in parallel)
+concurrency = 4
+
+# optional ignores
+exclude = ["**/.git/**", "**/node_modules/**"]
+# ignore_file = ".filedockignore"
+
+# optional auth (maps to env vars used by CLI):
+# token = "change-me"
+# device_id = "..."
+# device_token = "..."
+
+# optional heartbeats (0 disables)
+heartbeat_secs = 300
+heartbeat_status = "online"
+
