@@ -31,6 +31,8 @@ echo "[smoke] server: $BASE"
 run_server() {
   if [ -x "$ROOT/target/release/filedock-server" ]; then
     FILEDOCK_TOKEN="$TOKEN" "$ROOT/target/release/filedock-server" --listen "$ADDR" --storage-dir "$DATA"
+  elif [ -x "$ROOT/target/debug/filedock-server" ]; then
+    FILEDOCK_TOKEN="$TOKEN" "$ROOT/target/debug/filedock-server" --listen "$ADDR" --storage-dir "$DATA"
   else
     need cargo
     (cd "$ROOT" && FILEDOCK_LISTEN="$ADDR" FILEDOCK_STORAGE_DIR="$DATA" FILEDOCK_TOKEN="$TOKEN" cargo run -p filedock-server)
@@ -40,6 +42,8 @@ run_server() {
 run_cli() {
   if [ -x "$ROOT/target/release/filedock" ]; then
     FILEDOCK_TOKEN="$TOKEN" "$ROOT/target/release/filedock" "$@"
+  elif [ -x "$ROOT/target/debug/filedock" ]; then
+    FILEDOCK_TOKEN="$TOKEN" "$ROOT/target/debug/filedock" "$@"
   else
     need cargo
     (cd "$ROOT" && FILEDOCK_TOKEN="$TOKEN" cargo run -p filedock -- "$@")
