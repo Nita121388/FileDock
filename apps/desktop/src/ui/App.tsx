@@ -399,6 +399,29 @@ export default function App() {
       let newMtime = now;
       let newChunks: { hash: string; size: number }[] = [];
 
+      const destKnownHave = new Set<string>();
+      const destKnownMissing = new Set<string>();
+      const ensureMissingOnDest = async (hashes: string[]) => {
+        const unknown: string[] = [];
+        for (const h of hashes) {
+          if (destKnownHave.has(h) || destKnownMissing.has(h)) continue;
+          unknown.push(h);
+        }
+        const batchSize = 1000;
+        for (let i = 0; i < unknown.length; i += batchSize) {
+          const batch = unknown.slice(i, i + batchSize);
+          const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
+          const miss = new Set(resp.missing);
+          for (const h of batch) {
+            if (miss.has(h)) destKnownMissing.add(h);
+            else destKnownHave.add(h);
+          }
+        }
+        const missing: string[] = [];
+        for (const h of hashes) if (destKnownMissing.has(h)) missing.push(h);
+        return missing;
+      };
+
       if (srcMeta) {
         newSize = srcMeta.size;
         newMtime = srcMeta.mtime_unix;
@@ -407,13 +430,7 @@ export default function App() {
         // Presence (batched) on destination.
         setTransferProgress(id, { phase: "checking chunks", pct: 0 });
         const hashes = newChunks.map((c) => c.hash);
-        const missing = new Set<string>();
-        const batchSize = 1000;
-        for (let i = 0; i < hashes.length; i += batchSize) {
-          const batch = hashes.slice(i, i + batchSize);
-          const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
-          for (const h of resp.missing) missing.add(h);
-        }
+        const missing = new Set(await ensureMissingOnDest(hashes));
 
         const missingBytesTotal = newChunks.reduce((acc, c) => acc + (missing.has(c.hash) ? c.size : 0), 0);
         let missingBytesDone = 0;
@@ -468,13 +485,7 @@ export default function App() {
         newChunks = refs.map((c) => ({ hash: c.hash, size: c.size }));
 
         setTransferProgress(id, { phase: "checking", pct: 0 });
-        const missing = new Set<string>();
-        const batchSize = 1000;
-        for (let i = 0; i < hashes.length; i += batchSize) {
-          const batch = hashes.slice(i, i + batchSize);
-          const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
-          for (const h of resp.missing) missing.add(h);
-        }
+        const missing = new Set(await ensureMissingOnDest(hashes));
 
         setTransferProgress(id, { phase: "uploading", pct: 0 });
         let offset = 0;
@@ -676,6 +687,30 @@ export default function App() {
 
       const bytesPerSec = getRateLimitBytesPerSec();
 
+      // Destination chunk cache to reduce repeat presence checks across many files.
+      const destKnownHave = new Set<string>();
+      const destKnownMissing = new Set<string>();
+      const ensureMissingOnDest = async (hashes: string[]) => {
+        const unknown: string[] = [];
+        for (const h of hashes) {
+          if (destKnownHave.has(h) || destKnownMissing.has(h)) continue;
+          unknown.push(h);
+        }
+        const batchSize = 1000;
+        for (let i = 0; i < unknown.length; i += batchSize) {
+          const batch = unknown.slice(i, i + batchSize);
+          const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
+          const miss = new Set(resp.missing);
+          for (const h of batch) {
+            if (miss.has(h)) destKnownMissing.add(h);
+            else destKnownHave.add(h);
+          }
+        }
+        const missing: string[] = [];
+        for (const h of hashes) if (destKnownMissing.has(h)) missing.push(h);
+        return missing;
+      };
+
       // Best-effort optimization: use the source manifest chunk lists to transfer by chunks (no full-file download).
       // Falls back to file download if the source manifest is unavailable or missing chunk metadata.
       let srcChunkMap: Map<
@@ -724,14 +759,8 @@ export default function App() {
         if (srcMeta) {
           // Chunk-level copy: download missing chunks by hash and upload to destination.
           const hashes = srcMeta.chunks.map((c) => c.hash);
-          const missing = new Set<string>();
-          const batchSize = 1000;
           setTransferProgress(id, { phase: `checking chunks ${srcFilePath}`, pct: total > 0 ? Math.floor((i / total) * 100) : 0 });
-          for (let j = 0; j < hashes.length; j += batchSize) {
-            const batch = hashes.slice(j, j + batchSize);
-            const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
-            for (const h of resp.missing) missing.add(h);
-          }
+          const missing = new Set(await ensureMissingOnDest(hashes));
 
           const missingBytesTotal = srcMeta.chunks.reduce((acc, c) => acc + (missing.has(c.hash) ? c.size : 0), 0);
           let missingBytesDone = 0;
@@ -817,13 +846,7 @@ export default function App() {
         const manifestChunks = refs.map((c) => ({ hash: c.hash, size: c.size }));
 
         // Presence on destination.
-        const missing = new Set<string>();
-        const batchSize = 1000;
-        for (let j = 0; j < hashes.length; j += batchSize) {
-          const batch = hashes.slice(j, j + batchSize);
-          const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
-          for (const h of resp.missing) missing.add(h);
-        }
+        const missing = new Set(await ensureMissingOnDest(hashes));
 
         // Upload missing chunks.
         const ulLimiter = makeLimiter(bytesPerSec);
