@@ -24,7 +24,7 @@ export FILEDOCK_TOKEN="change-me"
 cargo run -p filedock -- push-folder \
   --server http://127.0.0.1:8787 \
   --device "laptop" \
-  --root /home/you/Documents
+  --folder /home/you/Documents
 ```
 
 List snapshots:
