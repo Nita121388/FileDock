@@ -25,6 +25,7 @@ import {
   chunksPresence,
   createSnapshot,
   getTree,
+  getManifest,
   putChunk,
   putManifest
 } from "./api/client";
@@ -161,8 +162,7 @@ export default function App() {
       dstDeviceId: req.dstDeviceId,
       dstDirPath: req.dstDirPath,
       nextIndex: 0,
-      filePaths: undefined,
-      manifestEntries: undefined
+      filePaths: undefined
     } as any;
     setTransfers((xs) => [job, ...xs]);
   };
@@ -422,7 +422,8 @@ export default function App() {
     let dstSnapshotId = job.dstSnapshotId;
     let filesList: string[] = (job.filePaths ?? []) as any;
     let nextIndex: number = job.nextIndex ?? 0;
-    let entries: any[] = job.manifestEntries ? [...job.manifestEntries] : [];
+    let manifestFiles: { path: string; size: number; mtime_unix: number; chunks: { hash: string; size: number }[] }[] =
+      [];
 
     try {
       // 1) Ensure destination snapshot exists.
@@ -441,6 +442,24 @@ export default function App() {
         dstSnapshotId = snap.snapshot_id;
       }
 
+      // 1.5) Load destination manifest (for resume / skip already-copied files).
+      setTransferProgress(id, { phase: "loading destination manifest", pct: 0 });
+      try {
+        const m = await getManifest(dstSettings, dstSnapshotId!, ac.signal);
+        manifestFiles = (m.files ?? [])
+          .filter((f) => f && typeof f.path === "string" && Array.isArray(f.chunks))
+          .map((f) => ({
+            path: f.path,
+            size: f.size,
+            mtime_unix: f.mtime_unix,
+            chunks: (f.chunks ?? []).map((c) => ({ hash: c.hash, size: c.size }))
+          }));
+      } catch {
+        // Manifest may not exist yet; treat as empty.
+        manifestFiles = [];
+      }
+      const doneSet = new Set(manifestFiles.map((f) => f.path));
+
       // 2) Enumerate all files under the source directory (once; persist for resume).
       if (!filesList || filesList.length === 0) {
         setTransferProgress(id, { phase: "enumerating files", pct: 0 });
@@ -457,10 +476,9 @@ export default function App() {
           if (stack.length + files.length > 200000) throw new Error("too many files for desktop copy");
         }
         files.sort();
-        patchTransfer(id, (x) => ({ ...(x as any), filePaths: files, nextIndex: 0, manifestEntries: [] }));
+        patchTransfer(id, (x) => ({ ...(x as any), filePaths: files, nextIndex: 0 }));
         filesList = files;
         nextIndex = 0;
-        entries = [];
       }
 
       const total = filesList.length;
@@ -472,6 +490,14 @@ export default function App() {
         const srcFilePath = filesList[i]!;
         const rel = job.srcDirPath ? srcFilePath.slice(job.srcDirPath.length + 1) : srcFilePath;
         const dstFilePath = job.dstDirPath ? `${job.dstDirPath}/${rel}` : rel;
+
+        // Already present in destination manifest: skip (resume-friendly).
+        if (doneSet.has(dstFilePath)) {
+          const pct = total > 0 ? Math.floor(((i + 1) / total) * 100) : 0;
+          setTransferProgress(id, { phase: `skipping ${dstFilePath}`, pct });
+          patchTransfer(id, (x) => ({ ...(x as any), nextIndex: i + 1 }));
+          continue;
+        }
 
         const dlLimiter = makeLimiter(bytesPerSec);
         const buf = await withRetry(async () => {
@@ -522,15 +548,32 @@ export default function App() {
         }
 
         const now = Math.floor(Date.now() / 1000);
-        entries.push({
+        manifestFiles.push({
           path: dstFilePath,
           size: buf.length,
           mtime_unix: now,
           chunks: manifestChunks
         });
+        doneSet.add(dstFilePath);
 
-        // Persist resume point after each file.
-        patchTransfer(id, (x) => ({ ...(x as any), nextIndex: i + 1, manifestEntries: entries }));
+        // Persist resume point after each file and write manifest for crash-resume.
+        patchTransfer(id, (x) => ({ ...(x as any), nextIndex: i + 1 }));
+        await putManifest(
+          dstSettings,
+          dstSnapshotId!,
+          {
+            snapshot_id: dstSnapshotId!,
+            created_unix: Math.floor(Date.now() / 1000),
+            files: manifestFiles.map((f) => ({
+              path: f.path,
+              size: f.size,
+              mtime_unix: f.mtime_unix,
+              chunk_hash: null,
+              chunks: f.chunks
+            }))
+          },
+          ac.signal
+        );
       }
 
       setTransferProgress(id, { phase: "writing manifest", pct: 99 });
@@ -540,7 +583,7 @@ export default function App() {
         {
           snapshot_id: dstSnapshotId!,
           created_unix: Math.floor(Date.now() / 1000),
-          files: entries.map((e) => ({
+          files: manifestFiles.map((e) => ({
             path: e.path,
             size: e.size,
             mtime_unix: e.mtime_unix,

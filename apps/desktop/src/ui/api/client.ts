@@ -217,6 +217,19 @@ export async function getTree(
   return apiGetJson<TreeResponse>(settings, `/v1/snapshots/${encodeURIComponent(snapshotId)}/tree`, { path }, signal);
 }
 
+export async function getManifest(
+  settings: Settings,
+  snapshotId: string,
+  signal?: AbortSignal
+): Promise<SnapshotManifest> {
+  return apiGetJson<SnapshotManifest>(
+    settings,
+    `/v1/snapshots/${encodeURIComponent(snapshotId)}/manifest`,
+    undefined,
+    signal
+  );
+}
+
 export async function listDevices(settings: Settings): Promise<DeviceInfo[]> {
   return apiGetJson<DeviceInfo[]>(settings, "/v1/devices");
 }

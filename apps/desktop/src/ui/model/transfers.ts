@@ -68,7 +68,6 @@ export type CopyFolderJob = {
   // Persisted resume state.
   filePaths?: string[];
   nextIndex?: number;
-  manifestEntries?: ManifestFileEntry[];
   error?: string;
   progress?: TransferProgress;
 };
