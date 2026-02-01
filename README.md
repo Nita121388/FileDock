@@ -24,4 +24,5 @@ Status: active development (MVP features working; still evolving).
 - Development: `docs/development.md`
 - Release: `docs/release.md`
 - Verify: `docs/verify.md`
+- Acceptance: `docs/acceptance.md`
 - Scripts: `scripts/README.md`
