@@ -37,6 +37,54 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(() => loadSettings() ?? DEFAULT_SETTINGS);
   const [transfers, setTransfers] = useState<TransferJob[]>(() => loadTransfers());
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
+  const presenceCacheRef = useRef<
+    Map<
+      string,
+      {
+        haveLRU: Map<string, true>;
+        missingUntilMs: Map<string, number>;
+      }
+    >
+  >(new Map());
+
+  const getPresenceCache = (dst: Conn) => {
+    const key = dst.serverBaseUrl;
+    let ent = presenceCacheRef.current.get(key);
+    if (!ent) {
+      ent = { haveLRU: new Map(), missingUntilMs: new Map() };
+      presenceCacheRef.current.set(key, ent);
+    }
+    return ent;
+  };
+
+  const cacheTouch = (lru: Map<string, true>, k: string) => {
+    if (lru.has(k)) lru.delete(k);
+    lru.set(k, true);
+  };
+
+  const cacheMarkHave = (dst: Conn, hash: string) => {
+    const ent = getPresenceCache(dst);
+    cacheTouch(ent.haveLRU, hash);
+    ent.missingUntilMs.delete(hash);
+    const MAX_HAVE = 50000;
+    while (ent.haveLRU.size > MAX_HAVE) {
+      const it = ent.haveLRU.keys().next();
+      if (it.done) break;
+      ent.haveLRU.delete(it.value);
+    }
+  };
+
+  const cacheMarkMissingShort = (dst: Conn, hash: string) => {
+    const ent = getPresenceCache(dst);
+    // Only cache "missing" briefly; it might appear shortly after due to other jobs/devices.
+    ent.missingUntilMs.set(hash, Date.now() + 30_000);
+    const MAX_MISS = 20000;
+    while (ent.missingUntilMs.size > MAX_MISS) {
+      const it = ent.missingUntilMs.keys().next();
+      if (it.done) break;
+      ent.missingUntilMs.delete(it.value);
+    }
+  };
 
   const getRateLimitBytesPerSec = (): number => {
     try {
@@ -62,6 +110,44 @@ export default function App() {
     } catch {
       return 4;
     }
+  };
+
+  const ensureMissingOnDestShared = async (dst: Conn, hashes: string[], signal: AbortSignal) => {
+    const ent = getPresenceCache(dst);
+    const now = Date.now();
+    const unknown: string[] = [];
+    const missing: string[] = [];
+
+    for (const h of hashes) {
+      if (ent.haveLRU.has(h)) {
+        cacheTouch(ent.haveLRU, h);
+        continue;
+      }
+      const until = ent.missingUntilMs.get(h);
+      if (until && until > now) {
+        missing.push(h);
+        continue;
+      }
+      if (until) ent.missingUntilMs.delete(h);
+      unknown.push(h);
+    }
+
+    const batchSize = 1000;
+    for (let i = 0; i < unknown.length; i += batchSize) {
+      const batch = unknown.slice(i, i + batchSize);
+      const resp = await chunksPresence(dst, { hashes: batch }, signal);
+      const miss = new Set(resp.missing);
+      for (const h of batch) {
+        if (miss.has(h)) {
+          missing.push(h);
+          cacheMarkMissingShort(dst, h);
+        } else {
+          cacheMarkHave(dst, h);
+        }
+      }
+    }
+
+    return missing;
   };
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -420,12 +506,9 @@ export default function App() {
           if (destKnownHave.has(h) || destKnownMissing.has(h)) continue;
           unknown.push(h);
         }
-        const batchSize = 1000;
-        for (let i = 0; i < unknown.length; i += batchSize) {
-          const batch = unknown.slice(i, i + batchSize);
-          const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
-          const miss = new Set(resp.missing);
-          for (const h of batch) {
+        if (unknown.length > 0) {
+          const miss = new Set(await ensureMissingOnDestShared(dstSettings, unknown, ac.signal));
+          for (const h of unknown) {
             if (miss.has(h)) destKnownMissing.add(h);
             else destKnownHave.add(h);
           }
@@ -471,11 +554,12 @@ export default function App() {
               dlDone += bytes.byteLength;
               if (dlLimiter) await dlLimiter(dlDone);
 
-              await withRetry(async () => {
-                await putChunk(dstSettings, c.hash, bytes, ac.signal);
-              });
-              ulDone += bytes.byteLength;
-              if (ulLimiter) await ulLimiter(ulDone);
+          await withRetry(async () => {
+            await putChunk(dstSettings, c.hash, bytes, ac.signal);
+          });
+          cacheMarkHave(dstSettings, c.hash);
+          ulDone += bytes.byteLength;
+          if (ulLimiter) await ulLimiter(ulDone);
 
               missingBytesDone += c.size;
               setTransferProgress(id, {
@@ -522,6 +606,7 @@ export default function App() {
             await withRetry(async () => {
               await putChunk(dstSettings, c.hash, buf.subarray(offset, end), ac.signal);
             });
+            cacheMarkHave(dstSettings, c.hash);
             uploaded++;
           }
           offset = end;
@@ -722,12 +807,9 @@ export default function App() {
           if (destKnownHave.has(h) || destKnownMissing.has(h)) continue;
           unknown.push(h);
         }
-        const batchSize = 1000;
-        for (let i = 0; i < unknown.length; i += batchSize) {
-          const batch = unknown.slice(i, i + batchSize);
-          const resp = await chunksPresence(dstSettings, { hashes: batch }, ac.signal);
-          const miss = new Set(resp.missing);
-          for (const h of batch) {
+        if (unknown.length > 0) {
+          const miss = new Set(await ensureMissingOnDestShared(dstSettings, unknown, ac.signal));
+          for (const h of unknown) {
             if (miss.has(h)) destKnownMissing.add(h);
             else destKnownHave.add(h);
           }
@@ -880,6 +962,7 @@ export default function App() {
                 await withRetry(async () => {
                   await putChunk(dstSettings, c.hash, bytes, ac.signal);
                 });
+                cacheMarkHave(dstSettings, c.hash);
                 ulDone += bytes.byteLength;
                 if (ulLimiter) await ulLimiter(ulDone);
 
@@ -957,6 +1040,7 @@ export default function App() {
             await withRetry(async () => {
               await putChunk(dstSettings, c.hash, buf.subarray(offset, end), ac.signal);
             });
+            cacheMarkHave(dstSettings, c.hash);
             uploaded++;
           }
           offset = end;
