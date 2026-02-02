@@ -29,6 +29,15 @@ export default function LeafPane(props: {
     remotePath: string;
     mkdirs?: boolean;
   }) => void;
+  onEnqueueSnapshotToSftp: (job: {
+    src: import("../../model/transfers").Conn;
+    snapshotId: string;
+    snapshotPath: string;
+    runner?: import("../../model/transfers").PluginRunConfig;
+    conn: import("../../model/transfers").SftpConn;
+    remotePath: string;
+    mkdirs?: boolean;
+  }) => void;
   onEnqueueCopy: (job: {
     src: import("../../model/transfers").Conn;
     srcSnapshotId: string;
@@ -74,6 +83,7 @@ export default function LeafPane(props: {
     onEnqueueDownload,
     onEnqueueSftpDownload,
     onEnqueueSftpUpload,
+    onEnqueueSnapshotToSftp,
     onEnqueueCopy,
     onEnqueueCopyFolder,
     onRemoveTransfer,
@@ -202,6 +212,7 @@ export default function LeafPane(props: {
           onEnqueueDownload={onEnqueueDownload}
           onEnqueueSftpDownload={onEnqueueSftpDownload}
           onEnqueueSftpUpload={onEnqueueSftpUpload}
+          onEnqueueSnapshotToSftp={onEnqueueSnapshotToSftp}
           onEnqueueCopy={onEnqueueCopy}
           onEnqueueCopyFolder={onEnqueueCopyFolder}
           onRemoveTransfer={onRemoveTransfer}

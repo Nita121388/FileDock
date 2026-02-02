@@ -27,6 +27,15 @@ export function PaneView(props: {
     remotePath: string;
     mkdirs?: boolean;
   }) => void;
+  onEnqueueSnapshotToSftp: (job: {
+    src: import("../../model/transfers").Conn;
+    snapshotId: string;
+    snapshotPath: string;
+    runner?: import("../../model/transfers").PluginRunConfig;
+    conn: import("../../model/transfers").SftpConn;
+    remotePath: string;
+    mkdirs?: boolean;
+  }) => void;
   onEnqueueCopy: (job: {
     src: import("../../model/transfers").Conn;
     srcSnapshotId: string;
@@ -74,6 +83,7 @@ export function PaneView(props: {
           onTabChange={(next) => props.onUpdateTab(() => next)}
           onEnqueueSftpDownload={props.onEnqueueSftpDownload}
           onEnqueueSftpUpload={props.onEnqueueSftpUpload}
+          onEnqueueSnapshotToSftp={props.onEnqueueSnapshotToSftp}
         />
       );
     case "transferQueue":

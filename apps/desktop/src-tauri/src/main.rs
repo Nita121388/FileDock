@@ -13,6 +13,7 @@ use std::{
     time::Duration,
 };
 use tauri::{AppHandle, State};
+use urlencoding::encode;
 
 const TOKEN_HEADER: &str = "x-filedock-token";
 const DEVICE_ID_HEADER: &str = "x-filedock-device-id";
@@ -29,6 +30,29 @@ struct RestoreManager {
 struct PluginRunManager {
     // run_id -> cancellation flag
     cancel: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CopySnapshotFileToSftpRequest {
+    run_id: String,
+    server_base_url: String,
+    token: Option<String>,
+    device_id: Option<String>,
+    device_token: Option<String>,
+    snapshot_id: String,
+    path: String,
+    sftp_conn: serde_json::Value,
+    remote_path: String,
+    runner: Option<RunnerConfig>,
+    #[serde(default)]
+    mkdirs: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RunnerConfig {
+    filedock_path: Option<String>,
+    plugin_dirs: Option<String>,
+    timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -390,7 +414,8 @@ fn main() {
             restore_snapshot_to_folder,
             cancel_restore_snapshot,
             run_filedock_plugin,
-            cancel_filedock_plugin_run
+            cancel_filedock_plugin_run,
+            copy_snapshot_file_to_sftp
         ])
         .run(tauri::generate_context!())
         .expect("error while running filedock desktop");
@@ -428,6 +453,215 @@ fn cancel_filedock_plugin_run(state: State<PluginRunManager>, run_id: String) ->
         return Ok(true);
     }
     Ok(false)
+}
+
+fn build_http_client(
+    token: Option<&str>,
+    device_id: Option<&str>,
+    device_token: Option<&str>,
+) -> Result<reqwest::Client, String> {
+    let mut headers = reqwest::header::HeaderMap::new();
+
+    if let Some(tok) = token.map(str::trim).filter(|s| !s.is_empty()) {
+        let name = reqwest::header::HeaderName::from_static(TOKEN_HEADER);
+        let value = reqwest::header::HeaderValue::from_str(tok)
+            .map_err(|e| format!("invalid token: {e}"))?;
+        headers.insert(name, value);
+    }
+    if let Some(id) = device_id.map(str::trim).filter(|s| !s.is_empty()) {
+        let name = reqwest::header::HeaderName::from_static(DEVICE_ID_HEADER);
+        let value = reqwest::header::HeaderValue::from_str(id)
+            .map_err(|e| format!("invalid device_id: {e}"))?;
+        headers.insert(name, value);
+    }
+    if let Some(tok) = device_token.map(str::trim).filter(|s| !s.is_empty()) {
+        let name = reqwest::header::HeaderName::from_static(DEVICE_TOKEN_HEADER);
+        let value = reqwest::header::HeaderValue::from_str(tok)
+            .map_err(|e| format!("invalid device_token: {e}"))?;
+        headers.insert(name, value);
+    }
+
+    reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .map_err(|e| format!("build http client: {e}"))
+}
+
+async fn wait_cancel(flag: Arc<AtomicBool>) {
+    loop {
+        if flag.load(Ordering::Relaxed) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    }
+}
+
+#[tauri::command]
+async fn copy_snapshot_file_to_sftp(
+    state: State<PluginRunManager>,
+    req: CopySnapshotFileToSftpRequest,
+) -> Result<(), String> {
+    let run_id = req.run_id.trim().to_string();
+    if run_id.is_empty() {
+        return Err("run_id required".to_string());
+    }
+    if req.server_base_url.trim().is_empty() {
+        return Err("server_base_url required".to_string());
+    }
+    if req.snapshot_id.trim().is_empty() {
+        return Err("snapshot_id required".to_string());
+    }
+    if req.path.trim().is_empty() {
+        return Err("path required".to_string());
+    }
+    if req.remote_path.trim().is_empty() {
+        return Err("remote_path required".to_string());
+    }
+
+    let cancel_flag = {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut m = state
+            .cancel
+            .lock()
+            .map_err(|_| "plugin run manager lock poisoned".to_string())?;
+        m.insert(run_id.clone(), flag.clone());
+        flag
+    };
+
+    struct Cleanup<'a> {
+        state: &'a PluginRunManager,
+        run_id: String,
+    }
+    impl Drop for Cleanup<'_> {
+        fn drop(&mut self) {
+            if let Ok(mut m) = self.state.cancel.lock() {
+                m.remove(&self.run_id);
+            }
+        }
+    }
+    let _cleanup = Cleanup {
+        state: &state,
+        run_id: run_id.clone(),
+    };
+
+    let client = build_http_client(
+        req.token.as_deref(),
+        req.device_id.as_deref(),
+        req.device_token.as_deref(),
+    )?;
+
+    let base = req.server_base_url.trim_end_matches('/').to_string();
+    let url = format!(
+        "{}/v1/snapshots/{}/file?path={}",
+        base,
+        encode(req.snapshot_id.trim()),
+        encode(req.path.trim())
+    );
+
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("download request: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("download response: {e}"))?;
+
+    // Write to a temp file so the SFTP plugin can read it by path.
+    let mut tmp = std::env::temp_dir();
+    let suffix = rand::random::<u64>();
+    tmp.push(format!("filedock_{run_id}_{suffix}.tmp"));
+    let tmp_str = tmp.to_string_lossy().to_string();
+
+    let mut file = tokio::fs::File::create(&tmp)
+        .await
+        .map_err(|e| format!("create temp file: {e}"))?;
+
+    let mut stream = resp.bytes_stream();
+    loop {
+        tokio::select! {
+            _ = wait_cancel(cancel_flag.clone()) => {
+                let _ = tokio::fs::remove_file(&tmp).await;
+                return Err("canceled".to_string());
+            }
+            item = stream.next() => {
+                match item {
+                    None => break,
+                    Some(Ok(bytes)) => {
+                        tokio::io::AsyncWriteExt::write_all(&mut file, &bytes)
+                            .await
+                            .map_err(|e| format!("write temp file: {e}"))?;
+                    }
+                    Some(Err(e)) => {
+                        let _ = tokio::fs::remove_file(&tmp).await;
+                        return Err(format!("download stream: {e}"));
+                    }
+                }
+            }
+        }
+    }
+
+    // Build the plugin payload.
+    let payload = serde_json::json!({
+        "op": "upload",
+        "conn": req.sftp_conn,
+        "args": {
+            "local_path": tmp_str,
+            "remote_path": req.remote_path,
+            "mkdirs": req.mkdirs,
+        }
+    });
+    let json = serde_json::to_string(&payload).map_err(|e| format!("encode plugin json: {e}"))?;
+
+    let runner = req.runner.unwrap_or(RunnerConfig {
+        filedock_path: None,
+        plugin_dirs: None,
+        timeout_secs: None,
+    });
+    let (filedock, filedock_dir) = resolve_filedock_path(runner.filedock_path.as_deref());
+    let timeout_secs = runner.timeout_secs.unwrap_or(600).max(1);
+
+    let mut cmd = tokio::process::Command::new(filedock);
+    cmd.arg("plugin")
+        .arg("run")
+        .arg("--name")
+        .arg("sftp")
+        .arg("--json")
+        .arg(&json)
+        .arg("--raw")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+
+    if let Some(dirs) = runner.plugin_dirs.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        cmd.env("FILEDOCK_PLUGIN_DIRS", dirs);
+    } else if let Some(dir) = filedock_dir {
+        cmd.env("FILEDOCK_PLUGIN_DIRS", dir.to_string_lossy().to_string());
+    }
+
+    let mut child = cmd.spawn().map_err(|e| format!("spawn filedock: {e}"))?;
+    let output = tokio::select! {
+        res = child.wait_with_output() => {
+            res.map_err(|e| format!("wait filedock: {e}"))?
+        }
+        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
+            let _ = child.kill().await;
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(format!("plugin timed out after {timeout_secs}s"));
+        }
+        _ = wait_cancel(cancel_flag.clone()) => {
+            let _ = child.kill().await;
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err("canceled".to_string());
+        }
+    };
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let _ = tokio::fs::remove_file(&tmp).await;
+
+    if !output.status.success() {
+        return Err(format!("plugin failed: {} {}", output.status, stderr.trim()));
+    }
+    Ok(())
 }
 
 fn resolve_filedock_path(explicit: Option<&str>) -> (String, Option<PathBuf>) {

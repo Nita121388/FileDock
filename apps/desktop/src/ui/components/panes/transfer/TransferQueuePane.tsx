@@ -299,6 +299,10 @@ export default function TransferQueuePane(props: {
                 <span className="queue-path">
                   copy {j.src.serverBaseUrl} {j.srcSnapshotId}:{j.srcPath} → {j.dst.serverBaseUrl} {j.dstPath}
                 </span>
+              ) : j.kind === "snapshot_to_sftp" ? (
+                <span className="queue-path">
+                  snap→sftp {j.src.serverBaseUrl} {j.snapshotId}:{j.snapshotPath} → {j.conn.user}@{j.conn.host}:{j.remotePath}
+                </span>
               ) : j.kind === "sftp_download" ? (
                 <span className="queue-path">
                   sftp-dl {j.conn.user}@{j.conn.host}:{j.remotePath} → {j.localPath}

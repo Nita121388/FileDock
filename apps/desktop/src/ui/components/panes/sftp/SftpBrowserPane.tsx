@@ -45,6 +45,15 @@ export default function SftpBrowserPane(props: {
     remotePath: string;
     mkdirs?: boolean;
   }) => void;
+  onEnqueueSnapshotToSftp: (job: {
+    src: import("../../../model/transfers").Conn;
+    snapshotId: string;
+    snapshotPath: string;
+    runner?: import("../../../model/transfers").PluginRunConfig;
+    conn: import("../../../model/transfers").SftpConn;
+    remotePath: string;
+    mkdirs?: boolean;
+  }) => void;
 }) {
   const st = props.tab.state;
 
@@ -261,7 +270,40 @@ export default function SftpBrowserPane(props: {
   }
 
   return (
-    <div className="pane sftp-pane">
+    <div
+      className="pane sftp-pane"
+      onDragOver={(e) => {
+        const t = Array.from(e.dataTransfer.types);
+        if (t.includes("application/x-filedock-file")) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        const raw = e.dataTransfer.getData("application/x-filedock-file");
+        if (!raw) return;
+        e.preventDefault();
+        try {
+          const parsed = JSON.parse(raw) as any;
+          const src = parsed?.src;
+          const snapshotId = parsed?.snapshotId;
+          const snapshotPath = parsed?.path;
+          if (!src || !snapshotId || !snapshotPath) return;
+          const base = String(snapshotPath).split("/").filter(Boolean).pop() || "upload";
+          const defaultRemote = st.path && st.path !== "/" ? joinPosix(st.path, base) : `/${base}`;
+          const remote = prompt("Upload to remote path (absolute POSIX path)?", defaultRemote);
+          if (!remote) return;
+          props.onEnqueueSnapshotToSftp({
+            src,
+            snapshotId,
+            snapshotPath,
+            runner,
+            conn: conn as any,
+            remotePath: remote,
+            mkdirs: true
+          });
+        } catch {
+          // ignore
+        }
+      }}
+    >
       <div className="pane-toolbar">
         <div className="toolbar-row">
           <label title="Host (IP or domain)">

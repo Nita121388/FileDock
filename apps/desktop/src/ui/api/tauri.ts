@@ -73,3 +73,25 @@ export async function runFiledockPlugin(
 export async function cancelFiledockPluginRun(runId: string): Promise<boolean> {
   return await invoke<boolean>("cancel_filedock_plugin_run", { runId });
 }
+
+export type CopySnapshotFileToSftpRequest = {
+  run_id: string;
+  server_base_url: string;
+  token?: string;
+  device_id?: string;
+  device_token?: string;
+  snapshot_id: string;
+  path: string;
+  sftp_conn: unknown;
+  remote_path: string;
+  runner?: {
+    filedock_path?: string;
+    plugin_dirs?: string;
+    timeout_secs?: number;
+  };
+  mkdirs?: boolean;
+};
+
+export async function copySnapshotFileToSftp(req: CopySnapshotFileToSftpRequest): Promise<void> {
+  await invoke("copy_snapshot_file_to_sftp", { req });
+}

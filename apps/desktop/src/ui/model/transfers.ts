@@ -128,7 +128,29 @@ export type SftpUploadJob = {
   progress?: TransferProgress;
 };
 
-export type TransferJob = DownloadJob | CopyJob | CopyFolderJob | SftpDownloadJob | SftpUploadJob;
+export type SnapshotToSftpJob = {
+  id: string;
+  kind: "snapshot_to_sftp";
+  createdAt: number;
+  status: TransferStatus;
+  src: Conn;
+  snapshotId: string;
+  snapshotPath: string; // snapshot-relative POSIX path
+  runner?: PluginRunConfig;
+  conn: SftpConn;
+  remotePath: string; // absolute POSIX path on the remote side
+  mkdirs?: boolean;
+  error?: string;
+  progress?: TransferProgress;
+};
+
+export type TransferJob =
+  | DownloadJob
+  | CopyJob
+  | CopyFolderJob
+  | SftpDownloadJob
+  | SftpUploadJob
+  | SnapshotToSftpJob;
 
 const KEY = "filedock.desktop.transfers.v1";
 
@@ -156,6 +178,7 @@ export function loadTransfers(): TransferJob[] {
         if (j.kind === "copy_folder") return withStatus as CopyFolderJob;
         if (j.kind === "sftp_download") return withStatus as SftpDownloadJob;
         if (j.kind === "sftp_upload") return withStatus as SftpUploadJob;
+        if (j.kind === "snapshot_to_sftp") return withStatus as SnapshotToSftpJob;
         return null;
       })
       .filter((j): j is TransferJob => j !== null);

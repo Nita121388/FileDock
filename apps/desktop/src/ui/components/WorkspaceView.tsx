@@ -37,6 +37,15 @@ export function WorkspaceView(props: {
     remotePath: string;
     mkdirs?: boolean;
   }) => void;
+  onEnqueueSnapshotToSftp: (job: {
+    src: import("../model/transfers").Conn;
+    snapshotId: string;
+    snapshotPath: string;
+    runner?: import("../model/transfers").PluginRunConfig;
+    conn: import("../model/transfers").SftpConn;
+    remotePath: string;
+    mkdirs?: boolean;
+  }) => void;
   onEnqueueCopy: (job: {
     src: import("../model/transfers").Conn;
     srcSnapshotId: string;
@@ -73,6 +82,7 @@ export function WorkspaceView(props: {
     onEnqueueDownload,
     onEnqueueSftpDownload,
     onEnqueueSftpUpload,
+    onEnqueueSnapshotToSftp,
     onEnqueueCopy,
     onEnqueueCopyFolder,
     onRemoveTransfer,
@@ -102,6 +112,7 @@ export function WorkspaceView(props: {
           onEnqueueDownload={onEnqueueDownload}
           onEnqueueSftpDownload={onEnqueueSftpDownload}
           onEnqueueSftpUpload={onEnqueueSftpUpload}
+          onEnqueueSnapshotToSftp={onEnqueueSnapshotToSftp}
           onEnqueueCopy={onEnqueueCopy}
           onEnqueueCopyFolder={onEnqueueCopyFolder}
           onRemoveTransfer={onRemoveTransfer}
