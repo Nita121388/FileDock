@@ -8,6 +8,16 @@ export default function SplitNodeView(props: {
 }) {
   const { node, render, onResize } = props;
   const ref = useRef<HTMLDivElement | null>(null);
+  const onResizeRef = useRef(onResize);
+  const ratioRef = useRef(node.ratio);
+
+  useEffect(() => {
+    onResizeRef.current = onResize;
+  }, [onResize]);
+
+  useEffect(() => {
+    ratioRef.current = node.ratio;
+  }, [node.ratio]);
 
   const isRow = node.dir === "row";
 
@@ -36,7 +46,7 @@ export default function SplitNodeView(props: {
       if (size <= 0) return;
       const delta = (isRow ? ev.clientX : ev.clientY) - start;
       const next = startRatio + delta / size;
-      onResize(next);
+      onResizeRef.current(next);
     };
 
     const onUp = () => {
@@ -55,7 +65,7 @@ export default function SplitNodeView(props: {
       dragging = true;
       pointerId = ev.pointerId;
       start = isRow ? ev.clientX : ev.clientY;
-      startRatio = node.ratio;
+      startRatio = ratioRef.current;
       gutter.setPointerCapture(ev.pointerId);
     };
 
@@ -67,7 +77,7 @@ export default function SplitNodeView(props: {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [isRow, node.id, node.ratio, onResize]);
+  }, [isRow, node.id]);
 
   return (
     <div ref={ref} className="split" style={style}>
