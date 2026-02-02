@@ -766,6 +766,13 @@ export default function App() {
           plugin_dirs: job.runner?.plugin_dirs,
           timeout_secs: job.runner?.timeout_secs ?? 900
         }
+      }, (p) => {
+        setTransferProgress(id, {
+          phase: p.phase || "sftp -> snapshot",
+          doneBytes: typeof p.done_bytes === "number" ? p.done_bytes : undefined,
+          totalBytes: typeof p.total_bytes === "number" ? p.total_bytes : undefined,
+          pct: typeof p.pct === "number" ? p.pct : undefined
+        });
       });
 
       if (ac.signal.aborted) {

@@ -22,6 +22,7 @@ const TOKEN_HEADER: &str = "x-filedock-token";
 const DEVICE_ID_HEADER: &str = "x-filedock-device-id";
 const DEVICE_TOKEN_HEADER: &str = "x-filedock-device-token";
 const RESTORE_EVENT: &str = "filedock_restore_progress";
+const IMPORT_EVENT: &str = "filedock_import_progress";
 const CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
 #[derive(Default)]
@@ -110,6 +111,15 @@ struct RestoreSnapshotResponse {
     dest_dir: String,
     total_files: u64,
     total_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ImportSftpProgress {
+    run_id: String,
+    phase: String,
+    done_bytes: Option<u64>,
+    total_bytes: Option<u64>,
+    pct: Option<u32>,
 }
 
 fn build_client(req: &RestoreSnapshotRequest) -> Result<reqwest::Client, String> {
@@ -240,6 +250,26 @@ async fn chunk_file(path: &Path) -> Result<Vec<ChunkRef>, String> {
         });
     }
     Ok(out)
+}
+
+fn emit_import(
+    app: &AppHandle,
+    run_id: &str,
+    phase: &str,
+    done_bytes: Option<u64>,
+    total_bytes: Option<u64>,
+    pct: Option<u32>,
+) {
+    let _ = app.emit_all(
+        IMPORT_EVENT,
+        ImportSftpProgress {
+            run_id: run_id.to_string(),
+            phase: phase.to_string(),
+            done_bytes,
+            total_bytes,
+            pct,
+        },
+    );
 }
 
 async fn presence_missing(
@@ -760,6 +790,7 @@ async fn copy_snapshot_file_to_sftp(
 
 #[tauri::command]
 async fn import_sftp_file_to_snapshot(
+    app: AppHandle,
     state: State<PluginRunManager>,
     req: ImportSftpFileToSnapshotRequest,
 ) -> Result<(), String> {
@@ -811,6 +842,7 @@ async fn import_sftp_file_to_snapshot(
     };
 
     // Download remote SFTP file to a temp file (so we can chunk+upload it).
+    emit_import(&app, &run_id, "sftp download", None, None, None);
     let mut tmp = std::env::temp_dir();
     let suffix = rand::random::<u64>();
     tmp.push(format!("filedock_sftp_import_{run_id}_{suffix}.tmp"));
@@ -878,6 +910,7 @@ async fn import_sftp_file_to_snapshot(
         let _ = tokio::fs::remove_file(&tmp).await;
         return Err("canceled".to_string());
     }
+    emit_import(&app, &run_id, "sftp download done", None, None, None);
 
     // Chunk+upload to the destination server.
     let client = build_http_client(
@@ -887,14 +920,39 @@ async fn import_sftp_file_to_snapshot(
     )?;
     let base = req.server_base_url.trim_end_matches('/').to_string();
 
+    let total_bytes = tokio::fs::metadata(&tmp)
+        .await
+        .map_err(|e| format!("stat temp file: {e}"))?
+        .len();
+
+    emit_import(&app, &run_id, "hashing", Some(0), Some(total_bytes), Some(0));
     let chunks = chunk_file(&tmp).await?;
+    emit_import(&app, &run_id, "hashing done", Some(total_bytes), Some(total_bytes), Some(100));
     let hashes = chunks.iter().map(|c| c.hash.clone()).collect::<Vec<_>>();
+    emit_import(&app, &run_id, "checking chunks", None, None, None);
     let missing = presence_missing(&client, &base, &hashes).await?;
 
     if !missing.is_empty() {
         let mut f = tokio::fs::File::open(&tmp)
             .await
             .map_err(|e| format!("open temp file: {e}"))?;
+
+        let missing_total_bytes = chunks
+            .iter()
+            .filter(|c| missing.contains(&c.hash))
+            .map(|c| c.size)
+            .sum::<u64>();
+        let missing_total_chunks = chunks.iter().filter(|c| missing.contains(&c.hash)).count() as u64;
+        let mut missing_done_bytes = 0u64;
+        let mut missing_done_chunks = 0u64;
+        emit_import(
+            &app,
+            &run_id,
+            &format!("uploading chunks (0/{})", missing_total_chunks),
+            Some(0),
+            Some(missing_total_bytes),
+            Some(0),
+        );
 
         for c in &chunks {
             if cancel_flag.load(Ordering::Relaxed) {
@@ -916,6 +974,22 @@ async fn import_sftp_file_to_snapshot(
                     .map_err(|e| format!("upload chunk request: {e}"))?
                     .error_for_status()
                     .map_err(|e| format!("upload chunk response: {e}"))?;
+
+                missing_done_bytes = missing_done_bytes.saturating_add(c.size);
+                missing_done_chunks = missing_done_chunks.saturating_add(1);
+                let pct = if missing_total_bytes > 0 {
+                    Some(((missing_done_bytes.saturating_mul(100)) / missing_total_bytes) as u32)
+                } else {
+                    Some(100)
+                };
+                emit_import(
+                    &app,
+                    &run_id,
+                    &format!("uploading chunks ({}/{})", missing_done_chunks, missing_total_chunks),
+                    Some(missing_done_bytes),
+                    Some(missing_total_bytes),
+                    pct,
+                );
             }
         }
     }
@@ -983,6 +1057,7 @@ async fn import_sftp_file_to_snapshot(
     };
 
     // Create destination snapshot and write manifest.
+    emit_import(&app, &run_id, "finalizing snapshot", None, None, None);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| format!("time: {e}"))?
@@ -1047,6 +1122,7 @@ async fn import_sftp_file_to_snapshot(
         .error_for_status()
         .map_err(|e| format!("manifest response: {e}"))?;
 
+    emit_import(&app, &run_id, "done", None, None, Some(100));
     let _ = tokio::fs::remove_file(&tmp).await;
     Ok(())
 }

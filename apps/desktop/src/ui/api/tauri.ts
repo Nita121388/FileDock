@@ -116,6 +116,29 @@ export type ImportSftpFileToSnapshotRequest = {
   };
 };
 
-export async function importSftpFileToSnapshot(req: ImportSftpFileToSnapshotRequest): Promise<void> {
-  await invoke("import_sftp_file_to_snapshot", { req });
+export type ImportSftpProgress = {
+  run_id: string;
+  phase: string;
+  done_bytes?: number | null;
+  total_bytes?: number | null;
+  pct?: number | null;
+};
+
+export async function importSftpFileToSnapshot(
+  req: ImportSftpFileToSnapshotRequest,
+  onProgress?: (p: ImportSftpProgress) => void
+): Promise<void> {
+  let unlisten: UnlistenFn | null = null;
+  if (onProgress) {
+    unlisten = await listen<ImportSftpProgress>("filedock_import_progress", (e) => {
+      if (e.payload.run_id !== req.run_id) return;
+      onProgress(e.payload);
+    });
+  }
+
+  try {
+    await invoke("import_sftp_file_to_snapshot", { req });
+  } finally {
+    if (unlisten) await unlisten();
+  }
 }
