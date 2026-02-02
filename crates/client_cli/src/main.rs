@@ -1,16 +1,19 @@
 use clap::{Parser, Subcommand};
 use filedock_protocol::{
-    is_valid_chunk_hash, is_valid_rel_path, ChunkPresenceRequest, ChunkPresenceResponse, HealthResponse,
-    ChunkRef, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest, ManifestFileEntry,
-    TreeResponse, SnapshotMeta, SnapshotDeleteResponse, SnapshotPruneRequest, SnapshotPruneResponse,
-    ChunkGcRequest, ChunkGcResponse,
-    DeviceHeartbeatRequest, DeviceHeartbeatResponse,
+    is_valid_chunk_hash, is_valid_rel_path, ChunkGcRequest, ChunkGcResponse, ChunkPresenceRequest,
+    ChunkPresenceResponse, ChunkRef, DeviceHeartbeatRequest, DeviceHeartbeatResponse,
+    HealthResponse, ManifestFileEntry, SnapshotCreateRequest, SnapshotCreateResponse,
+    SnapshotDeleteResponse, SnapshotManifest, SnapshotMeta, SnapshotPruneRequest,
+    SnapshotPruneResponse, TreeResponse,
 };
 use futures_util::stream::{self, StreamExt};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
-use std::{path::PathBuf, time::Duration};
+use std::collections::HashMap;
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use walkdir::WalkDir;
 
@@ -596,7 +599,7 @@ async fn push_folder_impl(
                         + plan.size;
                     let done_skipped =
                         skipped_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    if done_files % 25 == 0 || done_files == total_files {
+                    if done_files.is_multiple_of(25) || done_files == total_files {
                         eprintln!(
                             "uploaded files: {done_files}/{total_files}  bytes: {done_bytes}/{total_bytes}  skipped: {done_skipped}"
                         );
@@ -643,7 +646,7 @@ async fn push_folder_impl(
                 let done_bytes =
                     uploaded_bytes.fetch_add(plan.size, std::sync::atomic::Ordering::Relaxed)
                         + plan.size;
-                if done_files % 25 == 0 || done_files == total_files {
+                if done_files.is_multiple_of(25) || done_files == total_files {
                     let done_skipped = skipped_files.load(std::sync::atomic::Ordering::Relaxed);
                     eprintln!(
                         "uploaded files: {done_files}/{total_files}  bytes: {done_bytes}/{total_bytes}  skipped: {done_skipped}"
@@ -758,30 +761,28 @@ async fn main() -> Result<(), String> {
             exclude,
             ignore_file,
             interval_secs,
-        } => {
-            loop {
-                let snap = push_folder_impl(
-                    server.clone(),
-                    device.clone(),
-                    folder.clone(),
-                    concurrency,
-                    exclude.clone(),
-                    ignore_file.clone(),
-                )
-                .await?;
-                eprintln!("completed snapshot: {snap}");
+        } => loop {
+            let snap = push_folder_impl(
+                server.clone(),
+                device.clone(),
+                folder.clone(),
+                concurrency,
+                exclude.clone(),
+                ignore_file.clone(),
+            )
+            .await?;
+            eprintln!("completed snapshot: {snap}");
 
-                if interval_secs == 0 {
-                    break;
-                }
-
-                eprintln!("sleeping {interval_secs}s (Ctrl+C to stop)...");
-                tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {},
-                    _ = tokio::signal::ctrl_c() => { eprintln!(\"stopped\"); break; }
-                }
+            if interval_secs == 0 {
+                break;
             }
-        }
+
+            eprintln!("sleeping {interval_secs}s (Ctrl+C to stop)...");
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {},
+                _ = tokio::signal::ctrl_c() => { eprintln!("stopped"); break; }
+            }
+        },
 
         Command::Tree {
             server,
@@ -805,7 +806,10 @@ async fn main() -> Result<(), String> {
                 .json()
                 .await
                 .map_err(|e| format!("tree decode: {e}"))?;
-            println!("{}", serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?
+            );
         }
 
         Command::PullFile {
@@ -885,13 +889,12 @@ async fn main() -> Result<(), String> {
                     let out_root = out_root.clone();
                     async move {
                         let rel_path = f.path;
-                        let out_path = out_root.join(rel_path.replace('/', std::path::MAIN_SEPARATOR_STR));
-                        let url = format!(
-                            "{}/v1/snapshots/{}/file",
-                            server_base,
-                            snapshot_id
-                        );
-                        let bytes = get_bytes_with_retry(&client, &url, &[("path", rel_path.as_str())]).await?;
+                        let out_path =
+                            out_root.join(rel_path.replace('/', std::path::MAIN_SEPARATOR_STR));
+                        let url = format!("{}/v1/snapshots/{}/file", server_base, snapshot_id);
+                        let bytes =
+                            get_bytes_with_retry(&client, &url, &[("path", rel_path.as_str())])
+                                .await?;
 
                         if let Some(parent) = out_path.parent() {
                             tokio::fs::create_dir_all(parent)
@@ -902,8 +905,9 @@ async fn main() -> Result<(), String> {
                             .await
                             .map_err(|e| format!("write out: {e}"))?;
 
-                        let done = downloaded_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                        if done % 25 == 0 || done == total_files {
+                        let done =
+                            downloaded_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                        if done.is_multiple_of(25) || done == total_files {
                             eprintln!("downloaded files: {done}/{total_files}");
                         }
                         Ok(())
@@ -941,11 +945,7 @@ async fn main() -> Result<(), String> {
 
         Command::DeleteSnapshot { server, snapshot } => {
             let client = build_client()?;
-            let url = format!(
-                "{}/v1/snapshots/{}",
-                server.trim_end_matches('/'),
-                snapshot
-            );
+            let url = format!("{}/v1/snapshots/{}", server.trim_end_matches('/'), snapshot);
             let resp: SnapshotDeleteResponse = client
                 .delete(url)
                 .send()
@@ -1003,7 +1003,10 @@ async fn main() -> Result<(), String> {
         } => {
             let client = build_client()?;
             let url = format!("{}/v1/admin/chunks/gc", server.trim_end_matches('/'));
-            let req = ChunkGcRequest { dry_run, max_delete };
+            let req = ChunkGcRequest {
+                dry_run,
+                max_delete,
+            };
             let resp: ChunkGcResponse = client
                 .post(url)
                 .json(&req)
@@ -1105,8 +1108,6 @@ async fn main() -> Result<(), String> {
                 )
                 .await?;
                 eprintln!("agent: completed snapshot: {snap}");
-                last_snapshot_id = Some(snap.clone());
-
                 if heartbeat_enabled {
                     let st = cfg
                         .heartbeat_status
@@ -1286,8 +1287,7 @@ async fn main() -> Result<(), String> {
                 let server_ent = by_path.get(&rel_path);
 
                 if local_meta.is_none() {
-                    if server_ent.is_some() {
-                        let s = server_ent.unwrap();
+                    if let Some(s) = server_ent {
                         return Ok(StatusItem {
                             path: rel_path,
                             status: "missing_local".to_string(),
@@ -1347,7 +1347,11 @@ async fn main() -> Result<(), String> {
                     return Ok(StatusItem {
                         path: rel_path,
                         status: if ok { "up_to_date" } else { "changed" }.to_string(),
-                        reason: if ok { None } else { Some("mtime differs (use --verify to compare content)".to_string()) },
+                        reason: if ok {
+                            None
+                        } else {
+                            Some("mtime differs (use --verify to compare content)".to_string())
+                        },
                         local_size: Some(local_size),
                         server_size: Some(s.size),
                         local_mtime_unix: Some(local_mtime_unix),
@@ -1376,12 +1380,20 @@ async fn main() -> Result<(), String> {
                 };
 
                 let got = compute_chunks_for_file(&abs_path).await?;
-                let ok = got.len() == expected.len() && got.iter().zip(expected.iter()).all(|(a,b)| a.hash == b.hash && a.size == b.size);
+                let ok = got.len() == expected.len()
+                    && got
+                        .iter()
+                        .zip(expected.iter())
+                        .all(|(a, b)| a.hash == b.hash && a.size == b.size);
 
                 Ok(StatusItem {
                     path: rel_path,
                     status: if ok { "up_to_date" } else { "changed" }.to_string(),
-                    reason: if ok { None } else { Some("content differs".to_string()) },
+                    reason: if ok {
+                        None
+                    } else {
+                        Some("content differs".to_string())
+                    },
                     local_size: Some(local_size),
                     server_size: Some(s.size),
                     local_mtime_unix: Some(local_mtime_unix),
@@ -1391,7 +1403,9 @@ async fn main() -> Result<(), String> {
 
             if let Some(p) = path {
                 if !is_valid_rel_path(&p) {
-                    return Err("invalid --path (expected relative POSIX path like a/b.txt)".to_string());
+                    return Err(
+                        "invalid --path (expected relative POSIX path like a/b.txt)".to_string()
+                    );
                 }
                 if exclude_set.is_match(&p) {
                     items.push(StatusItem {
@@ -1575,7 +1589,7 @@ fn is_executable(path: &std::path::Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        return (meta.permissions().mode() & 0o111) != 0;
+        (meta.permissions().mode() & 0o111) != 0
     }
 
     #[cfg(not(unix))]
@@ -1586,7 +1600,7 @@ fn is_executable(path: &std::path::Path) -> bool {
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        return matches!(ext.as_str(), "exe" | "cmd" | "bat");
+        matches!(ext.as_str(), "exe" | "cmd" | "bat")
     }
 }
 
@@ -1594,14 +1608,14 @@ fn normalize_plugin_filename(name: &str) -> String {
     #[cfg(windows)]
     {
         // On Windows, we might see `filedock-foo.exe`.
-        return name.trim_end_matches(".exe")
+        name.trim_end_matches(".exe")
             .trim_end_matches(".cmd")
             .trim_end_matches(".bat")
-            .to_string();
+            .to_string()
     }
     #[cfg(not(windows))]
     {
-        return name.to_string();
+        name.to_string()
     }
 }
 
@@ -1619,12 +1633,16 @@ fn discover_plugins() -> Result<Vec<(String, std::path::PathBuf)>, String> {
                 Err(_) => continue,
             };
             let file_name = ent.file_name();
-            let Some(file_name) = file_name.to_str() else { continue };
+            let Some(file_name) = file_name.to_str() else {
+                continue;
+            };
             if !file_name.starts_with("filedock-") {
                 continue;
             }
             let file_name = normalize_plugin_filename(file_name);
-            let Some(name) = file_name.strip_prefix("filedock-") else { continue };
+            let Some(name) = file_name.strip_prefix("filedock-") else {
+                continue;
+            };
             if name.trim().is_empty() {
                 continue;
             }
@@ -1715,7 +1733,7 @@ fn build_excludes(patterns: &[String]) -> Result<GlobSet, String> {
         .map_err(|e| format!("failed to build exclude set: {e}"))
 }
 
-fn load_ignore_patterns(root: &PathBuf, ignore_file: Option<PathBuf>) -> Result<Vec<String>, String> {
+fn load_ignore_patterns(root: &Path, ignore_file: Option<PathBuf>) -> Result<Vec<String>, String> {
     let p = match ignore_file {
         Some(p) => {
             if p.is_absolute() {
@@ -1787,20 +1805,12 @@ async fn put_chunk(
     hash: &str,
     data: Vec<u8>,
 ) -> Result<(), String> {
-    let put_url = format!(
-        "{}/v1/chunks/{}",
-        server.trim_end_matches('/'),
-        hash
-    );
+    let put_url = format!("{}/v1/chunks/{}", server.trim_end_matches('/'), hash);
     // Retry with backoff on transient failures.
     let mut attempt = 0u32;
     loop {
         attempt += 1;
-        let resp = client
-            .put(put_url.clone())
-            .body(data.clone())
-            .send()
-            .await;
+        let resp = client.put(put_url.clone()).body(data.clone()).send().await;
 
         match resp {
             Ok(r) if r.status().is_success() => return Ok(()),
@@ -1834,10 +1844,7 @@ async fn get_bytes_with_retry(
         let resp = client.get(url).query(query).send().await;
         match resp {
             Ok(r) if r.status().is_success() => {
-                return r
-                    .bytes()
-                    .await
-                    .map_err(|e| format!("read bytes: {e}"));
+                return r.bytes().await.map_err(|e| format!("read bytes: {e}"));
             }
             Ok(r) => {
                 if attempt >= 4 {

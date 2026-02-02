@@ -126,7 +126,10 @@ fn build_client() -> Result<reqwest::Client, String> {
         .map_err(|e| format!("build http client: {e}"))
 }
 
-async fn fetch_snapshots(client: &reqwest::Client, server: &str) -> Result<Vec<SnapshotMeta>, String> {
+async fn fetch_snapshots(
+    client: &reqwest::Client,
+    server: &str,
+) -> Result<Vec<SnapshotMeta>, String> {
     let url = format!("{}/v1/snapshots", server.trim_end_matches('/'));
     let mut metas: Vec<SnapshotMeta> = client
         .get(url)
@@ -188,7 +191,9 @@ fn main() -> Result<(), String> {
     disable_raw_mode().map_err(|e| format!("disable raw mode: {e}"))?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)
         .map_err(|e| format!("leave alt screen: {e}"))?;
-    terminal.show_cursor().map_err(|e| format!("show cursor: {e}"))?;
+    terminal
+        .show_cursor()
+        .map_err(|e| format!("show cursor: {e}"))?;
 
     res
 }
@@ -205,7 +210,11 @@ fn run_app(
     match rt.block_on(fetch_snapshots(client, server)) {
         Ok(s) => {
             app.snapshots = s;
-            app.snapshots_state.select(if app.snapshots.is_empty() { None } else { Some(0) });
+            app.snapshots_state.select(if app.snapshots.is_empty() {
+                None
+            } else {
+                Some(0)
+            });
         }
         Err(e) => app.status = format!("error: {e}"),
     }
@@ -223,15 +232,22 @@ fn run_app(
                         match rt.block_on(fetch_snapshots(client, server)) {
                             Ok(s) => {
                                 app.snapshots = s;
-                                app.snapshots_state
-                                    .select(if app.snapshots.is_empty() { None } else { Some(0) });
+                                app.snapshots_state.select(if app.snapshots.is_empty() {
+                                    None
+                                } else {
+                                    Some(0)
+                                });
                                 app.status = "snapshots refreshed".to_string();
                                 // Refresh tree if currently showing one.
                                 if let Some(id) = app.snapshot_id.clone() {
                                     match rt.block_on(fetch_tree(client, server, &id, &app.path)) {
                                         Ok(tr) => {
                                             app.entries = tr.entries;
-                                            app.tree_state.select(if app.entries.is_empty() { None } else { Some(0) });
+                                            app.tree_state.select(if app.entries.is_empty() {
+                                                None
+                                            } else {
+                                                Some(0)
+                                            });
                                         }
                                         Err(e) => app.status = format!("error: {e}"),
                                     }
@@ -247,35 +263,47 @@ fn run_app(
                         }
                     }
                     KeyCode::Up => match app.focus {
-                        Focus::Snapshots => App::select_prev(&mut app.snapshots_state, app.snapshots.len()),
+                        Focus::Snapshots => {
+                            App::select_prev(&mut app.snapshots_state, app.snapshots.len())
+                        }
                         Focus::Tree => App::select_prev(&mut app.tree_state, app.entries.len()),
                     },
                     KeyCode::Down => match app.focus {
-                        Focus::Snapshots => App::select_next(&mut app.snapshots_state, app.snapshots.len()),
+                        Focus::Snapshots => {
+                            App::select_next(&mut app.snapshots_state, app.snapshots.len())
+                        }
                         Focus::Tree => App::select_next(&mut app.tree_state, app.entries.len()),
                     },
                     KeyCode::Enter => match app.focus {
                         Focus::Snapshots => {
-                            if let Some(s) = app.selected_snapshot() {
-                                app.snapshot_id = Some(s.snapshot_id.clone());
-                                app.path.clear();
-                                match rt.block_on(fetch_tree(client, server, &s.snapshot_id, "")) {
-                                    Ok(tr) => {
-                                        app.entries = tr.entries;
-                                        app.tree_state.select(if app.entries.is_empty() { None } else { Some(0) });
-                                        app.status = format!("opened snapshot {}", s.snapshot_id);
-                                    }
-                                    Err(e) => app.status = format!("error: {e}"),
+                            let snapshot_id = match app.selected_snapshot() {
+                                Some(s) => s.snapshot_id.clone(),
+                                None => continue,
+                            };
+                            app.snapshot_id = Some(snapshot_id.clone());
+                            app.path.clear();
+                            match rt.block_on(fetch_tree(client, server, &snapshot_id, "")) {
+                                Ok(tr) => {
+                                    app.entries = tr.entries;
+                                    app.tree_state.select(if app.entries.is_empty() {
+                                        None
+                                    } else {
+                                        Some(0)
+                                    });
+                                    app.status = format!("opened snapshot {}", snapshot_id);
                                 }
-                                app.focus = Focus::Tree;
+                                Err(e) => app.status = format!("error: {e}"),
                             }
+                            app.focus = Focus::Tree;
                         }
                         Focus::Tree => {
                             let Some(id) = app.snapshot_id.clone() else {
                                 app.status = "select a snapshot first".to_string();
                                 continue;
                             };
-                            let Some(ent) = app.selected_entry() else { continue };
+                            let Some(ent) = app.selected_entry() else {
+                                continue;
+                            };
                             if ent.kind != "dir" {
                                 app.status = "not a directory".to_string();
                                 continue;
@@ -289,7 +317,11 @@ fn run_app(
                                 Ok(tr) => {
                                     app.path = tr.path;
                                     app.entries = tr.entries;
-                                    app.tree_state.select(if app.entries.is_empty() { None } else { Some(0) });
+                                    app.tree_state.select(if app.entries.is_empty() {
+                                        None
+                                    } else {
+                                        Some(0)
+                                    });
                                 }
                                 Err(e) => app.status = format!("error: {e}"),
                             }
@@ -299,7 +331,9 @@ fn run_app(
                         if app.focus != Focus::Tree {
                             continue;
                         }
-                        let Some(id) = app.snapshot_id.clone() else { continue };
+                        let Some(id) = app.snapshot_id.clone() else {
+                            continue;
+                        };
 
                         if app.path.is_empty() {
                             app.status = "at snapshot root".to_string();
@@ -314,7 +348,11 @@ fn run_app(
                             Ok(tr) => {
                                 app.path = tr.path;
                                 app.entries = tr.entries;
-                                app.tree_state.select(if app.entries.is_empty() { None } else { Some(0) });
+                                app.tree_state.select(if app.entries.is_empty() {
+                                    None
+                                } else {
+                                    Some(0)
+                                });
                             }
                             Err(e) => app.status = format!("error: {e}"),
                         }
@@ -336,14 +374,16 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &mut App) {
     let areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(2)])
-        .split(f.area());
+        .split(f.size());
 
     let main = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(areas[0]);
 
-    let focus_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let focus_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
 
     // Left: snapshots
     let title = match app.focus {
@@ -354,11 +394,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &mut App) {
         .snapshots
         .iter()
         .map(|s| {
-            let line = format!(
-                "{}  {}",
-                s.snapshot_id,
-                s.device_name
-            );
+            let line = format!("{}  {}", s.snapshot_id, s.device_name);
             ListItem::new(line)
         })
         .collect();

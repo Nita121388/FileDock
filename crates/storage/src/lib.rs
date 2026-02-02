@@ -276,7 +276,7 @@ impl S3Storage {
 
         let prefix = normalize_prefix(cfg.prefix)?;
 
-        let mut loader = aws_config::from_env()
+        let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(aws_types::region::Region::new(cfg.region.clone()));
         if let Some(ep) = cfg.endpoint.as_ref().filter(|s| !s.trim().is_empty()) {
             loader = loader.endpoint_url(ep.trim().to_string());

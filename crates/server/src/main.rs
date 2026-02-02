@@ -1,6 +1,6 @@
 use axum::{
-    extract::{Path, State},
     body::Body,
+    extract::{Path, State},
     http::Request,
     http::StatusCode,
     middleware::Next,
@@ -9,21 +9,20 @@ use axum::{
 };
 use bytes::Bytes;
 use filedock_protocol::{
-    is_valid_chunk_hash, is_valid_rel_path, ChunkPresenceRequest, ChunkPresenceResponse, ChunkRef,
-    DeviceHeartbeatRequest, DeviceHeartbeatResponse, DeviceInfo, DeviceRegisterRequest,
-    DeviceRegisterResponse, HealthResponse, SnapshotCreateRequest,
-    SnapshotCreateResponse, SnapshotManifest, TreeEntry, TreeResponse, SnapshotMeta,
-    SnapshotDeleteResponse, SnapshotPruneRequest, SnapshotPruneResponse,
-    ChunkGcRequest, ChunkGcResponse,
+    is_valid_chunk_hash, is_valid_rel_path, ChunkGcRequest, ChunkGcResponse, ChunkPresenceRequest,
+    ChunkPresenceResponse, ChunkRef, DeviceHeartbeatRequest, DeviceHeartbeatResponse, DeviceInfo,
+    DeviceRegisterRequest, DeviceRegisterResponse, HealthResponse, SnapshotCreateRequest,
+    SnapshotCreateResponse, SnapshotDeleteResponse, SnapshotManifest, SnapshotMeta,
+    SnapshotPruneRequest, SnapshotPruneResponse, TreeEntry, TreeResponse,
 };
-use filedock_storage::{DiskStorage, PutOpts, Storage, S3Storage, S3StorageConfig};
+use filedock_storage::{DiskStorage, PutOpts, S3Storage, S3StorageConfig, Storage};
 use std::{net::SocketAddr, sync::Arc};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
 use axum::extract::Query;
-use serde::Deserialize;
 use clap::Parser;
+use serde::Deserialize;
 use std::io;
 
 #[derive(Parser, Debug)]
@@ -109,8 +108,8 @@ async fn register_device(
     };
 
     let key = format!("devices/{device_id}.json");
-    let data = serde_json::to_vec(&rec)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let data =
+        serde_json::to_vec(&rec).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     state
         .storage
         .put(
@@ -144,7 +143,9 @@ async fn list_devices(
             continue;
         }
         let data = state.storage.get(&key).await.map_err(|e| match e {
-            filedock_storage::StorageError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
+            filedock_storage::StorageError::NotFound => {
+                (StatusCode::NOT_FOUND, "not found".to_string())
+            }
             _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         })?;
         let rec: DeviceRecord = serde_json::from_slice(&data)
@@ -170,13 +171,18 @@ async fn device_heartbeat(
         return Err((StatusCode::BAD_REQUEST, "device_id required".to_string()));
     }
     if req.agent_version.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "agent_version required".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "agent_version required".to_string(),
+        ));
     }
 
     // Load device record and update last_seen.
     let key = format!("devices/{device_id}.json");
     let data = state.storage.get(&key).await.map_err(|e| match e {
-        filedock_storage::StorageError::NotFound => (StatusCode::NOT_FOUND, "device not found".to_string()),
+        filedock_storage::StorageError::NotFound => {
+            (StatusCode::NOT_FOUND, "device not found".to_string())
+        }
         _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     })?;
     let mut rec: DeviceRecord = serde_json::from_slice(&data)
@@ -185,8 +191,8 @@ async fn device_heartbeat(
     let now = now_unix();
     rec.last_seen_unix = Some(now);
 
-    let new_data = serde_json::to_vec(&rec)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let new_data =
+        serde_json::to_vec(&rec).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     state
         .storage
         .put(
@@ -214,8 +220,8 @@ async fn device_heartbeat(
         created_unix: now,
     };
     let hb_key = format!("devices/{device_id}.heartbeat.json");
-    let hb_data = serde_json::to_vec(&hb)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let hb_data =
+        serde_json::to_vec(&hb).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     state
         .storage
         .put(
@@ -288,8 +294,13 @@ async fn auth(
         }
 
         let key = format!("devices/{dev_id}.json");
-        let data = state.storage.get(&key).await.map_err(|_| StatusCode::UNAUTHORIZED)?;
-        let rec: DeviceRecord = serde_json::from_slice(&data).map_err(|_| StatusCode::UNAUTHORIZED)?;
+        let data = state
+            .storage
+            .get(&key)
+            .await
+            .map_err(|_| StatusCode::UNAUTHORIZED)?;
+        let rec: DeviceRecord =
+            serde_json::from_slice(&data).map_err(|_| StatusCode::UNAUTHORIZED)?;
         if rec.device_token != dev_token {
             return Err(StatusCode::UNAUTHORIZED);
         }
@@ -356,16 +367,12 @@ async fn get_chunk(
         return Err((StatusCode::BAD_REQUEST, "invalid chunk hash".to_string()));
     }
     let key = format!("chunks/{hash}");
-    state
-        .storage
-        .get(&key)
-        .await
-        .map_err(|e| match e {
-            filedock_storage::StorageError::NotFound => {
-                (StatusCode::NOT_FOUND, "not found".to_string())
-            }
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        })
+    state.storage.get(&key).await.map_err(|e| match e {
+        filedock_storage::StorageError::NotFound => {
+            (StatusCode::NOT_FOUND, "not found".to_string())
+        }
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    })
 }
 
 async fn create_snapshot(
@@ -424,7 +431,9 @@ async fn load_snapshot_metas(state: &AppState) -> Result<Vec<SnapshotMeta>, (Sta
             continue;
         }
         let data = state.storage.get(&key).await.map_err(|e| match e {
-            filedock_storage::StorageError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
+            filedock_storage::StorageError::NotFound => {
+                (StatusCode::NOT_FOUND, "not found".to_string())
+            }
             _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         })?;
         let meta: SnapshotMeta = serde_json::from_slice(&data)
@@ -594,11 +603,17 @@ async fn gc_chunks(
             continue;
         }
         let data = state.storage.get(&key).await.map_err(|e| match e {
-            filedock_storage::StorageError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
+            filedock_storage::StorageError::NotFound => {
+                (StatusCode::NOT_FOUND, "not found".to_string())
+            }
             _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         })?;
-        let manifest: SnapshotManifest = serde_json::from_slice(&data)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("decode manifest {key}: {e}")))?;
+        let manifest: SnapshotManifest = serde_json::from_slice(&data).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("decode manifest {key}: {e}"),
+            )
+        })?;
         for f in &manifest.files {
             if f.size == 0 {
                 continue;
@@ -623,7 +638,9 @@ async fn gc_chunks(
     let mut total_chunks = 0u64;
     let mut unref = Vec::<String>::new();
     for key in chunk_keys {
-        let Some(hash) = key.strip_prefix("chunks/") else { continue };
+        let Some(hash) = key.strip_prefix("chunks/") else {
+            continue;
+        };
         if hash.is_empty() {
             continue;
         }
@@ -736,7 +753,9 @@ async fn load_manifest(
 ) -> Result<SnapshotManifest, (StatusCode, String)> {
     let key = format!("manifests/{snapshot_id}.json");
     let data = state.storage.get(&key).await.map_err(|e| match e {
-        filedock_storage::StorageError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
+        filedock_storage::StorageError::NotFound => {
+            (StatusCode::NOT_FOUND, "not found".to_string())
+        }
         _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     })?;
     let manifest: SnapshotManifest = serde_json::from_slice(&data)
@@ -824,49 +843,6 @@ struct FileQuery {
     path: String,
 }
 
-async fn get_file_bytes(
-    State(state): State<AppState>,
-    Path(snapshot_id): Path<String>,
-    Query(q): Query<FileQuery>,
-) -> Result<Bytes, (StatusCode, String)> {
-    if !is_valid_rel_path(&q.path) {
-        return Err((StatusCode::BAD_REQUEST, "invalid path".to_string()));
-    }
-
-    let manifest = load_manifest(&state, &snapshot_id).await?;
-    let entry = manifest
-        .files
-        .iter()
-        .find(|f| f.path == q.path)
-        .ok_or((StatusCode::NOT_FOUND, "file not found".to_string()))?;
-
-    // MVP: single chunk per file (legacy) OR multi-chunk reconstruction (in-memory).
-    let chunks: Vec<ChunkRef> = if let Some(chunks) = &entry.chunks {
-        chunks.clone()
-    } else if let Some(hash) = &entry.chunk_hash {
-        vec![ChunkRef {
-            hash: hash.clone(),
-            size: entry.size,
-        }]
-    } else {
-        return Err((StatusCode::BAD_REQUEST, "manifest missing chunk info".to_string()));
-    };
-
-    let mut out = Vec::with_capacity(entry.size as usize);
-    for c in chunks {
-        let key = format!("chunks/{}", c.hash);
-        let data = state.storage.get(&key).await.map_err(|e| match e {
-            filedock_storage::StorageError::NotFound => {
-                (StatusCode::NOT_FOUND, "chunk not found".to_string())
-            }
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        })?;
-        out.extend_from_slice(&data);
-    }
-
-    Ok(Bytes::from(out))
-}
-
 async fn get_file_stream(
     State(state): State<AppState>,
     Path(snapshot_id): Path<String>,
@@ -895,26 +871,32 @@ async fn get_file_stream(
             size: entry.size,
         }]
     } else {
-        return Err((StatusCode::BAD_REQUEST, "manifest missing chunk info".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "manifest missing chunk info".to_string(),
+        ));
     };
 
     // Stream chunks sequentially without buffering all of them first.
     // If a chunk read fails mid-stream, the client will observe a truncated response.
     // This is acceptable for now (caller can retry / verify via hashes).
     let storage = state.storage.clone();
-    let stream = futures_util::stream::try_unfold((storage, chunks, 0usize), |(storage, chunks, idx)| async move {
-        if idx >= chunks.len() {
-            return Ok::<_, io::Error>(None);
-        }
-        let key = format!("chunks/{}", chunks[idx].hash);
-        let data = storage.get(&key).await.map_err(|e| match e {
-            filedock_storage::StorageError::NotFound => {
-                io::Error::new(io::ErrorKind::NotFound, "chunk not found")
+    let stream = futures_util::stream::try_unfold(
+        (storage, chunks, 0usize),
+        |(storage, chunks, idx)| async move {
+            if idx >= chunks.len() {
+                return Ok::<_, io::Error>(None);
             }
-            _ => io::Error::new(io::ErrorKind::Other, e.to_string()),
-        })?;
-        Ok(Some((data, (storage, chunks, idx + 1))))
-    });
+            let key = format!("chunks/{}", chunks[idx].hash);
+            let data = storage.get(&key).await.map_err(|e| match e {
+                filedock_storage::StorageError::NotFound => {
+                    io::Error::new(io::ErrorKind::NotFound, "chunk not found")
+                }
+                _ => io::Error::other(e.to_string()),
+            })?;
+            Ok(Some((data, (storage, chunks, idx + 1))))
+        },
+    );
 
     Ok(axum::body::Body::from_stream(stream))
 }
@@ -935,7 +917,9 @@ async fn main() {
                 .clone()
                 .filter(|s| !s.trim().is_empty())
                 .unwrap_or_else(|| {
-                    eprintln!("missing FILEDOCK_S3_BUCKET (required when FILEDOCK_STORAGE_BACKEND=s3)");
+                    eprintln!(
+                        "missing FILEDOCK_S3_BUCKET (required when FILEDOCK_STORAGE_BACKEND=s3)"
+                    );
                     std::process::exit(2);
                 });
 
@@ -959,7 +943,9 @@ async fn main() {
         }
     };
 
-    let token = std::env::var("FILEDOCK_TOKEN").ok().filter(|s| !s.is_empty());
+    let token = std::env::var("FILEDOCK_TOKEN")
+        .ok()
+        .filter(|s| !s.is_empty());
     if token.is_some() {
         tracing::info!("auth: enabled (FILEDOCK_TOKEN set)");
     } else {
