@@ -2,6 +2,11 @@
 
 The desktop app (Tauri) provides a multi-pane UI for browsing snapshots and (via plugins) remote filesystems like SFTP.
 
+## Drag-and-drop transfers (MVP)
+
+- Snapshot file → SFTP pane: uploads a snapshot file to a remote SFTP path (queues `snapshot_to_sftp`).
+- SFTP file → Device Browser pane: imports a remote SFTP file into a new snapshot on the server (queues `sftp_to_snapshot`).
+
 ## Bundling `filedock` + plugins inside the app
 
 The desktop UI can invoke `filedock plugin run ...` via a Tauri backend command.
@@ -28,4 +33,3 @@ npm run tauri build
 Notes:
 - Tauri expects binaries named with the host target triple (see `apps/desktop/src-tauri/binaries/README.md`).
 - The app will default `FILEDOCK_PLUGIN_DIRS` to the directory of the bundled `filedock` binary, so plugins can live alongside it.
-

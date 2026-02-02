@@ -3,7 +3,7 @@ import type { MouseEvent } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { PaneTab } from "../../../model/layout";
 import type { Settings } from "../../../model/settings";
-import type { Conn } from "../../../model/transfers";
+import type { Conn, PluginRunConfig, SftpConn } from "../../../model/transfers";
 import {
   apiGetBytes,
   chunksPresence,
@@ -90,9 +90,28 @@ export default function DeviceBrowserPane(props: {
     dstDirPath: string;
     dstBaseSnapshotId?: string;
   }) => void;
+  onEnqueueSftpToSnapshot: (job: {
+    runner?: PluginRunConfig;
+    conn: SftpConn;
+    remotePath: string;
+    dst: Conn;
+    dstDeviceName: string;
+    dstDeviceId?: string;
+    dstPath: string;
+    dstBaseSnapshotId?: string;
+    conflictPolicy?: "overwrite" | "skip" | "rename";
+  }) => void;
 }) {
-  const { settings, tab, onTabChange, onEnqueueDownload, onSetDeviceAuth, onEnqueueCopy, onEnqueueCopyFolder } =
-    props;
+  const {
+    settings,
+    tab,
+    onTabChange,
+    onEnqueueDownload,
+    onSetDeviceAuth,
+    onEnqueueCopy,
+    onEnqueueCopyFolder,
+    onEnqueueSftpToSnapshot
+  } = props;
 
   const [status, setStatus] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -650,10 +669,45 @@ export default function DeviceBrowserPane(props: {
           className="db-tree"
           onDragOver={(e) => {
             const t = Array.from(e.dataTransfer.types);
-            if (t.includes("application/x-filedock-file") || t.includes("Files")) e.preventDefault();
+            if (t.includes("application/x-filedock-file") || t.includes("application/x-filedock-sftp-file") || t.includes("Files"))
+              e.preventDefault();
           }}
           onDrop={async (e) => {
+            const rawSftp = e.dataTransfer.getData("application/x-filedock-sftp-file");
             const raw = e.dataTransfer.getData("application/x-filedock-file");
+            if (rawSftp) {
+              e.preventDefault();
+              try {
+                if (!deviceName) return;
+                const parsed = JSON.parse(rawSftp) as any;
+                const remotePath = String(parsed?.remotePath ?? "");
+                const conn = parsed?.conn as SftpConn | undefined;
+                const runner = parsed?.runner as PluginRunConfig | undefined;
+                if (!remotePath || !conn) return;
+
+                const base = remotePath.split("/").filter(Boolean).pop() || "file";
+                const defaultDstPath = path ? `${path}/${base}` : base;
+                const dst = prompt("Import to snapshot path (relative POSIX path)?", defaultDstPath);
+                if (!dst) return;
+
+                onEnqueueSftpToSnapshot({
+                  runner,
+                  conn,
+                  remotePath,
+                  dst: effConn,
+                  dstDeviceName: deviceName || "device",
+                  dstDeviceId: tab.state.deviceId || undefined,
+                  dstPath: dst,
+                  dstBaseSnapshotId: snapshotId || undefined,
+                  conflictPolicy: "overwrite"
+                });
+                setStatus(`queued sftp import: ${remotePath} -> ${dst}`);
+              } catch {
+                // ignore
+              }
+              return;
+            }
+
             if (raw) {
               e.preventDefault();
               try {

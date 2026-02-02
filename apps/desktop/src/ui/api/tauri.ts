@@ -95,3 +95,27 @@ export type CopySnapshotFileToSftpRequest = {
 export async function copySnapshotFileToSftp(req: CopySnapshotFileToSftpRequest): Promise<void> {
   await invoke("copy_snapshot_file_to_sftp", { req });
 }
+
+export type ImportSftpFileToSnapshotRequest = {
+  run_id: string;
+  server_base_url: string;
+  token?: string;
+  device_id?: string;
+  device_token?: string;
+  dst_device_name: string;
+  dst_device_id?: string;
+  dst_base_snapshot_id?: string;
+  dst_path: string;
+  conflict_policy?: "overwrite" | "skip" | "rename";
+  sftp_conn: unknown;
+  remote_path: string;
+  runner?: {
+    filedock_path?: string;
+    plugin_dirs?: string;
+    timeout_secs?: number;
+  };
+};
+
+export async function importSftpFileToSnapshot(req: ImportSftpFileToSnapshotRequest): Promise<void> {
+  await invoke("import_sftp_file_to_snapshot", { req });
+}

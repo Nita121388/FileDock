@@ -1,6 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use filedock_protocol::{is_valid_rel_path, SnapshotManifest};
+use filedock_protocol::{
+    is_valid_rel_path, ChunkPresenceRequest, ChunkPresenceResponse, ChunkRef, ManifestFileEntry,
+    SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest,
+};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -19,6 +22,7 @@ const TOKEN_HEADER: &str = "x-filedock-token";
 const DEVICE_ID_HEADER: &str = "x-filedock-device-id";
 const DEVICE_TOKEN_HEADER: &str = "x-filedock-device-token";
 const RESTORE_EVENT: &str = "filedock_restore_progress";
+const CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
 #[derive(Default)]
 struct RestoreManager {
@@ -46,6 +50,25 @@ struct CopySnapshotFileToSftpRequest {
     runner: Option<RunnerConfig>,
     #[serde(default)]
     mkdirs: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ImportSftpFileToSnapshotRequest {
+    run_id: String,
+    server_base_url: String,
+    token: Option<String>,
+    device_id: Option<String>,
+    device_token: Option<String>,
+
+    dst_device_name: String,
+    dst_device_id: Option<String>,
+    dst_base_snapshot_id: Option<String>,
+    dst_path: String,
+    conflict_policy: Option<String>, // "overwrite" | "skip" | "rename"
+
+    sftp_conn: serde_json::Value,
+    remote_path: String,
+    runner: Option<RunnerConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -194,6 +217,76 @@ async fn download_to_file_with_retry(
         let jitter: u64 = rand::random::<u8>() as u64;
         tokio::time::sleep(Duration::from_millis(base_ms + jitter)).await;
     }
+}
+
+async fn chunk_file(path: &Path) -> Result<Vec<ChunkRef>, String> {
+    let mut f = tokio::fs::File::open(path)
+        .await
+        .map_err(|e| format!("open file: {e}"))?;
+
+    let mut buf = vec![0u8; CHUNK_SIZE];
+    let mut out = Vec::<ChunkRef>::new();
+    loop {
+        let n = tokio::io::AsyncReadExt::read(&mut f, &mut buf)
+            .await
+            .map_err(|e| format!("read file: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        let hash = blake3::hash(&buf[..n]).to_hex().to_string();
+        out.push(ChunkRef {
+            hash,
+            size: n as u64,
+        });
+    }
+    Ok(out)
+}
+
+async fn presence_missing(
+    client: &reqwest::Client,
+    base: &str,
+    hashes: &[String],
+) -> Result<std::collections::HashSet<String>, String> {
+    let mut missing = std::collections::HashSet::<String>::new();
+    let url = format!("{}/v1/chunks/presence", base.trim_end_matches('/'));
+    for batch in hashes.chunks(1000) {
+        let req = ChunkPresenceRequest {
+            hashes: batch.to_vec(),
+        };
+        let resp: ChunkPresenceResponse = client
+            .post(&url)
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| format!("presence request: {e}"))?
+            .error_for_status()
+            .map_err(|e| format!("presence response: {e}"))?
+            .json()
+            .await
+            .map_err(|e| format!("presence decode: {e}"))?;
+        for h in resp.missing {
+            missing.insert(h);
+        }
+    }
+    Ok(missing)
+}
+
+fn unique_path(existing: &std::collections::HashSet<String>, desired: &str) -> String {
+    if !existing.contains(desired) {
+        return desired.to_string();
+    }
+    let dot = desired.rfind('.');
+    let (base, ext) = match dot {
+        Some(i) if i > 0 => (&desired[..i], &desired[i..]),
+        _ => (desired, ""),
+    };
+    for i in 2..1000 {
+        let cand = format!("{base} ({i}){ext}");
+        if !existing.contains(&cand) {
+            return cand;
+        }
+    }
+    desired.to_string()
 }
 
 #[tauri::command]
@@ -415,7 +508,8 @@ fn main() {
             cancel_restore_snapshot,
             run_filedock_plugin,
             cancel_filedock_plugin_run,
-            copy_snapshot_file_to_sftp
+            copy_snapshot_file_to_sftp,
+            import_sftp_file_to_snapshot
         ])
         .run(tauri::generate_context!())
         .expect("error while running filedock desktop");
@@ -661,6 +755,299 @@ async fn copy_snapshot_file_to_sftp(
     if !output.status.success() {
         return Err(format!("plugin failed: {} {}", output.status, stderr.trim()));
     }
+    Ok(())
+}
+
+#[tauri::command]
+async fn import_sftp_file_to_snapshot(
+    state: State<PluginRunManager>,
+    req: ImportSftpFileToSnapshotRequest,
+) -> Result<(), String> {
+    let run_id = req.run_id.trim().to_string();
+    if run_id.is_empty() {
+        return Err("run_id required".to_string());
+    }
+    if req.server_base_url.trim().is_empty() {
+        return Err("server_base_url required".to_string());
+    }
+    if req.dst_device_name.trim().is_empty() {
+        return Err("dst_device_name required".to_string());
+    }
+    let dst_path = req.dst_path.trim().to_string();
+    if dst_path.is_empty() {
+        return Err("dst_path required".to_string());
+    }
+    if !is_valid_rel_path(&dst_path) {
+        return Err("dst_path must be a relative POSIX path (no leading slash, no ..)".to_string());
+    }
+    if req.remote_path.trim().is_empty() {
+        return Err("remote_path required".to_string());
+    }
+
+    let cancel_flag = {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut m = state
+            .cancel
+            .lock()
+            .map_err(|_| "plugin run manager lock poisoned".to_string())?;
+        m.insert(run_id.clone(), flag.clone());
+        flag
+    };
+
+    struct Cleanup<'a> {
+        state: &'a PluginRunManager,
+        run_id: String,
+    }
+    impl Drop for Cleanup<'_> {
+        fn drop(&mut self) {
+            if let Ok(mut m) = self.state.cancel.lock() {
+                m.remove(&self.run_id);
+            }
+        }
+    }
+    let _cleanup = Cleanup {
+        state: &state,
+        run_id: run_id.clone(),
+    };
+
+    // Download remote SFTP file to a temp file (so we can chunk+upload it).
+    let mut tmp = std::env::temp_dir();
+    let suffix = rand::random::<u64>();
+    tmp.push(format!("filedock_sftp_import_{run_id}_{suffix}.tmp"));
+    let tmp_str = tmp.to_string_lossy().to_string();
+
+    let runner = req.runner.clone().unwrap_or(RunnerConfig {
+        filedock_path: None,
+        plugin_dirs: None,
+        timeout_secs: None,
+    });
+    let (filedock, filedock_dir) = resolve_filedock_path(runner.filedock_path.as_deref());
+    let timeout_secs = runner.timeout_secs.unwrap_or(900).max(1);
+
+    let payload = serde_json::json!({
+        "op": "download",
+        "conn": req.sftp_conn,
+        "args": {
+            "remote_path": req.remote_path,
+            "local_path": tmp_str,
+        }
+    });
+    let json = serde_json::to_string(&payload).map_err(|e| format!("encode plugin json: {e}"))?;
+
+    let mut cmd = tokio::process::Command::new(filedock);
+    cmd.arg("plugin")
+        .arg("run")
+        .arg("--name")
+        .arg("sftp")
+        .arg("--json")
+        .arg(&json)
+        .arg("--raw")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+
+    if let Some(dirs) = runner.plugin_dirs.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        cmd.env("FILEDOCK_PLUGIN_DIRS", dirs);
+    } else if let Some(dir) = filedock_dir {
+        cmd.env("FILEDOCK_PLUGIN_DIRS", dir.to_string_lossy().to_string());
+    }
+
+    let mut child = cmd.spawn().map_err(|e| format!("spawn filedock: {e}"))?;
+    let output = tokio::select! {
+        res = child.wait_with_output() => {
+            res.map_err(|e| format!("wait filedock: {e}"))?
+        }
+        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
+            let _ = child.kill().await;
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(format!("plugin timed out after {timeout_secs}s"));
+        }
+        _ = wait_cancel(cancel_flag.clone()) => {
+            let _ = child.kill().await;
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err("canceled".to_string());
+        }
+    };
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(format!("plugin failed: {} {}", output.status, stderr.trim()));
+    }
+
+    if cancel_flag.load(Ordering::Relaxed) {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err("canceled".to_string());
+    }
+
+    // Chunk+upload to the destination server.
+    let client = build_http_client(
+        req.token.as_deref(),
+        req.device_id.as_deref(),
+        req.device_token.as_deref(),
+    )?;
+    let base = req.server_base_url.trim_end_matches('/').to_string();
+
+    let chunks = chunk_file(&tmp).await?;
+    let hashes = chunks.iter().map(|c| c.hash.clone()).collect::<Vec<_>>();
+    let missing = presence_missing(&client, &base, &hashes).await?;
+
+    if !missing.is_empty() {
+        let mut f = tokio::fs::File::open(&tmp)
+            .await
+            .map_err(|e| format!("open temp file: {e}"))?;
+
+        for c in &chunks {
+            if cancel_flag.load(Ordering::Relaxed) {
+                let _ = tokio::fs::remove_file(&tmp).await;
+                return Err("canceled".to_string());
+            }
+            let mut buf = vec![0u8; c.size as usize];
+            tokio::io::AsyncReadExt::read_exact(&mut f, &mut buf)
+                .await
+                .map_err(|e| format!("read temp file: {e}"))?;
+
+            if missing.contains(&c.hash) {
+                let url = format!("{}/v1/chunks/{}", base, encode(&c.hash));
+                client
+                    .put(url)
+                    .body(buf)
+                    .send()
+                    .await
+                    .map_err(|e| format!("upload chunk request: {e}"))?
+                    .error_for_status()
+                    .map_err(|e| format!("upload chunk response: {e}"))?;
+            }
+        }
+    }
+
+    // Base manifest (optional).
+    let mut file_map = std::collections::HashMap::<String, ManifestFileEntry>::new();
+    if let Some(base_id) = req
+        .dst_base_snapshot_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let url = format!("{}/v1/snapshots/{}/manifest", base, encode(base_id));
+        if let Ok(resp) = client.get(url).send().await {
+            if let Ok(resp) = resp.error_for_status() {
+                if let Ok(m) = resp.json::<SnapshotManifest>().await {
+                    for f in m.files {
+                        if f.path.trim().is_empty() {
+                            continue;
+                        }
+                        // Normalize to chunks-only form (server accepts both, but we want stable manifests).
+                        let chunks = if let Some(chunks) = f.chunks.clone() {
+                            Some(chunks)
+                        } else if let Some(h) = f.chunk_hash.as_deref() {
+                            Some(vec![ChunkRef {
+                                hash: h.to_string(),
+                                size: f.size,
+                            }])
+                        } else {
+                            Some(vec![])
+                        };
+                        file_map.insert(
+                            f.path.clone(),
+                            ManifestFileEntry {
+                                path: f.path,
+                                size: f.size,
+                                mtime_unix: f.mtime_unix,
+                                chunk_hash: None,
+                                chunks,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    let policy = req.conflict_policy.as_deref().unwrap_or("overwrite");
+    let mut existing = std::collections::HashSet::<String>::new();
+    for k in file_map.keys() {
+        existing.insert(k.to_string());
+    }
+
+    let final_path = if existing.contains(&dst_path) {
+        match policy {
+            "skip" => {
+                let _ = tokio::fs::remove_file(&tmp).await;
+                return Ok(());
+            }
+            "rename" => unique_path(&existing, &dst_path),
+            _ => dst_path.clone(), // overwrite
+        }
+    } else {
+        dst_path.clone()
+    };
+
+    // Create destination snapshot and write manifest.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("time: {e}"))?
+        .as_secs() as i64;
+    let create_url = format!("{}/v1/snapshots", base);
+    let create_req = SnapshotCreateRequest {
+        device_name: req.dst_device_name.trim().to_string(),
+        device_id: req
+            .dst_device_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string()),
+        root_path: format!("(sftp import: {})", final_path),
+    };
+    let create_resp: SnapshotCreateResponse = client
+        .post(create_url)
+        .json(&create_req)
+        .send()
+        .await
+        .map_err(|e| format!("create snapshot request: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("create snapshot response: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("create snapshot decode: {e}"))?;
+
+    file_map.insert(
+        final_path.clone(),
+        ManifestFileEntry {
+            path: final_path,
+            size: tokio::fs::metadata(&tmp)
+                .await
+                .map_err(|e| format!("stat temp file: {e}"))?
+                .len(),
+            mtime_unix: now,
+            chunk_hash: None,
+            chunks: Some(chunks),
+        },
+    );
+
+    let mut files = file_map.into_values().collect::<Vec<_>>();
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+
+    let manifest = SnapshotManifest {
+        snapshot_id: create_resp.snapshot_id.clone(),
+        created_unix: now,
+        files,
+    };
+
+    let manifest_url = format!(
+        "{}/v1/snapshots/{}/manifest",
+        base,
+        encode(&create_resp.snapshot_id)
+    );
+    client
+        .put(manifest_url)
+        .json(&manifest)
+        .send()
+        .await
+        .map_err(|e| format!("manifest request: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("manifest response: {e}"))?;
+
+    let _ = tokio::fs::remove_file(&tmp).await;
     Ok(())
 }
 

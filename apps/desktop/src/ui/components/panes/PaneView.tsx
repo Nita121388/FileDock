@@ -36,6 +36,17 @@ export function PaneView(props: {
     remotePath: string;
     mkdirs?: boolean;
   }) => void;
+  onEnqueueSftpToSnapshot: (job: {
+    runner?: import("../../model/transfers").PluginRunConfig;
+    conn: import("../../model/transfers").SftpConn;
+    remotePath: string;
+    dst: import("../../model/transfers").Conn;
+    dstDeviceName: string;
+    dstDeviceId?: string;
+    dstPath: string;
+    dstBaseSnapshotId?: string;
+    conflictPolicy?: "overwrite" | "skip" | "rename";
+  }) => void;
   onEnqueueCopy: (job: {
     src: import("../../model/transfers").Conn;
     srcSnapshotId: string;
@@ -74,6 +85,7 @@ export function PaneView(props: {
           onSetDeviceAuth={props.onSetDeviceAuth}
           onEnqueueCopy={props.onEnqueueCopy}
           onEnqueueCopyFolder={props.onEnqueueCopyFolder}
+          onEnqueueSftpToSnapshot={props.onEnqueueSftpToSnapshot}
         />
       );
     case "sftpBrowser":

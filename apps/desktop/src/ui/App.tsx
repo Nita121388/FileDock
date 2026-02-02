@@ -33,7 +33,12 @@ import {
   putManifest
 } from "./api/client";
 import { chunkBytes } from "./util/chunking";
-import { cancelFiledockPluginRun, copySnapshotFileToSftp, runFiledockPlugin } from "./api/tauri";
+import {
+  cancelFiledockPluginRun,
+  copySnapshotFileToSftp,
+  importSftpFileToSnapshot,
+  runFiledockPlugin
+} from "./api/tauri";
 
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadState() ?? DEFAULT_APP_STATE);
@@ -332,6 +337,35 @@ export default function App() {
     setTransfers((xs) => [job, ...xs]);
   };
 
+  const enqueueSftpToSnapshot = (req: {
+    runner?: PluginRunConfig;
+    conn: SftpConn;
+    remotePath: string;
+    dst: Conn;
+    dstDeviceName: string;
+    dstDeviceId?: string;
+    dstPath: string;
+    dstBaseSnapshotId?: string;
+    conflictPolicy?: "overwrite" | "skip" | "rename";
+  }) => {
+    const job: TransferJob = {
+      id: uid("xfer"),
+      kind: "sftp_to_snapshot",
+      createdAt: Date.now(),
+      status: "queued",
+      runner: req.runner,
+      conn: req.conn,
+      remotePath: req.remotePath,
+      dst: req.dst,
+      dstDeviceName: req.dstDeviceName,
+      dstDeviceId: req.dstDeviceId,
+      dstBaseSnapshotId: req.dstBaseSnapshotId,
+      dstPath: req.dstPath,
+      conflictPolicy: req.conflictPolicy ?? "overwrite"
+    } as any;
+    setTransfers((xs) => [job, ...xs]);
+  };
+
   const enqueueCopy = (req: {
     src: Conn;
     srcSnapshotId: string;
@@ -454,7 +488,13 @@ export default function App() {
   const cancelTransfer = (id: string) => {
     const ac = abortersRef.current.get(id);
     const job = transfers.find((x) => x.id === id);
-    if (job && (job.kind === "sftp_download" || job.kind === "sftp_upload" || job.kind === "snapshot_to_sftp")) {
+    if (
+      job &&
+      (job.kind === "sftp_download" ||
+        job.kind === "sftp_upload" ||
+        job.kind === "snapshot_to_sftp" ||
+        job.kind === "sftp_to_snapshot")
+    ) {
       // Best-effort: signal the backend to kill the plugin process if it is running.
       cancelFiledockPluginRun(id).catch(() => {});
     }
@@ -668,6 +708,64 @@ export default function App() {
           timeout_secs: job.runner?.timeout_secs ?? 600
         },
         mkdirs: job.mkdirs ?? true
+      });
+
+      if (ac.signal.aborted) {
+        setTransfers((xs) =>
+          xs.map((x) => (x.id === id ? { ...x, status: "failed", error: "canceled", progress: undefined } : x))
+        );
+        return;
+      }
+
+      setTransfers((xs) =>
+        xs.map((x) => (x.id === id ? { ...x, status: "done", error: undefined, progress: undefined } : x))
+      );
+    } catch (e: any) {
+      if (isAbortError(e)) {
+        setTransfers((xs) =>
+          xs.map((x) => (x.id === id ? { ...x, status: "failed", error: "canceled", progress: undefined } : x))
+        );
+        return;
+      }
+      const msg = String(e?.message ?? e);
+      setTransfers((xs) =>
+        xs.map((x) => (x.id === id ? { ...x, status: "failed", error: msg, progress: undefined } : x))
+      );
+    } finally {
+      clearAborter(id);
+    }
+  };
+
+  const sftpToSnapshotNow = async (id: string) => {
+    const job = transfers.find((x) => x.id === id);
+    if (!job) return;
+    if (job.kind !== "sftp_to_snapshot") return;
+    if (job.status === "running" || job.status === "done") return;
+
+    const ac = newAborter(id);
+    setTransferStatus(id, "running");
+    setTransferError(id, undefined);
+    setTransferProgress(id, { phase: "sftp -> snapshot", pct: undefined });
+
+    try {
+      await importSftpFileToSnapshot({
+        run_id: id,
+        server_base_url: job.dst.serverBaseUrl,
+        token: job.dst.token || undefined,
+        device_id: job.dst.deviceId || undefined,
+        device_token: job.dst.deviceToken || undefined,
+        dst_device_name: job.dstDeviceName,
+        dst_device_id: job.dstDeviceId || undefined,
+        dst_base_snapshot_id: job.dstBaseSnapshotId || undefined,
+        dst_path: job.dstPath,
+        conflict_policy: job.conflictPolicy ?? "overwrite",
+        sftp_conn: job.conn,
+        remote_path: job.remotePath,
+        runner: {
+          filedock_path: job.runner?.filedock_path,
+          plugin_dirs: job.runner?.plugin_dirs,
+          timeout_secs: job.runner?.timeout_secs ?? 900
+        }
       });
 
       if (ac.signal.aborted) {
@@ -1426,6 +1524,7 @@ export default function App() {
     if (job.kind === "sftp_download") return sftpDownloadNow(id);
     if (job.kind === "sftp_upload") return sftpUploadNow(id);
     if (job.kind === "snapshot_to_sftp") return snapshotToSftpNow(id);
+    if (job.kind === "sftp_to_snapshot") return sftpToSnapshotNow(id);
   };
 
   return (
@@ -1512,6 +1611,7 @@ export default function App() {
           onEnqueueSftpDownload={enqueueSftpDownload}
           onEnqueueSftpUpload={enqueueSftpUpload}
           onEnqueueSnapshotToSftp={enqueueSnapshotToSftp}
+          onEnqueueSftpToSnapshot={enqueueSftpToSnapshot}
           onEnqueueCopy={enqueueCopy}
           onEnqueueCopyFolder={enqueueCopyFolder}
           onRemoveTransfer={removeTransfer}

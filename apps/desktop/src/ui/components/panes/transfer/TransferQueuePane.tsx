@@ -303,6 +303,10 @@ export default function TransferQueuePane(props: {
                 <span className="queue-path">
                   snap→sftp {j.src.serverBaseUrl} {j.snapshotId}:{j.snapshotPath} → {j.conn.user}@{j.conn.host}:{j.remotePath}
                 </span>
+              ) : j.kind === "sftp_to_snapshot" ? (
+                <span className="queue-path">
+                  sftp→snap {j.conn.user}@{j.conn.host}:{j.remotePath} → {j.dst.serverBaseUrl} {j.dstPath}
+                </span>
               ) : j.kind === "sftp_download" ? (
                 <span className="queue-path">
                   sftp-dl {j.conn.user}@{j.conn.host}:{j.remotePath} → {j.localPath}
@@ -324,9 +328,9 @@ export default function TransferQueuePane(props: {
               {typeof j.progress?.pct === "number" ? (
                 <span className="pill pill-running">{j.progress.pct}%</span>
               ) : null}
-              {j.kind === "copy_file" || j.kind === "copy_folder" ? (
+              {j.kind === "copy_file" || j.kind === "copy_folder" || j.kind === "sftp_to_snapshot" ? (
                 <>
-                  {j.dstBaseSnapshotId ? (
+                  {"dstBaseSnapshotId" in j && j.dstBaseSnapshotId ? (
                     <span className="queue-path">base:{String(j.dstBaseSnapshotId).slice(0, 8)}</span>
                   ) : null}
                   <select
