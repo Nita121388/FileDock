@@ -70,6 +70,14 @@ export default function SftpBrowserPane(props: {
     };
   }, [st]);
 
+  const runner = useMemo(() => {
+    return {
+      filedock_path: st.filedockPath || undefined,
+      plugin_dirs: st.pluginDirs || undefined,
+      timeout_secs: 300
+    };
+  }, [st.filedockPath, st.pluginDirs]);
+
   async function call(op: string, args: any): Promise<any> {
     const payload = {
       op,
@@ -153,11 +161,7 @@ export default function SftpBrowserPane(props: {
     });
     if (!dest) return;
     props.onEnqueueSftpDownload({
-      runner: {
-        filedock_path: st.filedockPath || undefined,
-        plugin_dirs: st.pluginDirs || undefined,
-        timeout_secs: 300
-      },
+      runner,
       conn: conn as any,
       remotePath: remote,
       localPath: dest
@@ -174,11 +178,7 @@ export default function SftpBrowserPane(props: {
     const base = local.split(/[\\/]/).pop() || `upload_${uid("file")}`;
     const remote = st.path && st.path !== "/" ? joinPosix(st.path, base) : `/${base}`;
     props.onEnqueueSftpUpload({
-      runner: {
-        filedock_path: st.filedockPath || undefined,
-        plugin_dirs: st.pluginDirs || undefined,
-        timeout_secs: 300
-      },
+      runner,
       conn: conn as any,
       localPath: local,
       remotePath: remote,
@@ -418,7 +418,24 @@ export default function SftpBrowserPane(props: {
                   {e.name}/
                 </button>
               ) : (
-                e.name
+                <span
+                  draggable={e.kind === "file"}
+                  title={e.kind === "file" ? "Drag to Transfer Queue to download" : undefined}
+                  onDragStart={(ev) => {
+                    if (e.kind !== "file") return;
+                    const remote = st.path && st.path !== "/" ? joinPosix(st.path, e.name) : `/${e.name}`;
+                    const payload = {
+                      runner,
+                      conn,
+                      remotePath: remote
+                    };
+                    ev.dataTransfer.effectAllowed = "copy";
+                    ev.dataTransfer.setData("application/x-filedock-sftp-file", JSON.stringify(payload));
+                    ev.dataTransfer.setData("text/plain", remote);
+                  }}
+                >
+                  {e.name}
+                </span>
               )}
             </div>
             <div>{e.kind}</div>

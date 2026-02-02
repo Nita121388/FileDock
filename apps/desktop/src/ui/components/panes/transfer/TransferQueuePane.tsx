@@ -1,5 +1,7 @@
 import type { TransferJob } from "../../../model/transfers";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
+import type { PluginRunConfig, SftpConn } from "../../../model/transfers";
 
 const QUEUE_KEY = "filedock.desktop.queue.v1";
 
@@ -48,11 +50,19 @@ export default function TransferQueuePane(props: {
   transfers: TransferJob[];
   onUpdateTransfer: (id: string, updates: Partial<TransferJob>) => void;
   onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../../../model/transfers").Conn) => void;
+  onEnqueueSftpDownload: (job: { runner?: PluginRunConfig; conn: SftpConn; remotePath: string; localPath: string }) => void;
+  onEnqueueSftpUpload: (job: {
+    runner?: PluginRunConfig;
+    conn: SftpConn;
+    localPath: string;
+    remotePath: string;
+    mkdirs?: boolean;
+  }) => void;
   onRemove: (id: string) => void;
   onRun: (id: string) => Promise<void>;
   onCancel: (id: string) => void;
 }) {
-  const { transfers, onUpdateTransfer, onEnqueueDownload, onRemove, onRun, onCancel } = props;
+  const { transfers, onUpdateTransfer, onEnqueueDownload, onEnqueueSftpDownload, onRemove, onRun, onCancel } = props;
   const [busy, setBusy] = useState(false);
   const [queue, setQueue] = useState<QueueSettings>(() => loadQueueSettings());
   const pausedRef = useRef(queue.paused);
@@ -125,25 +135,47 @@ export default function TransferQueuePane(props: {
       onDragOver={(e) => {
         // Accept file items dragged from Device Browser.
         const t = Array.from(e.dataTransfer.types);
-        if (t.includes("application/x-filedock-file")) e.preventDefault();
+        if (t.includes("application/x-filedock-file") || t.includes("application/x-filedock-sftp-file")) e.preventDefault();
       }}
       onDrop={(e) => {
+        const rawSftp = e.dataTransfer.getData("application/x-filedock-sftp-file");
         const raw = e.dataTransfer.getData("application/x-filedock-file");
-        if (!raw) return;
+        if (!raw && !rawSftp) return;
         e.preventDefault();
-        try {
-          const parsed = JSON.parse(raw) as any;
-          // New format: { src: Conn, snapshotId, path }
-          if (parsed?.src && parsed.snapshotId && parsed.path) {
-            onEnqueueDownload(parsed.snapshotId, parsed.path, parsed.src);
-            return;
+        if (rawSftp) {
+          void (async () => {
+            try {
+              const parsed = JSON.parse(rawSftp) as any;
+              const remotePath = String(parsed?.remotePath ?? "");
+              const conn = parsed?.conn as SftpConn | undefined;
+              const runner = parsed?.runner as PluginRunConfig | undefined;
+              if (!remotePath || !conn) return;
+              const base = remotePath.split("/").filter(Boolean).pop() || "download";
+              const dest = await save({ defaultPath: base });
+              if (!dest) return;
+              onEnqueueSftpDownload({ runner, conn, remotePath, localPath: dest });
+            } catch {
+              // ignore
+            }
+          })();
+          return;
+        }
+
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as any;
+            // New format: { src: Conn, snapshotId, path }
+            if (parsed?.src && parsed.snapshotId && parsed.path) {
+              onEnqueueDownload(parsed.snapshotId, parsed.path, parsed.src);
+              return;
+            }
+            // Legacy format: { snapshotId, path }
+            if (parsed?.snapshotId && parsed?.path) {
+              onEnqueueDownload(parsed.snapshotId, parsed.path);
+            }
+          } catch {
+            // ignore
           }
-          // Legacy format: { snapshotId, path }
-          if (parsed?.snapshotId && parsed?.path) {
-            onEnqueueDownload(parsed.snapshotId, parsed.path);
-          }
-        } catch {
-          // ignore
         }
       }}
     >

@@ -82,6 +82,8 @@ export function PaneView(props: {
           transfers={props.transfers}
           onUpdateTransfer={props.onUpdateTransfer}
           onEnqueueDownload={props.onEnqueueDownload}
+          onEnqueueSftpDownload={props.onEnqueueSftpDownload}
+          onEnqueueSftpUpload={props.onEnqueueSftpUpload}
           onRemove={props.onRemoveTransfer}
           onRun={props.onRunTransfer}
           onCancel={props.onCancelTransfer}
