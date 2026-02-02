@@ -3,6 +3,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Ensure cargo is available in non-login shells (e.g. IDE tasks).
+if [ -d "$HOME/.cargo/bin" ]; then
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
 # Start a dev server in the background (if cargo is available).
 if command -v cargo >/dev/null 2>&1; then
   export FILEDOCK_LISTEN="${FILEDOCK_LISTEN:-127.0.0.1:8787}"
@@ -26,4 +31,3 @@ else
   echo "[dev] npm not found; cannot start desktop UI" >&2
   exit 1
 fi
-

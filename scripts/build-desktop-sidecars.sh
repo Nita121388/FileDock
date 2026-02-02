@@ -40,7 +40,7 @@ echo "[desktop-sidecars] wrote $DST_FD"
 if command -v go >/dev/null 2>&1; then
   echo "[desktop-sidecars] building filedock-sftp (go)"
   tmp="$OUT_DIR/.tmp_filedock-sftp${EXT}"
-  (cd "$ROOT" && go build -o "$tmp" ./plugins/sftp)
+  (cd "$ROOT/plugins/sftp" && go build -o "$tmp")
   DST_SFTP="$OUT_DIR/filedock-sftp-${HOST_TRIPLE}${EXT}"
   mv -f "$tmp" "$DST_SFTP"
   chmod +x "$DST_SFTP" 2>/dev/null || true
@@ -50,4 +50,3 @@ else
 fi
 
 echo "[desktop-sidecars] done"
-

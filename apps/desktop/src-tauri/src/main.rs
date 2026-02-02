@@ -15,7 +15,7 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use urlencoding::encode;
 
 const TOKEN_HEADER: &str = "x-filedock-token";
@@ -260,7 +260,7 @@ fn emit_import(
     total_bytes: Option<u64>,
     pct: Option<u32>,
 ) {
-    let _ = app.emit_all(
+    let _ = app.emit(
         IMPORT_EVENT,
         ImportSftpProgress {
             run_id: run_id.to_string(),
@@ -320,7 +320,10 @@ fn unique_path(existing: &std::collections::HashSet<String>, desired: &str) -> S
 }
 
 #[tauri::command]
-fn cancel_restore_snapshot(state: State<RestoreManager>, snapshot_id: String) -> Result<bool, String> {
+fn cancel_restore_snapshot(
+    state: State<'_, RestoreManager>,
+    snapshot_id: String,
+) -> Result<bool, String> {
     let id = snapshot_id.trim();
     if id.is_empty() {
         return Err("snapshot_id required".to_string());
@@ -339,7 +342,7 @@ fn cancel_restore_snapshot(state: State<RestoreManager>, snapshot_id: String) ->
 #[tauri::command]
 async fn restore_snapshot_to_folder(
     app: AppHandle,
-    state: State<RestoreManager>,
+    state: State<'_, RestoreManager>,
     req: RestoreSnapshotRequest,
 ) -> Result<RestoreSnapshotResponse, String> {
     if req.server_base_url.trim().is_empty() {
@@ -487,7 +490,7 @@ async fn restore_snapshot_to_folder(
             Ok((path, bytes)) => {
                 done_files = done_files.saturating_add(1);
                 done_bytes = done_bytes.saturating_add(bytes);
-                let _ = app.emit_all(
+                let _ = app.emit(
                     RESTORE_EVENT,
                     RestoreSnapshotProgress {
                         snapshot_id: req.snapshot_id.clone(),
@@ -562,7 +565,10 @@ struct RunFiledockPluginResponse {
 }
 
 #[tauri::command]
-fn cancel_filedock_plugin_run(state: State<PluginRunManager>, run_id: String) -> Result<bool, String> {
+fn cancel_filedock_plugin_run(
+    state: State<'_, PluginRunManager>,
+    run_id: String,
+) -> Result<bool, String> {
     let id = run_id.trim();
     if id.is_empty() {
         return Err("runId required".to_string());
@@ -622,7 +628,7 @@ async fn wait_cancel(flag: Arc<AtomicBool>) {
 
 #[tauri::command]
 async fn copy_snapshot_file_to_sftp(
-    state: State<PluginRunManager>,
+    state: State<'_, PluginRunManager>,
     req: CopySnapshotFileToSftpRequest,
 ) -> Result<(), String> {
     let run_id = req.run_id.trim().to_string();
@@ -763,10 +769,9 @@ async fn copy_snapshot_file_to_sftp(
     }
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn filedock: {e}"))?;
-    let output = tokio::select! {
-        res = child.wait_with_output() => {
-            res.map_err(|e| format!("wait filedock: {e}"))?
-        }
+    let mut stderr_pipe = child.stderr.take();
+    let status = tokio::select! {
+        res = child.wait() => res.map_err(|e| format!("wait filedock: {e}"))?,
         _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
             let _ = child.kill().await;
             let _ = tokio::fs::remove_file(&tmp).await;
@@ -778,12 +783,17 @@ async fn copy_snapshot_file_to_sftp(
             return Err("canceled".to_string());
         }
     };
-
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let mut stderr_buf = Vec::new();
+    if let Some(mut s) = stderr_pipe {
+        tokio::io::AsyncReadExt::read_to_end(&mut s, &mut stderr_buf)
+            .await
+            .map_err(|e| format!("read filedock stderr: {e}"))?;
+    }
+    let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
     let _ = tokio::fs::remove_file(&tmp).await;
 
-    if !output.status.success() {
-        return Err(format!("plugin failed: {} {}", output.status, stderr.trim()));
+    if !status.success() {
+        return Err(format!("plugin failed: {} {}", status, stderr.trim()));
     }
     Ok(())
 }
@@ -791,7 +801,7 @@ async fn copy_snapshot_file_to_sftp(
 #[tauri::command]
 async fn import_sftp_file_to_snapshot(
     app: AppHandle,
-    state: State<PluginRunManager>,
+    state: State<'_, PluginRunManager>,
     req: ImportSftpFileToSnapshotRequest,
 ) -> Result<(), String> {
     let run_id = req.run_id.trim().to_string();
@@ -885,10 +895,9 @@ async fn import_sftp_file_to_snapshot(
     }
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn filedock: {e}"))?;
-    let output = tokio::select! {
-        res = child.wait_with_output() => {
-            res.map_err(|e| format!("wait filedock: {e}"))?
-        }
+    let mut stderr_pipe = child.stderr.take();
+    let status = tokio::select! {
+        res = child.wait() => res.map_err(|e| format!("wait filedock: {e}"))?,
         _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
             let _ = child.kill().await;
             let _ = tokio::fs::remove_file(&tmp).await;
@@ -900,10 +909,16 @@ async fn import_sftp_file_to_snapshot(
             return Err("canceled".to_string());
         }
     };
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    if !output.status.success() {
+    let mut stderr_buf = Vec::new();
+    if let Some(mut s) = stderr_pipe {
+        tokio::io::AsyncReadExt::read_to_end(&mut s, &mut stderr_buf)
+            .await
+            .map_err(|e| format!("read filedock stderr: {e}"))?;
+    }
+    let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
+    if !status.success() {
         let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(format!("plugin failed: {} {}", output.status, stderr.trim()));
+        return Err(format!("plugin failed: {} {}", status, stderr.trim()));
     }
 
     if cancel_flag.load(Ordering::Relaxed) {
@@ -1135,7 +1150,7 @@ fn resolve_filedock_path(explicit: Option<&str>) -> (String, Option<PathBuf>) {
 
     // For packaged apps, prefer a sidecar binary next to the main executable.
     // Fall back to "filedock" on PATH.
-    let exe = tauri::process::current_binary().ok();
+    let exe = tauri::process::current_binary(&tauri::Env::default()).ok();
     let exe_dir = exe.as_deref().and_then(|p| p.parent()).map(Path::to_path_buf);
     if let Some(dir) = exe_dir {
         let mut candidates = vec![dir.join("filedock")];
@@ -1166,7 +1181,7 @@ fn resolve_filedock_path(explicit: Option<&str>) -> (String, Option<PathBuf>) {
 
 #[tauri::command]
 async fn run_filedock_plugin(
-    state: State<PluginRunManager>,
+    state: State<'_, PluginRunManager>,
     req: RunFiledockPluginRequest,
 ) -> Result<RunFiledockPluginResponse, String> {
     let name = req.name.trim().to_string();
@@ -1246,10 +1261,10 @@ async fn run_filedock_plugin(
     }
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn filedock: {e}"))?;
-    let output = tokio::select! {
-        res = child.wait_with_output() => {
-            res.map_err(|e| format!("wait filedock: {e}"))?
-        }
+    let mut stdout_pipe = child.stdout.take();
+    let mut stderr_pipe = child.stderr.take();
+    let status = tokio::select! {
+        res = child.wait() => res.map_err(|e| format!("wait filedock: {e}"))?,
         _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
             let _ = child.kill().await;
             return Err(format!("plugin timed out after {timeout_secs}s"));
@@ -1270,11 +1285,23 @@ async fn run_filedock_plugin(
             return Err("canceled".to_string());
         }
     };
+    let mut stdout_buf = Vec::new();
+    if let Some(mut s) = stdout_pipe {
+        tokio::io::AsyncReadExt::read_to_end(&mut s, &mut stdout_buf)
+            .await
+            .map_err(|e| format!("read filedock stdout: {e}"))?;
+    }
+    let mut stderr_buf = Vec::new();
+    if let Some(mut s) = stderr_pipe {
+        tokio::io::AsyncReadExt::read_to_end(&mut s, &mut stderr_buf)
+            .await
+            .map_err(|e| format!("read filedock stderr: {e}"))?;
+    }
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    if !output.status.success() {
-        return Err(format!("plugin failed: {} {}", output.status, stderr.trim()));
+    let stdout = String::from_utf8_lossy(&stdout_buf).to_string();
+    let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
+    if !status.success() {
+        return Err(format!("plugin failed: {} {}", status, stderr.trim()));
     }
 
     Ok(RunFiledockPluginResponse { stdout, stderr })
