@@ -20,6 +20,7 @@
   /* Cross-theme safe interaction fills (black on light, white on dark). */
   --surface-hover: hsl(var(--foreground) / 0.04);
   --surface-active: hsl(var(--foreground) / 0.07);
+  --surface-selected: hsl(var(--primary) / 0.12);
 
   /* Flat: no shadows anywhere. */
   --shadow: none;

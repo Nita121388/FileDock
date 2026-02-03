@@ -139,7 +139,7 @@ export default function LeafPane(props: {
           {node.tabs.map((t) => (
             <button
               key={t.id}
-              className={t.id === node.activeTabId ? "pane-tab active" : "pane-tab"}
+              className={t.id === node.activeTabId ? "pane-tab ui-item active" : "pane-tab ui-item"}
               onClick={() => onSetActiveTab(t.id)}
               title={displayTabTitle(t as any)}
             >
@@ -158,7 +158,7 @@ export default function LeafPane(props: {
               ) : null}
             </button>
           ))}
-          <button className="pane-tab add" onClick={() => onAddTab(tab.pane)} title="New tab">
+          <button className="pane-tab ui-item add" onClick={() => onAddTab(tab.pane)} title="New tab">
             +
           </button>
         </div>

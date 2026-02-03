@@ -500,7 +500,7 @@ export default function DeviceBrowserPane(props: {
           {deviceNames.map((name) => (
             <button
               key={name}
-              className={name === deviceName ? "db-item active" : "db-item"}
+              className={name === deviceName ? "db-item ui-item active" : "db-item ui-item"}
               onClick={() => {
                 onTabChange({ ...tab, state: { ...tab.state, deviceName: name, snapshotId: "", path: "" } });
                 setEntries([]);
@@ -526,7 +526,7 @@ export default function DeviceBrowserPane(props: {
           {filtered.map((s) => (
             <button
               key={s.snapshot_id}
-              className={s.snapshot_id === snapshotId ? "db-item active" : "db-item"}
+              className={s.snapshot_id === snapshotId ? "db-item ui-item active" : "db-item ui-item"}
               onClick={() => {
                 onTabChange({ ...tab, state: { ...tab.state, snapshotId: s.snapshot_id, path: "" } });
                 setEntries([]);
@@ -816,7 +816,7 @@ export default function DeviceBrowserPane(props: {
                     {selectedSet.has(itemPath) ? "[x]" : "[ ]"}
                   </button>
                   <button
-                    className={e.kind === "dir" ? "db-row-main dir" : "db-row-main file"}
+                    className={`db-row-main ui-item ${e.kind}${selectedSet.has(itemPath) ? " active" : ""}`}
                     draggable={true}
                     onClick={() => {
                       if (e.kind !== "dir") return;

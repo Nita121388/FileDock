@@ -83,6 +83,62 @@ a {
   background: linear-gradient(var(--surface-active), var(--surface-active)), var(--bg2);
 }
 
+/* Tabs + list items share a token-driven interaction recipe. */
+:where(.ui-item) {
+  --item-bg: var(--bg2);
+  --item-border: var(--stroke);
+  --item-fg: var(--fg1);
+  --item-fg-hover: var(--fg0);
+  --item-bg-hover: linear-gradient(var(--surface-hover), var(--surface-hover)), var(--item-bg);
+  --item-bg-active: linear-gradient(var(--surface-active), var(--surface-active)), var(--item-bg);
+  --item-bg-selected: var(--surface-selected);
+  --item-bg-selected-hover: linear-gradient(var(--surface-hover), var(--surface-hover)), var(--item-bg-selected);
+  --item-bg-selected-active: linear-gradient(var(--surface-active), var(--surface-active)), var(--item-bg-selected);
+  --item-border-selected: var(--accent);
+  --item-fg-selected: var(--fg0);
+
+  border: 1px solid var(--item-border);
+  background: var(--item-bg);
+  color: var(--item-fg);
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+:where(.ui-item):hover {
+  background: var(--item-bg-hover);
+  color: var(--item-fg-hover);
+}
+
+:where(.ui-item):active {
+  background: var(--item-bg-active);
+}
+
+:where(.ui-item).active,
+:where(.ui-item)[aria-selected="true"] {
+  border-color: var(--item-border-selected);
+  background: var(--item-bg-selected);
+  color: var(--item-fg-selected);
+}
+
+:where(.ui-item).active:hover,
+:where(.ui-item)[aria-selected="true"]:hover {
+  background: var(--item-bg-selected-hover);
+}
+
+:where(.ui-item).active:active,
+:where(.ui-item)[aria-selected="true"]:active {
+  background: var(--item-bg-selected-active);
+}
+
+:where(.ui-item):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+:where(.ui-item):focus-visible {
+  outline: 2px solid hsl(var(--ring) / 0.40);
+  outline-offset: 1px;
+}
+
 .app {
   height: 100%;
   display: flex;
@@ -148,27 +204,10 @@ a {
   gap: var(--space-2);
   height: var(--control-h);
   padding: 0 var(--space-2);
-  border: 1px solid var(--stroke);
   border-radius: 999px;
-  background: var(--bg2);
-  color: var(--fg1);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
-}
-
-.tab.active {
-  border-color: var(--accent);
-  background: hsl(var(--primary) / 0.12);
-  color: var(--fg0);
-}
-
-.tab:hover {
-  background: linear-gradient(var(--surface-hover), var(--surface-hover)), var(--bg2);
-}
-
-.tab.active:hover {
-  background: linear-gradient(var(--surface-hover), var(--surface-hover)), hsl(var(--primary) / 0.12);
 }
 
 .tab .dot {
@@ -417,9 +456,7 @@ a {
 }
 
 .pane-tab {
-  border: 1px solid var(--stroke);
-  background: var(--bg2);
-  color: var(--fg2);
+  --item-fg: var(--fg2);
   border-radius: 999px;
   height: var(--control-h);
   padding: 0 var(--space-2);
@@ -431,15 +468,9 @@ a {
   max-width: 220px;
 }
 
-.pane-tab.active {
-  border-color: var(--accent);
-  background: hsl(var(--primary) / 0.12);
-  color: var(--fg0);
-}
-
 .pane-tab.add {
+  --item-fg: var(--fg1);
   border-style: dashed;
-  color: var(--fg1);
 }
 
 .pane-tab-label {
@@ -718,23 +749,9 @@ a {
 
 .db-item {
   text-align: left;
-  border: 1px solid var(--stroke);
-  background: var(--bg2);
-  color: var(--fg1);
   padding: var(--space-3) var(--space-3);
   border-radius: var(--radius);
   cursor: pointer;
-}
-
-.db-item:hover {
-  background: linear-gradient(var(--surface-hover), var(--surface-hover)), var(--bg2);
-  color: var(--fg0);
-}
-
-.db-item.active {
-  border-color: var(--accent);
-  background: hsl(var(--primary) / 0.12);
-  color: var(--fg0);
 }
 
 .db-title {
@@ -768,9 +785,6 @@ a {
 .db-row-main {
   flex: 1;
   min-width: 0;
-  border: 1px solid var(--stroke);
-  background: var(--bg2);
-  color: var(--fg1);
   border-radius: var(--radius);
   padding: var(--space-3);
   cursor: pointer;
@@ -780,18 +794,11 @@ a {
   text-align: left;
 }
 
-.db-row-main:hover {
-  background: linear-gradient(var(--surface-hover), var(--surface-hover)), var(--bg2);
-  color: var(--fg0);
-}
-
 .db-row-main.file {
+  --item-bg-hover: var(--item-bg);
+  --item-bg-active: var(--item-bg);
+  --item-fg-hover: var(--item-fg);
   cursor: default;
-}
-
-.db-row-main.file:hover {
-  background: transparent;
-  color: var(--fg1);
 }
 
 .db-row-main.file:active {

@@ -1595,7 +1595,7 @@ export default function App() {
           {state.tabs.map((t) => (
             <div
               key={t.id}
-              className={t.id === activeTab.id ? "tab active" : "tab"}
+              className={t.id === activeTab.id ? "tab ui-item active" : "tab ui-item"}
               role="tab"
               aria-selected={t.id === activeTab.id}
               tabIndex={0}
