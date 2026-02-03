@@ -266,32 +266,6 @@ export default function App() {
     saveTransfers(transfers);
   }, [transfers]);
 
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === ",") {
-        e.preventDefault();
-        setShowPrefs((v) => {
-          const next = !v;
-          if (next) setShowCommand(false);
-          return next;
-        });
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setShowCommand(true);
-        setShowPrefs(false);
-        return;
-      }
-      if (e.key === "Escape") {
-        setShowPrefs(false);
-        setShowCommand(false);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
   const activeTab: TabState = useMemo(() => {
     const t = state.tabs.find((x) => x.id === state.activeTabId);
     return t ?? state.tabs[0];
@@ -329,6 +303,152 @@ export default function App() {
     const target = state.tabs[next];
     if (target) setActiveTab(target.id);
   };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isTypingTarget =
+        !!target &&
+        (target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select");
+      const isMod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+
+      if ((e.ctrlKey || e.metaKey) && e.key === ",") {
+        e.preventDefault();
+        setShowPrefs((v) => {
+          const next = !v;
+          if (next) setShowCommand(false);
+          return next;
+        });
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setShowCommand(true);
+        setShowPrefs(false);
+        return;
+      }
+      if (e.key === "Escape") {
+        setShowPrefs(false);
+        setShowCommand(false);
+      }
+
+      if (showCommand || showPrefs) return;
+
+      if (isTypingTarget) return;
+
+      if (isMod && !e.shiftKey && !e.altKey) {
+        switch (key) {
+          case "1":
+            e.preventDefault();
+            setActiveLeafPane("deviceBrowser");
+            return;
+          case "2":
+            e.preventDefault();
+            setActiveLeafPane("localBrowser");
+            return;
+          case "3":
+            e.preventDefault();
+            setActiveLeafPane("sftpBrowser");
+            return;
+          case "4":
+            e.preventDefault();
+            setActiveLeafPane("transferQueue");
+            return;
+          case "5":
+            e.preventDefault();
+            setActiveLeafPane("notes");
+            return;
+          default:
+            break;
+        }
+      }
+
+      if (isMod && e.shiftKey && !e.altKey) {
+        if (key === "[" || key === "{") {
+          e.preventDefault();
+          goToNextWorkspace(-1);
+          return;
+        }
+        if (key === "]" || key === "}") {
+          e.preventDefault();
+          goToNextWorkspace(1);
+          return;
+        }
+        if (key === "r") {
+          if (activePane?.pane === "deviceBrowser") {
+            e.preventDefault();
+            emitPaneCommand({ kind: "device.refresh", paneId: activePane.id });
+            return;
+          }
+          if (activePane?.pane === "localBrowser") {
+            e.preventDefault();
+            emitPaneCommand({ kind: "local.refresh", paneId: activePane.id });
+            return;
+          }
+          if (activePane?.pane === "sftpBrowser") {
+            e.preventDefault();
+            emitPaneCommand({ kind: "sftp.refresh", paneId: activePane.id });
+            return;
+          }
+        }
+        if (key === "u") {
+          if (activePane?.pane === "deviceBrowser") {
+            e.preventDefault();
+            emitPaneCommand({ kind: "device.upload", paneId: activePane.id });
+            return;
+          }
+          if (activePane?.pane === "sftpBrowser") {
+            e.preventDefault();
+            emitPaneCommand({ kind: "sftp.upload", paneId: activePane.id });
+            return;
+          }
+        }
+        if (key === "o") {
+          if (activePane?.pane === "localBrowser") {
+            e.preventDefault();
+            emitPaneCommand({ kind: "local.choose", paneId: activePane.id });
+            return;
+          }
+        }
+        if (key === "n") {
+          if (activePane?.pane === "sftpBrowser") {
+            e.preventDefault();
+            emitPaneCommand({ kind: "sftp.mkdir", paneId: activePane.id });
+            return;
+          }
+        }
+        if (key === "h") {
+          if (activePane?.pane === "deviceBrowser") {
+            e.preventDefault();
+            emitPaneCommand({ kind: "device.toggleHistory", paneId: activePane.id });
+            return;
+          }
+        }
+      }
+
+      if (!isMod && e.altKey && e.key === "ArrowUp") {
+        if (activePane?.pane === "deviceBrowser") {
+          e.preventDefault();
+          emitPaneCommand({ kind: "device.up", paneId: activePane.id });
+          return;
+        }
+        if (activePane?.pane === "localBrowser") {
+          e.preventDefault();
+          emitPaneCommand({ kind: "local.up", paneId: activePane.id });
+          return;
+        }
+        if (activePane?.pane === "sftpBrowser") {
+          e.preventDefault();
+          emitPaneCommand({ kind: "sftp.up", paneId: activePane.id });
+          return;
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activePane, goToNextWorkspace, setActiveLeafPane, showCommand, showPrefs]);
 
   const onNewTab = () => {
     setState((s) => {
@@ -431,30 +551,35 @@ export default function App() {
         id: "view-device",
         title: "View: Server Device",
         keywords: "view device server",
+        shortcut: "Ctrl/⌘ + 1",
         run: () => setActiveLeafPane("deviceBrowser")
       },
       {
         id: "view-local",
         title: "View: Local",
         keywords: "view local",
+        shortcut: "Ctrl/⌘ + 2",
         run: () => setActiveLeafPane("localBrowser")
       },
       {
         id: "view-sftp",
         title: "View: SFTP",
         keywords: "view sftp vps",
+        shortcut: "Ctrl/⌘ + 3",
         run: () => setActiveLeafPane("sftpBrowser")
       },
       {
         id: "view-queue",
         title: "View: Transfer Queue",
         keywords: "view queue transfers",
+        shortcut: "Ctrl/⌘ + 4",
         run: () => setActiveLeafPane("transferQueue")
       },
       {
         id: "view-notes",
         title: "View: Notes",
         keywords: "view notes",
+        shortcut: "Ctrl/⌘ + 5",
         run: () => setActiveLeafPane("notes")
       }
     );
@@ -499,18 +624,21 @@ export default function App() {
           id: "device-refresh",
           title: "Device: Refresh snapshots",
           keywords: "device refresh snapshots",
+          shortcut: "Ctrl/⌘ + Shift + R",
           run: () => emitPaneCommand({ kind: "device.refresh", paneId })
         },
         {
           id: "device-upload",
           title: "Device: Upload file",
           keywords: "device upload",
+          shortcut: "Ctrl/⌘ + Shift + U",
           run: () => emitPaneCommand({ kind: "device.upload", paneId })
         },
         {
           id: "device-toggle-history",
           title: "Device: Toggle history list",
           keywords: "device history toggle",
+          shortcut: "Ctrl/⌘ + Shift + H",
           run: () => emitPaneCommand({ kind: "device.toggleHistory", paneId })
         },
         {
@@ -529,6 +657,7 @@ export default function App() {
           id: "device-up",
           title: "Device: Up",
           keywords: "device up parent",
+          shortcut: "Alt + ↑",
           run: () => emitPaneCommand({ kind: "device.up", paneId })
         },
         {
@@ -570,18 +699,21 @@ export default function App() {
           id: "local-choose",
           title: "Local: Choose folder",
           keywords: "local choose folder",
+          shortcut: "Ctrl/⌘ + Shift + O",
           run: () => emitPaneCommand({ kind: "local.choose", paneId })
         },
         {
           id: "local-up",
           title: "Local: Up",
           keywords: "local up parent",
+          shortcut: "Alt + ↑",
           run: () => emitPaneCommand({ kind: "local.up", paneId })
         },
         {
           id: "local-refresh",
           title: "Local: Refresh",
           keywords: "local refresh",
+          shortcut: "Ctrl/⌘ + Shift + R",
           run: () => emitPaneCommand({ kind: "local.refresh", paneId })
         }
       );
@@ -593,24 +725,28 @@ export default function App() {
           id: "sftp-refresh",
           title: "SFTP: Refresh",
           keywords: "sftp refresh",
+          shortcut: "Ctrl/⌘ + Shift + R",
           run: () => emitPaneCommand({ kind: "sftp.refresh", paneId })
         },
         {
           id: "sftp-up",
           title: "SFTP: Up",
           keywords: "sftp up parent",
+          shortcut: "Alt + ↑",
           run: () => emitPaneCommand({ kind: "sftp.up", paneId })
         },
         {
           id: "sftp-mkdir",
           title: "SFTP: Mkdir",
           keywords: "sftp mkdir",
+          shortcut: "Ctrl/⌘ + Shift + N",
           run: () => emitPaneCommand({ kind: "sftp.mkdir", paneId })
         },
         {
           id: "sftp-upload",
           title: "SFTP: Upload file",
           keywords: "sftp upload",
+          shortcut: "Ctrl/⌘ + Shift + U",
           run: () => emitPaneCommand({ kind: "sftp.upload", paneId })
         }
       );
@@ -672,12 +808,14 @@ export default function App() {
           id: "workspace-next",
           title: "Next workspace tab",
           keywords: "workspace next tab",
+          shortcut: "Ctrl/⌘ + Shift + ]",
           run: () => goToNextWorkspace(1)
         },
         {
           id: "workspace-prev",
           title: "Previous workspace tab",
           keywords: "workspace previous tab",
+          shortcut: "Ctrl/⌘ + Shift + [",
           run: () => goToNextWorkspace(-1)
         }
       );
