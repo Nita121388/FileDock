@@ -66,11 +66,6 @@ function fmtUnix(ts: number): string {
   return d.toISOString().replace("T", " ").slice(0, 16);
 }
 
-function fmtLastSeen(ts?: number | null): string {
-  if (!ts) return "never";
-  return fmtUnix(ts);
-}
-
 function detectOs(): string {
   const ua = navigator.userAgent || "";
   if (/Windows/i.test(ua)) return "Windows";
@@ -183,21 +178,12 @@ export default function DeviceBrowserPane(props: {
     };
   }, [effSettings.deviceId, effSettings.deviceToken, effSettings.serverBaseUrl, effSettings.token]);
 
-  const [regName, setRegName] = useState<string>("");
-  const [regOs, setRegOs] = useState<string>(() => detectOs());
-
   const deviceNames = useMemo(() => {
     // Prefer registered devices; fall back to snapshot-derived names.
     const fromApi = devicesApi.map((d) => d.name).filter((x) => x);
     if (fromApi.length > 0) return Array.from(new Set(fromApi)).sort();
     return Array.from(new Set(snapshots.map((s) => s.device_name))).sort();
   }, [devicesApi, snapshots]);
-
-  const deviceByName = useMemo(() => {
-    const m = new Map<string, DeviceInfo>();
-    for (const d of devicesApi) m.set(d.name, d);
-    return m;
-  }, [devicesApi]);
 
   const filtered = useMemo(() => {
     const list = snapshots.filter((s) => (deviceName ? s.device_name === deviceName : true));
@@ -221,6 +207,33 @@ export default function DeviceBrowserPane(props: {
       setStatus(String(e?.message ?? e));
     }
   }, [effSettings]);
+
+  const handleRegisterDevice = useCallback(async () => {
+    const name = prompt("Device name?");
+    if (!name || !name.trim()) return;
+    const os = prompt("OS?", detectOs()) ?? "";
+    if (!os.trim()) return;
+    setLoading(true);
+    try {
+      const resp = await registerDevice(effSettings, { device_name: name.trim(), os: os.trim() });
+      setStatus(`registered ${name.trim()} (id=${resp.device_id})`);
+      onTabChange({
+        ...tab,
+        state: {
+          ...tab.state,
+          deviceId: resp.device_id,
+          deviceToken: resp.device_token,
+          deviceName: name.trim()
+        }
+      });
+      onSetDeviceAuth(resp.device_id, resp.device_token);
+      await refreshDevices();
+    } catch (e: any) {
+      setStatus(String(e?.message ?? e));
+    } finally {
+      setLoading(false);
+    }
+  }, [effSettings, onSetDeviceAuth, onTabChange, refreshDevices, tab]);
 
   const refreshSnapshots = useCallback(async () => {
     setLoading(true);
@@ -433,7 +446,8 @@ export default function DeviceBrowserPane(props: {
   const items = useMemo(() => {
     return displayEntries.map((e, idx) => {
       const itemPath = path ? `${path}/${e.name}` : e.name;
-      return { e, idx, itemPath, itemSnapshotId: e.snapshotId };
+      const itemSnapshotId = "snapshotId" in e ? e.snapshotId : undefined;
+      return { e, idx, itemPath, itemSnapshotId };
     });
   }, [displayEntries, path]);
 
@@ -568,147 +582,6 @@ export default function DeviceBrowserPane(props: {
 
   return (
     <div className={`device-browser ${showHistory ? "" : "history-hidden"}`}>
-      <div className="db-col">
-        <div className="db-head">
-          Devices
-          <span className="db-head-right">
-            <button className="db-mini" onClick={refreshDevices} disabled={loading} title="Refresh devices">
-              Devices
-            </button>
-            <button className="db-mini" onClick={refreshSnapshots} disabled={loading} title="Refresh backups">
-              Refresh
-            </button>
-          </span>
-        </div>
-        <div className="db-reg">
-          <input
-            className="db-input"
-            value={tab.state.serverBaseUrl}
-            onChange={(e) => onTabChange({ ...tab, state: { ...tab.state, serverBaseUrl: e.target.value } })}
-            placeholder="server url (optional)"
-            title="Override server URL for this pane tab"
-          />
-          <input
-            className="db-input"
-            value={tab.state.token}
-            onChange={(e) => onTabChange({ ...tab, state: { ...tab.state, token: e.target.value } })}
-            placeholder="server token (optional)"
-            title="Override X-FileDock-Token for this pane tab"
-          />
-          <button
-            className="db-mini"
-            onClick={() => onTabChange({
-              ...tab,
-              state: {
-                ...tab.state,
-                serverBaseUrl: "",
-                token: "",
-                deviceId: "",
-                deviceToken: ""
-              }
-            })}
-            title="Clear per-tab connection override"
-          >
-            Clear
-          </button>
-        </div>
-        <div className="db-reg">
-          <input
-            className="db-input"
-            value={tab.state.deviceId}
-            onChange={(e) => onTabChange({ ...tab, state: { ...tab.state, deviceId: e.target.value } })}
-            placeholder="device id (optional)"
-            title="Override X-FileDock-Device-Id for this pane tab"
-          />
-          <input
-            className="db-input"
-            value={tab.state.deviceToken}
-            onChange={(e) => onTabChange({ ...tab, state: { ...tab.state, deviceToken: e.target.value } })}
-            placeholder="device token (optional)"
-            title="Override X-FileDock-Device-Token for this pane tab"
-          />
-          <span />
-        </div>
-        <div className="db-reg">
-          <input
-            className="db-input"
-            value={regName}
-            onChange={(e) => setRegName(e.target.value)}
-            placeholder="device name"
-          />
-          <input
-            className="db-input"
-            value={regOs}
-            onChange={(e) => setRegOs(e.target.value)}
-            placeholder="os"
-          />
-          <button
-            className="db-mini"
-            disabled={loading || !regName.trim() || !regOs.trim()}
-            onClick={async () => {
-              setLoading(true);
-              try {
-                const resp = await registerDevice(effSettings, { device_name: regName.trim(), os: regOs.trim() });
-                setStatus(`registered ${regName.trim()} (id=${resp.device_id})`);
-                // Make it easy to switch to device-auth without exposing FILEDOCK_TOKEN.
-                onTabChange({
-                  ...tab,
-                  state: {
-                    ...tab.state,
-                    deviceId: resp.device_id,
-                    deviceToken: resp.device_token,
-                    deviceName: regName.trim()
-                  }
-                });
-                onSetDeviceAuth(resp.device_id, resp.device_token);
-                await refreshDevices();
-              } catch (e: any) {
-                setStatus(String(e?.message ?? e));
-              } finally {
-                setLoading(false);
-              }
-            }}
-            title="Register device"
-          >
-            Register
-          </button>
-          <button
-            className="db-mini"
-            disabled={!regName.trim() || !regOs.trim()}
-            onClick={() => setRegOs(detectOs())}
-            title="Auto-detect OS"
-          >
-            Detect
-          </button>
-        </div>
-        <div className="db-list">
-          {deviceNames.map((name) => (
-            <button
-              key={name}
-              className={name === deviceName ? "db-item ui-item active" : "db-item ui-item"}
-              onClick={() => {
-                onTabChange({ ...tab, state: { ...tab.state, deviceName: name, snapshotId: "", path: "" } });
-                setSnapshotEntries([]);
-                setSelected([]);
-                setLastSelIndex(null);
-                setShowHistory(false);
-                setViewMode("all");
-              }}
-            >
-              <div className="db-title">{name}</div>
-              <div className="db-sub">
-                {deviceByName.get(name)?.os ? `${deviceByName.get(name)!.os} · ` : ""}
-                {deviceByName.get(name)?.last_seen_unix
-                  ? `seen ${fmtLastSeen(deviceByName.get(name)!.last_seen_unix)} · `
-                  : ""}
-                {snapshots.filter((s) => s.device_name === name).length} backups
-              </div>
-            </button>
-          ))}
-          {deviceNames.length === 0 ? <div className="db-empty">No devices</div> : null}
-        </div>
-      </div>
-
       {showHistory ? (
         <div className="db-col">
           <div className="db-head">History</div>
@@ -741,6 +614,7 @@ export default function DeviceBrowserPane(props: {
         <div className="db-head">
           Files
           <span className="db-head-right">
+            <span className="db-meta">{deviceName ? `Device: ${deviceName}` : "No device selected"}</span>
             <span className="db-meta">{snapshotLabel}</span>
             <span className="db-path">/{path || ""}</span>
             <input
@@ -754,6 +628,22 @@ export default function DeviceBrowserPane(props: {
                 e.currentTarget.value = "";
               }}
             />
+            <button
+              className="db-mini"
+              onClick={refreshSnapshots}
+              disabled={loading}
+              title="Refresh snapshots"
+            >
+              Refresh
+            </button>
+            <button
+              className="db-mini"
+              onClick={handleRegisterDevice}
+              disabled={loading}
+              title="Register device"
+            >
+              Register
+            </button>
             <button
               className="db-mini"
               disabled={loading || !deviceName}
@@ -1018,8 +908,12 @@ export default function DeviceBrowserPane(props: {
             await uploadFile(f);
           }}
         >
-          {(viewMode === "all" && mergedIndex.size === 0) || (viewMode === "snapshot" && !snapshotId) ? (
+          {!deviceName ? (
+            <div className="db-empty">Select a server device to browse snapshots and files.</div>
+          ) : (viewMode === "all" && mergedIndex.size === 0) || (viewMode === "snapshot" && !snapshotId) ? (
             <div className="db-empty">No backups yet. Upload a file to start.</div>
+          ) : items.length === 0 ? (
+            <div className="db-empty">No files in this folder.</div>
           ) : (
             <div className="db-tree-list">
               {items.map(({ e, idx, itemPath, itemSnapshotId }) => (

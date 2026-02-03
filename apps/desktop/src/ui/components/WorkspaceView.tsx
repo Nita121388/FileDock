@@ -1,29 +1,30 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { TabState } from "../model/state";
-import type { LayoutNode } from "../model/layout";
+import type { PaneKind, PaneTab } from "../model/layout";
+import { activeTab, makeTab, updateLeafTabState } from "../model/layout";
 import type { Settings } from "../model/settings";
 import type { TransferJob } from "../model/transfers";
-import {
-  addLeafTab,
-  closeLeaf,
-  closeLeafTab,
-  moveLeaf,
-  updateLeafTabState,
-  setLeafActiveTab,
-  setLeafPane,
-  splitLeaf,
-  updateSplitRatio,
-  type DropZone
-} from "../model/layout";
-import SplitNodeView from "./layout/SplitNodeView";
-import LeafPane from "./layout/LeafPane";
+import { listDevices, listSnapshots, type DeviceInfo } from "../api/client";
+import { PaneView } from "./panes/PaneView";
+
+const SOURCE_LOCAL = "local";
+const SOURCE_SFTP = "sftp";
+const SOURCE_QUEUE = "queue";
+const SOURCE_NOTES = "notes";
+const SOURCE_DEVICE_PREFIX = "device:";
+const SOURCE_DEVICE_NONE = "device:none";
+
+function toTab(pane: PaneKind, current: PaneTab): PaneTab {
+  if (current.pane === pane) return current;
+  const template = makeTab(pane);
+  return { ...template, id: current.id, title: current.title };
+}
 
 export function WorkspaceView(props: {
   tab: TabState;
   settings: Settings;
   transfers: TransferJob[];
-  onActiveLeafChange?: (leafId: string) => void;
   onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../model/transfers").Conn) => void;
   onEnqueueSftpDownload: (job: {
     runner?: import("../model/transfers").PluginRunConfig;
@@ -91,7 +92,6 @@ export function WorkspaceView(props: {
     tab,
     settings,
     transfers,
-    onActiveLeafChange,
     onEnqueueDownload,
     onEnqueueSftpDownload,
     onEnqueueSftpUpload,
@@ -106,60 +106,170 @@ export function WorkspaceView(props: {
     onSetDeviceAuth,
     onTabChange
   } = props;
-  const [draggingLeafId, setDraggingLeafId] = useState<string | null>(null);
 
-  const onRootChange = (root: LayoutNode) => {
-    onTabChange({ ...tab, root });
-  };
+  const { serverBaseUrl, token, deviceId, deviceToken } = settings;
 
-  const onDrop = (sourceLeafId: string, targetLeafId: string, zone: DropZone) => {
-    onRootChange(moveLeaf(tab.root, sourceLeafId, targetLeafId, zone));
-  };
+  const leaf = tab.root.kind === "leaf" ? tab.root : null;
+  const active = leaf ? activeTab(leaf) : makeTab("deviceBrowser");
 
-  const renderNode = (node: LayoutNode): JSX.Element => {
-    if (node.kind === "leaf") {
-      return (
-        <LeafPane
-          node={node}
-          settings={settings}
-          transfers={transfers}
-          onActivate={onActiveLeafChange}
-          onEnqueueDownload={onEnqueueDownload}
-          onEnqueueSftpDownload={onEnqueueSftpDownload}
-          onEnqueueSftpUpload={onEnqueueSftpUpload}
-          onEnqueueSnapshotToSftp={onEnqueueSnapshotToSftp}
-          onEnqueueSftpToSnapshot={onEnqueueSftpToSnapshot}
-          onEnqueueCopy={onEnqueueCopy}
-          onEnqueueCopyFolder={onEnqueueCopyFolder}
-          onRemoveTransfer={onRemoveTransfer}
-          onRunTransfer={onRunTransfer}
-          onCancelTransfer={onCancelTransfer}
-          onUpdateTransfer={onUpdateTransfer}
-          onSetDeviceAuth={onSetDeviceAuth}
-          draggingLeafId={draggingLeafId}
-          setDraggingLeafId={setDraggingLeafId}
-          onDrop={onDrop}
-          onSplit={(dir) => onRootChange(splitLeaf(tab.root, node.id, dir))}
-          onClose={() => onRootChange(closeLeaf(tab.root, node.id))}
-          onSetPane={(pane) => onRootChange(setLeafPane(tab.root, node.id, pane))}
-          onAddTab={(pane) => onRootChange(addLeafTab(tab.root, node.id, pane))}
-          onSetActiveTab={(tabId) => onRootChange(setLeafActiveTab(tab.root, node.id, tabId))}
-          onCloseTab={(tabId) => onRootChange(closeLeafTab(tab.root, node.id, tabId))}
-          onUpdateActiveTab={(updater) =>
-            onRootChange(updateLeafTabState(tab.root, node.id, node.activeTabId, updater))
-          }
-        />
-      );
+  const updateActiveTab = useCallback(
+    (updater: (t: PaneTab) => PaneTab) => {
+      if (!leaf) return;
+      onTabChange({
+        ...tab,
+        root: updateLeafTabState(tab.root, leaf.id, leaf.activeTabId, updater)
+      });
+    },
+    [leaf, onTabChange, tab]
+  );
+
+  const [deviceOptions, setDeviceOptions] = useState<DeviceInfo[]>([]);
+  const [deviceLoading, setDeviceLoading] = useState(false);
+
+  const refreshDevices = useCallback(async () => {
+    if (!serverBaseUrl.trim()) {
+      setDeviceOptions([]);
+      return;
     }
+    setDeviceLoading(true);
+    try {
+      const ds = await listDevices({ serverBaseUrl, token, deviceId, deviceToken });
+      setDeviceOptions(ds);
+    } catch {
+      try {
+        const snaps = await listSnapshots({ serverBaseUrl, token, deviceId, deviceToken });
+        const names = Array.from(new Set(snaps.map((s) => s.device_name).filter((x) => x)));
+        setDeviceOptions(names.map((name, idx) => ({ id: `snapshot-${idx}`, name, os: "", last_seen_unix: null })));
+      } catch {
+        setDeviceOptions([]);
+      }
+    } finally {
+      setDeviceLoading(false);
+    }
+  }, [deviceId, deviceToken, serverBaseUrl, token]);
 
-    return (
-      <SplitNodeView
-        node={node}
-        render={renderNode}
-        onResize={(ratio) => onRootChange(updateSplitRatio(tab.root, node.id, ratio))}
-      />
-    );
-  };
+  useEffect(() => {
+    refreshDevices();
+  }, [refreshDevices]);
 
-  return <div className="workspace-inner">{renderNode(tab.root)}</div>;
+  const deviceNames = useMemo(() => {
+    const names = deviceOptions.map((d) => d.name).filter((x) => x);
+    if (active.pane === "deviceBrowser" && active.state.deviceName) {
+      names.push(active.state.deviceName);
+    }
+    return Array.from(new Set(names)).sort();
+  }, [active, deviceOptions]);
+
+  const sourceValue = useMemo(() => {
+    if (active.pane === "localBrowser") return SOURCE_LOCAL;
+    if (active.pane === "sftpBrowser") return SOURCE_SFTP;
+    if (active.pane === "transferQueue") return SOURCE_QUEUE;
+    if (active.pane === "notes") return SOURCE_NOTES;
+    if (active.pane === "deviceBrowser") {
+      return active.state.deviceName
+        ? `${SOURCE_DEVICE_PREFIX}${active.state.deviceName}`
+        : SOURCE_DEVICE_NONE;
+    }
+    return SOURCE_LOCAL;
+  }, [active]);
+
+  const onSourceChange = useCallback(
+    (value: string) => {
+    if (value === SOURCE_LOCAL) {
+      updateActiveTab((t) => toTab("localBrowser", t));
+      return;
+    }
+    if (value === SOURCE_SFTP) {
+      updateActiveTab((t) => toTab("sftpBrowser", t));
+      return;
+    }
+    if (value === SOURCE_QUEUE) {
+      updateActiveTab((t) => toTab("transferQueue", t));
+      return;
+    }
+    if (value === SOURCE_NOTES) {
+      updateActiveTab((t) => toTab("notes", t));
+      return;
+    }
+      if (value.startsWith(SOURCE_DEVICE_PREFIX)) {
+        const name = value.slice(SOURCE_DEVICE_PREFIX.length);
+        updateActiveTab((t) => {
+          let next = toTab("deviceBrowser", t);
+          if (next.pane !== "deviceBrowser") return next;
+          const deviceName = name === "none" ? "" : name;
+          return {
+            ...next,
+            state: {
+              ...next.state,
+              deviceName,
+              snapshotId: "",
+              path: ""
+            }
+          };
+        });
+      }
+    },
+    [updateActiveTab]
+  );
+
+  return (
+    <div className="workspace-inner">
+      <div className="pane">
+        <div className="pane-titlebar">
+          <span className="pane-title">Source</span>
+          <select
+            className="pane-select"
+            value={sourceValue}
+            onChange={(e) => onSourceChange(e.target.value)}
+            aria-label="Source"
+          >
+            <option value={SOURCE_LOCAL}>Local</option>
+            <option value={SOURCE_SFTP}>SFTP</option>
+            <option value={SOURCE_QUEUE}>Transfer Queue</option>
+            <option value={SOURCE_NOTES}>Notes</option>
+            <option value={SOURCE_DEVICE_NONE}>Server Device...</option>
+            {deviceNames.length > 0 ? (
+              <optgroup label="Server Devices">
+                {deviceNames.map((name) => (
+                  <option key={name} value={`${SOURCE_DEVICE_PREFIX}${name}`}>
+                    {name}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
+          </select>
+          <button
+            className="pane-btn"
+            onClick={refreshDevices}
+            disabled={deviceLoading || !serverBaseUrl.trim()}
+            title="Refresh server devices"
+          >
+            Refresh Devices
+          </button>
+          <span className="pane-spacer" />
+        </div>
+
+        <div className="pane-body">
+          <PaneView
+            tab={active as PaneTab}
+            settings={settings}
+            onUpdateTab={updateActiveTab}
+            transfers={transfers}
+            onUpdateTransfer={onUpdateTransfer}
+            onEnqueueDownload={onEnqueueDownload}
+            onEnqueueSftpDownload={onEnqueueSftpDownload}
+            onEnqueueSftpUpload={onEnqueueSftpUpload}
+            onEnqueueSnapshotToSftp={onEnqueueSnapshotToSftp}
+            onEnqueueSftpToSnapshot={onEnqueueSftpToSnapshot}
+            onEnqueueCopy={onEnqueueCopy}
+            onEnqueueCopyFolder={onEnqueueCopyFolder}
+            onRemoveTransfer={onRemoveTransfer}
+            onRunTransfer={onRunTransfer}
+            onCancelTransfer={onCancelTransfer}
+            onSetDeviceAuth={onSetDeviceAuth}
+          />
+        </div>
+      </div>
+    </div>
+  );
 }

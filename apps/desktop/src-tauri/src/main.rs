@@ -319,6 +319,55 @@ fn unique_path(existing: &std::collections::HashSet<String>, desired: &str) -> S
     desired.to_string()
 }
 
+#[derive(Debug, Serialize)]
+struct LocalDirEntry {
+    name: String,
+    path: String,
+    kind: String, // "file" | "dir"
+    size: u64,
+    mtime_unix: Option<u64>,
+}
+
+#[tauri::command]
+fn list_local_dir(path: String) -> Result<Vec<LocalDirEntry>, String> {
+    let raw = path.trim();
+    if raw.is_empty() {
+        return Err("path required".to_string());
+    }
+    let dir = PathBuf::from(raw);
+    let meta = std::fs::metadata(&dir).map_err(|e| format!("metadata: {e}"))?;
+    if !meta.is_dir() {
+        return Err("not a directory".to_string());
+    }
+
+    let mut entries = Vec::new();
+    let rd = std::fs::read_dir(&dir).map_err(|e| format!("read_dir: {e}"))?;
+    for item in rd {
+        let entry = item.map_err(|e| format!("read_dir item: {e}"))?;
+        let path = entry.path();
+        let name = entry
+            .file_name()
+            .to_string_lossy()
+            .to_string();
+        let meta = entry.metadata().map_err(|e| format!("metadata: {e}"))?;
+        let kind = if meta.is_dir() { "dir" } else { "file" };
+        let mtime_unix = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs());
+        entries.push(LocalDirEntry {
+            name,
+            path: path.to_string_lossy().to_string(),
+            kind: kind.to_string(),
+            size: meta.len(),
+            mtime_unix,
+        });
+    }
+
+    Ok(entries)
+}
+
 #[tauri::command]
 fn cancel_restore_snapshot(
     state: State<'_, RestoreManager>,
@@ -539,6 +588,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             restore_snapshot_to_folder,
             cancel_restore_snapshot,
+            list_local_dir,
             run_filedock_plugin,
             cancel_filedock_plugin_run,
             copy_snapshot_file_to_sftp,

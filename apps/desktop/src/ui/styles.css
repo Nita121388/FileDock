@@ -198,6 +198,15 @@ a {
   padding: 2px;
 }
 
+.tab-label {
+  font-size: var(--text-xs);
+  color: var(--fg2);
+  letter-spacing: var(--caps-track);
+  text-transform: uppercase;
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+}
+
 .tab {
   display: inline-flex;
   align-items: center;
@@ -756,13 +765,13 @@ a {
 
 .device-browser {
   display: grid;
-  grid-template-columns: 220px 260px 1fr;
+  grid-template-columns: 260px 1fr;
   gap: 10px;
   min-height: 0;
 }
 
 .device-browser.history-hidden {
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 1fr;
 }
 
 .db-col {
@@ -790,6 +799,13 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
+}
+
+.db-note {
+  padding: var(--space-2) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--fg2);
+  border-bottom: 1px solid var(--stroke-subtle);
 }
 
 .db-head-right {

@@ -7,16 +7,7 @@ import {
   newTab,
   removeTab
 } from "./model/state";
-import {
-  activeTab as activePaneTab,
-  addLeafTab,
-  closeLeaf,
-  setLeafPane,
-  splitLeaf,
-  type LayoutNode,
-  type LeafNode,
-  type PaneKind
-} from "./model/layout";
+import { setLeafPane, type LayoutNode, type PaneKind } from "./model/layout";
 import { loadState, saveState } from "./model/storage";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "./model/settings";
 import {
@@ -60,7 +51,6 @@ export default function App() {
   const [transfers, setTransfers] = useState<TransferJob[]>(() => loadTransfers());
   const [showPrefs, setShowPrefs] = useState(false);
   const [showCommand, setShowCommand] = useState(false);
-  const [activeLeafByTab, setActiveLeafByTab] = useState<Record<string, string>>({});
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
   const runAllBusyRef = useRef(false);
   const presenceCacheRef = useRef<
@@ -172,19 +162,8 @@ export default function App() {
     return findFirstLeaf(node.a) ?? findFirstLeaf(node.b);
   };
 
-  const findLeafById = (node: LayoutNode, id: string): LeafNode | null => {
-    if (node.kind === "leaf") return node.id === id ? node : null;
-    return findLeafById(node.a, id) ?? findLeafById(node.b, id);
-  };
-
   const getActiveLeafId = (tab: TabState): string | null => {
-    return activeLeafByTab[tab.id] ?? findFirstLeaf(tab.root);
-  };
-
-  const getActiveLeaf = (tab: TabState): LeafNode | null => {
-    const id = getActiveLeafId(tab);
-    if (!id) return null;
-    return findLeafById(tab.root, id);
+    return findFirstLeaf(tab.root);
   };
 
   const ensureMissingOnDestShared = async (dst: Conn, hashes: string[], signal: AbortSignal) => {
@@ -328,30 +307,10 @@ export default function App() {
     }));
   };
 
-  const splitActiveLeaf = (dir: "row" | "col") => {
-    const leafId = getActiveLeafId(activeTab);
-    if (!leafId) return;
-    updateActiveRoot((root) => splitLeaf(root, leafId, dir));
-  };
-
   const setActiveLeafPane = (pane: PaneKind) => {
     const leafId = getActiveLeafId(activeTab);
     if (!leafId) return;
     updateActiveRoot((root) => setLeafPane(root, leafId, pane));
-  };
-
-  const closeActiveLeaf = () => {
-    const leafId = getActiveLeafId(activeTab);
-    if (!leafId) return;
-    updateActiveRoot((root) => closeLeaf(root, leafId));
-  };
-
-  const addTabToActiveLeaf = () => {
-    const leafId = getActiveLeafId(activeTab);
-    if (!leafId) return;
-    const leaf = getActiveLeaf(activeTab);
-    const pane = leaf ? activePaneTab(leaf).pane : "notes";
-    updateActiveRoot((root) => addLeafTab(root, leafId, pane));
   };
 
   const goToNextWorkspace = (dir: 1 | -1) => {
@@ -460,56 +419,22 @@ export default function App() {
 
     items.push(
       {
-        id: "pane-split-vertical",
-        title: "Split pane vertical",
-        hint: "Split active pane into left/right",
-        keywords: "split pane vertical row",
-        run: () => splitActiveLeaf("row")
-      },
-      {
-        id: "pane-split-horizontal",
-        title: "Split pane horizontal",
-        hint: "Split active pane into top/bottom",
-        keywords: "split pane horizontal col",
-        run: () => splitActiveLeaf("col")
-      },
-      {
-        id: "pane-new-tab",
-        title: "Pane: New tab",
-        hint: "Add a tab to the active pane",
-        keywords: "pane new tab",
-        run: addTabToActiveLeaf
-      },
-      {
-        id: "pane-close",
-        title: "Pane: Close",
-        hint: "Close the active pane",
-        keywords: "pane close",
-        run: closeActiveLeaf
-      },
-      {
-        id: "pane-device",
-        title: "Pane: Device Browser",
-        keywords: "pane device browser",
+        id: "view-device",
+        title: "View: Server Device",
+        keywords: "view device server",
         run: () => setActiveLeafPane("deviceBrowser")
       },
       {
-        id: "pane-sftp",
-        title: "Pane: SFTP Browser",
-        keywords: "pane sftp vps",
+        id: "view-local",
+        title: "View: Local",
+        keywords: "view local",
+        run: () => setActiveLeafPane("localBrowser")
+      },
+      {
+        id: "view-sftp",
+        title: "View: SFTP",
+        keywords: "view sftp vps",
         run: () => setActiveLeafPane("sftpBrowser")
-      },
-      {
-        id: "pane-transfer",
-        title: "Pane: Transfer Queue",
-        keywords: "pane transfer queue",
-        run: () => setActiveLeafPane("transferQueue")
-      },
-      {
-        id: "pane-notes",
-        title: "Pane: Notes",
-        keywords: "pane notes",
-        run: () => setActiveLeafPane("notes")
       }
     );
 
@@ -586,9 +511,7 @@ export default function App() {
     activeTab.id,
     activeTab.name,
     cancelRunningTransfers,
-    closeActiveLeaf,
     clearDoneTransfers,
-    addTabToActiveLeaf,
     goToNextWorkspace,
     onNewTab,
     onCloseTab,
@@ -597,7 +520,6 @@ export default function App() {
     setActiveLeafPane,
     setActiveTab,
     settings.theme.mode,
-    splitActiveLeaf,
     state.tabs,
     toggleTheme
   ]);
@@ -1918,6 +1840,13 @@ export default function App() {
         </div>
 
         <div className="tabs" role="tablist" aria-label="Workspaces">
+          <div
+            className="tab-label"
+            title="Workspace = a tab + its view state. Use multiple tabs to switch tasks."
+            aria-hidden="true"
+          >
+            Workspaces
+          </div>
           {state.tabs.map((t) => (
             <div
               key={t.id}
@@ -2075,12 +2004,6 @@ export default function App() {
           tab={activeTab}
           settings={settings}
           transfers={transfers}
-          onActiveLeafChange={(leafId) =>
-            setActiveLeafByTab((s) => ({
-              ...s,
-              [activeTab.id]: leafId
-            }))
-          }
           onEnqueueDownload={enqueueDownload}
           onEnqueueSftpDownload={enqueueSftpDownload}
           onEnqueueSftpUpload={enqueueSftpUpload}
@@ -2105,9 +2028,9 @@ export default function App() {
       </div>
 
       <div className="statusbar">
-        <span className="kbd">Split</span> via pane toolbar
-        <span className="kbd">Drag</span> gutters to resize
-        <span className="kbd">Persist</span> layouts saved locally per tab
+        <span className="kbd">Source</span> switch Local / Server / SFTP / Queue / Notes
+        <span className="kbd">+ Tab</span> new workspace
+        <span className="kbd">Persist</span> state saved locally per tab
       </div>
     </div>
   );

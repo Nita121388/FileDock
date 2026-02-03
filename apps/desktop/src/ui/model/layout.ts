@@ -1,6 +1,6 @@
 export type SplitDir = "row" | "col";
 
-export type PaneKind = "deviceBrowser" | "sftpBrowser" | "transferQueue" | "notes";
+export type PaneKind = "deviceBrowser" | "sftpBrowser" | "localBrowser" | "transferQueue" | "notes";
 
 export type DropZone = "center" | "left" | "right" | "top" | "bottom";
 
@@ -40,9 +40,15 @@ export type SftpBrowserTabState = {
   pluginDirs: string; // ":"-separated
 };
 
+export type LocalBrowserTabState = {
+  basePath: string;
+  path: string;
+};
+
 export type PaneTab =
   | { id: string; pane: "deviceBrowser"; title?: string; state: DeviceBrowserTabState }
   | { id: string; pane: "sftpBrowser"; title?: string; state: SftpBrowserTabState }
+  | { id: string; pane: "localBrowser"; title?: string; state: LocalBrowserTabState }
   | { id: string; pane: "transferQueue"; title?: string }
   | { id: string; pane: "notes"; title?: string };
 
@@ -68,14 +74,7 @@ export function clampRatio(v: number): number {
 }
 
 export function defaultLayout(): LayoutNode {
-  return {
-    kind: "split",
-    id: uid("split"),
-    dir: "row",
-    ratio: 0.34,
-    a: leafFromPane("deviceBrowser"),
-    b: leafFromPane("notes")
-  };
+  return leafFromPane("deviceBrowser");
 }
 
 export function uid(prefix: string): string {
@@ -122,6 +121,17 @@ export function makeTab(pane: PaneKind, title?: string): PaneTab {
       }
     };
   }
+  if (pane === "localBrowser") {
+    return {
+      id,
+      pane,
+      title,
+      state: {
+        basePath: "",
+        path: ""
+      }
+    };
+  }
   return { id, pane: pane as any, title } as PaneTab;
 }
 
@@ -151,6 +161,12 @@ export function displayTabTitle(tab: PaneTab): string {
     return `${user}${host}${p}`;
   }
 
+  if (tab.pane === "localBrowser") {
+    const base = tab.state.basePath || "Local";
+    const p = tab.state.path ? ` /${tab.state.path}` : "";
+    return `${base}${p}`;
+  }
+
   if (tab.pane === "transferQueue") return "Transfers";
   return "Notes";
 }
@@ -172,13 +188,25 @@ export function findLeaf(node: LayoutNode, id: string): LeafNode | null {
 }
 
 export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
+  const firstLeaf = (n: LayoutNode): LeafNode | null => {
+    if (n.kind === "leaf") return n;
+    return firstLeaf(n.a) ?? firstLeaf(n.b);
+  };
+
+  const toSingleLeaf = (leaf: LeafNode): LeafNode => {
+    const a = activeTab(leaf);
+    return { kind: "leaf", id: leaf.id, tabs: [a], activeTabId: a.id };
+  };
+
   if (node.kind === "split") {
-    return {
+    const normalized = {
       ...node,
       ratio: clampRatio(node.ratio),
       a: normalizeLayoutNode(node.a),
       b: normalizeLayoutNode(node.b)
     };
+    const leaf = firstLeaf(normalized);
+    return leaf ? toSingleLeaf(leaf) : leafFromPane("deviceBrowser");
   }
 
   // Migration: legacy leaf schema had {pane}.
@@ -237,6 +265,18 @@ export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
             }
           };
         }
+        if (pane === "localBrowser") {
+          const st = t.state as Partial<LocalBrowserTabState> | undefined;
+          return {
+            id: t.id,
+            pane,
+            title,
+            state: {
+              basePath: typeof st?.basePath === "string" ? st.basePath : "",
+              path: typeof st?.path === "string" ? st.path : ""
+            }
+          };
+        }
         if (pane === "transferQueue" || pane === "notes") {
           return { id: t.id, pane, title } as PaneTab;
         }
@@ -247,18 +287,19 @@ export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
     if (tabs.length > 0) {
       const activeTabId = typeof anyLeaf.activeTabId === "string" ? anyLeaf.activeTabId : tabs[0]!.id;
       const activeExists = tabs.some((t) => t.id === activeTabId);
-      return {
+      const leaf: LeafNode = {
         kind: "leaf",
         id: node.id,
         tabs,
         activeTabId: activeExists ? activeTabId : tabs[0]!.id
       };
+      return toSingleLeaf(leaf);
     }
   }
 
-  const pane: PaneKind = anyLeaf.pane ?? "notes";
+  const pane: PaneKind = anyLeaf.pane ?? "deviceBrowser";
   const t = makeTab(pane);
-  return { kind: "leaf", id: node.id, tabs: [t], activeTabId: t.id };
+  return toSingleLeaf({ kind: "leaf", id: node.id, tabs: [t], activeTabId: t.id });
 }
 
 export function updateSplitRatio(node: LayoutNode, splitId: string, ratio: number): LayoutNode {
@@ -297,13 +338,37 @@ export function setLeafPane(node: LayoutNode, leafId: string, pane: PaneKind): L
         if (t.id !== a.id) return t;
         const title = (t as any).title as string | undefined;
         if (pane === "deviceBrowser") {
-          const prev = t.pane === "deviceBrowser" ? t.state : {
+          const prev: DeviceBrowserTabState = t.pane === "deviceBrowser" ? t.state : {
             serverBaseUrl: "",
             token: "",
             deviceId: "",
             deviceToken: "",
             deviceName: "",
             snapshotId: "",
+            path: ""
+          };
+          return { id: t.id, pane, title, state: { ...prev } };
+        }
+        if (pane === "sftpBrowser") {
+          const prev: SftpBrowserTabState = t.pane === "sftpBrowser" ? t.state : {
+            host: "",
+            port: 22,
+            user: "",
+            password: "",
+            keyPath: "",
+            useAgent: false,
+            knownHostsPolicy: "strict",
+            knownHostsPath: "",
+            basePath: "",
+            path: "/",
+            filedockPath: "",
+            pluginDirs: ""
+          };
+          return { id: t.id, pane, title, state: { ...prev } };
+        }
+        if (pane === "localBrowser") {
+          const prev: LocalBrowserTabState = t.pane === "localBrowser" ? t.state : {
+            basePath: "",
             path: ""
           };
           return { id: t.id, pane, title, state: { ...prev } };

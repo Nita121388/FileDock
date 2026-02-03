@@ -1,7 +1,8 @@
-import type { PaneKind, PaneTab } from "../../model/layout";
+import type { PaneTab } from "../../model/layout";
 import type { Settings } from "../../model/settings";
 import type { TransferJob } from "../../model/transfers";
 import DeviceBrowserPane from "./device/DeviceBrowserPane";
+import LocalBrowserPane from "./local/LocalBrowserPane";
 import NotesPane from "./notes/NotesPane";
 import SftpBrowserPane from "./sftp/SftpBrowserPane";
 import TransferQueuePane from "./transfer/TransferQueuePane";
@@ -9,7 +10,6 @@ import TransferQueuePane from "./transfer/TransferQueuePane";
 export function PaneView(props: {
   tab: PaneTab;
   settings: Settings;
-  onSetPane: (pane: PaneKind) => void;
   onUpdateTab: (updater: (tab: PaneTab) => PaneTab) => void;
   transfers: TransferJob[];
   onUpdateTransfer: (id: string, updates: Partial<TransferJob>) => void;
@@ -86,6 +86,13 @@ export function PaneView(props: {
           onEnqueueCopy={props.onEnqueueCopy}
           onEnqueueCopyFolder={props.onEnqueueCopyFolder}
           onEnqueueSftpToSnapshot={props.onEnqueueSftpToSnapshot}
+        />
+      );
+    case "localBrowser":
+      return (
+        <LocalBrowserPane
+          tab={props.tab}
+          onTabChange={(next) => props.onUpdateTab(() => next)}
         />
       );
     case "sftpBrowser":

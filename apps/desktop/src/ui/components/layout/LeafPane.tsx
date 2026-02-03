@@ -5,8 +5,9 @@ import type { TransferJob } from "../../model/transfers";
 import { PaneView } from "../panes/PaneView";
 
 const PANE_LABELS: Record<PaneKind, string> = {
-  deviceBrowser: "Device Browser",
+  deviceBrowser: "Device Browser (Server)",
   sftpBrowser: "SFTP (VPS)",
+  localBrowser: "Local",
   transferQueue: "Transfer Queue",
   notes: "Notes"
 };
@@ -177,7 +178,8 @@ export default function LeafPane(props: {
           onChange={(e) => onSetPane(e.target.value as PaneKind)}
           aria-label="Pane type"
         >
-          <option value="deviceBrowser">Device Browser</option>
+          <option value="deviceBrowser">Device Browser (Server)</option>
+          <option value="localBrowser">Local</option>
           <option value="sftpBrowser">SFTP (VPS)</option>
           <option value="transferQueue">Transfer Queue</option>
           <option value="notes">Notes</option>
@@ -224,7 +226,6 @@ export default function LeafPane(props: {
         <PaneView
           tab={tab}
           settings={settings}
-          onSetPane={onSetPane}
           onUpdateTab={onUpdateActiveTab}
           transfers={transfers}
           onEnqueueDownload={onEnqueueDownload}

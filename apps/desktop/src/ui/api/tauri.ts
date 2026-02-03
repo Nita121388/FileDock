@@ -50,6 +50,18 @@ export async function cancelRestoreSnapshot(snapshotId: string): Promise<boolean
   return await invoke<boolean>("cancel_restore_snapshot", { snapshotId });
 }
 
+export type LocalDirEntry = {
+  name: string;
+  path: string;
+  kind: "file" | "dir";
+  size?: number | null;
+  mtime_unix?: number | null;
+};
+
+export async function listLocalDir(path: string): Promise<LocalDirEntry[]> {
+  return await invoke<LocalDirEntry[]>("list_local_dir", { path });
+}
+
 export type RunFiledockPluginRequest = {
   name: string;
   json: string;

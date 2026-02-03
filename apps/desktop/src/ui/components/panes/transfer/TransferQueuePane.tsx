@@ -180,7 +180,7 @@ export default function TransferQueuePane(props: {
       }}
     >
       {transfers.length === 0 ? (
-        <div className="db-empty">No transfers yet. Queue a file from Device Browser (+Q).</div>
+        <div className="db-empty">No transfers yet. Queue a file from Device Browser (Server) (+Q).</div>
       ) : null}
 
       {transfers.length > 0 ? (
