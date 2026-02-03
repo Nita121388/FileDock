@@ -1,0 +1,19 @@
+:root {
+  /* Back-compat aliases for existing styles.css */
+  --bg0: hsl(var(--background));
+  --bg1: hsl(var(--card));
+  --bg2: hsl(var(--muted));
+
+  --fg0: hsl(var(--foreground));
+  --fg1: hsl(var(--foreground) / 0.82);
+  --fg2: hsl(var(--muted-foreground));
+
+  --accent: hsl(var(--primary));
+  --warn: hsl(var(--warning));
+  --danger: hsl(var(--destructive));
+  --border: hsl(var(--border));
+
+  /* Flat: no shadows anywhere. */
+  --shadow: none;
+}
+

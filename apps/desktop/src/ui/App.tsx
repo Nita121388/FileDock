@@ -39,6 +39,7 @@ import {
   importSftpFileToSnapshot,
   runFiledockPlugin
 } from "./api/tauri";
+import { applyTheme } from "./theme/applyTheme";
 
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadState() ?? DEFAULT_APP_STATE);
@@ -226,6 +227,10 @@ export default function App() {
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    applyTheme(settings.theme);
+  }, [settings.theme]);
 
   useEffect(() => {
     saveTransfers(transfers);
@@ -506,7 +511,7 @@ export default function App() {
     }
   };
 
-  const connToSettings = (c: Conn): Settings => ({
+  const connToConn = (c: Conn): Conn => ({
     serverBaseUrl: c.serverBaseUrl,
     token: c.token,
     deviceId: c.deviceId,
@@ -522,7 +527,7 @@ export default function App() {
     setTransferStatus(id, "running");
     setTransferError(id, undefined);
     try {
-      const eff = job.conn ? connToSettings(job.conn) : settings;
+      const eff = job.conn ? connToConn(job.conn) : settings;
       const limiter = makeLimiter(getRateLimitBytesPerSec());
       setTransferProgress(id, { phase: "downloading", pct: 0 });
       const buf = await withRetry(async () => {
@@ -810,8 +815,8 @@ export default function App() {
     setTransferStatus(id, "running");
     setTransferError(id, undefined);
 
-    const srcSettings = connToSettings(job.src);
-    const dstSettings = connToSettings(job.dst);
+    const srcSettings = connToConn(job.src);
+    const dstSettings = connToConn(job.dst);
 
     try {
       // Optional: base the destination on an existing snapshot manifest (copy-on-write into a new snapshot).
@@ -1077,8 +1082,8 @@ export default function App() {
     setTransferStatus(id, "running");
     setTransferError(id, undefined);
 
-    const srcSettings = connToSettings(job.src);
-    const dstSettings = connToSettings(job.dst);
+    const srcSettings = connToConn(job.src);
+    const dstSettings = connToConn(job.dst);
     let dstSnapshotId = job.dstSnapshotId;
     let filesList: string[] = (job.filePaths ?? []) as any;
     let nextIndex: number = job.nextIndex ?? 0;
@@ -1603,6 +1608,22 @@ export default function App() {
             </div>
           ))}
         </div>
+
+        <button
+          className="btn"
+          title="Toggle theme"
+          onClick={() =>
+            setSettings((s) => ({
+              ...s,
+              theme: {
+                ...s.theme,
+                mode: s.theme.mode === "dark" ? "light" : "dark"
+              }
+            }))
+          }
+        >
+          {settings.theme.mode === "dark" ? "Dark" : "Light"}
+        </button>
 
         <button className="btn primary" onClick={onNewTab} title="New tab">
           + Tab

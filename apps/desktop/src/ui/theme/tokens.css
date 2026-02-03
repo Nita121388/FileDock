@@ -1,0 +1,90 @@
+:root {
+  --font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+
+  /* vben-style semantic tokens (HSL components), mapped to actual colors via hsl(var(--token)). */
+  --background: 0 0% 100%;
+  --background-deep: 210 20% 98%;
+  --foreground: 222 15% 18%;
+
+  --card: 0 0% 100%;
+  --popover: 0 0% 100%;
+
+  --muted: 210 20% 96%;
+  --muted-foreground: 220 9% 46%;
+
+  --border: 220 13% 90%;
+  --input: 220 13% 90%;
+
+  /* Flat: focus is an outline/ring color, not a glow shadow. */
+  --ring: 212 100% 45%;
+
+  /* Brand colors */
+  --primary: 170 60% 45%;
+  --primary-foreground: 0 0% 100%;
+
+  --success: 145 63% 42%;
+  --warning: 42 95% 50%;
+  --destructive: 0 84% 60%;
+
+  /* Flat + compact defaults */
+  --radius: 0.25rem;
+  --font-size-base: 14px;
+  --pane-header-h: 40px;
+  --row-h: 32px;
+  --gutter: 8px;
+
+  color-scheme: light;
+}
+
+/* Default to FileDock flat + dark (desktop app default). */
+:root:not([data-theme]) {
+  color-scheme: dark;
+}
+
+:root[data-theme='filedock-flat'] {
+  /* Light theme preset for FileDock. */
+  --background: 0 0% 100%;
+  --background-deep: 210 20% 98%;
+  --foreground: 222 15% 18%;
+  --card: 0 0% 100%;
+  --popover: 0 0% 100%;
+  --muted: 210 20% 96%;
+  --muted-foreground: 220 9% 46%;
+  --border: 220 13% 90%;
+  --input: 220 13% 90%;
+  --ring: 212 100% 45%;
+  --primary: 170 60% 45%;
+  --primary-foreground: 0 0% 100%;
+  --success: 145 63% 42%;
+  --warning: 42 95% 50%;
+  --destructive: 0 84% 60%;
+  color-scheme: light;
+}
+
+.dark,
+.dark[data-theme='filedock-flat'] {
+  /* Dark theme preset for FileDock. */
+  --background: 220 15% 7%;
+  --background-deep: 220 17% 5%;
+  --foreground: 0 0% 92%;
+
+  --card: 220 15% 10%;
+  --popover: 220 15% 10%;
+
+  --muted: 220 14% 14%;
+  --muted-foreground: 220 9% 65%;
+
+  --border: 220 14% 20%;
+  --input: 0 0% 100% / 10%;
+
+  --ring: 170 60% 45%;
+
+  --primary: 170 60% 45%;
+  --primary-foreground: 0 0% 10%;
+
+  --success: 145 63% 42%;
+  --warning: 42 95% 50%;
+  --destructive: 0 84% 60%;
+
+  color-scheme: dark;
+}

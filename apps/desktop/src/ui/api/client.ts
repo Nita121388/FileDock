@@ -1,4 +1,8 @@
-import type { Settings } from "../model/settings";
+import type { Conn } from "../model/transfers";
+
+// API calls only need connection/auth fields. Keeping a local alias avoids
+// leaking desktop UI settings (theme, layout prefs) into the networking layer.
+type Settings = Conn;
 
 export type DeviceInfo = {
   id: string;
