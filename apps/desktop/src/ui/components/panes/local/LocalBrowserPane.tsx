@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { PaneTab } from "../../../model/layout";
 import { listLocalDir, type LocalDirEntry } from "../../../api/tauri";
+import { onPaneCommand } from "../../../commandBus";
 
 const FORMAT_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 
@@ -26,10 +27,11 @@ function joinPath(base: string, rel: string): string {
 type LocalTab = Extract<PaneTab, { pane: "localBrowser" }>;
 
 export default function LocalBrowserPane(props: {
+  paneId: string;
   tab: LocalTab;
   onTabChange: (tab: LocalTab) => void;
 }) {
-  const { tab, onTabChange } = props;
+  const { paneId, tab, onTabChange } = props;
   const [entries, setEntries] = useState<LocalDirEntry[]>([]);
   const [status, setStatus] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -81,6 +83,25 @@ export default function LocalBrowserPane(props: {
     const next = idx === -1 ? "" : relPath.slice(0, idx);
     onTabChange({ ...tab, state: { ...tab.state, path: next } });
   }, [onTabChange, relPath, tab]);
+
+  useEffect(() => {
+    return onPaneCommand((cmd) => {
+      if (cmd.paneId !== paneId) return;
+      switch (cmd.kind) {
+        case "local.choose":
+          void pickFolder();
+          return;
+        case "local.refresh":
+          void refresh();
+          return;
+        case "local.up":
+          goUp();
+          return;
+        default:
+          return;
+      }
+    });
+  }, [goUp, paneId, pickFolder, refresh]);
 
   return (
     <div className="db-col local-browser">

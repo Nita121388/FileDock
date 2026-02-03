@@ -91,6 +91,7 @@ export function PaneView(props: {
     case "localBrowser":
       return (
         <LocalBrowserPane
+          paneId={props.tab.id}
           tab={props.tab}
           onTabChange={(next) => props.onUpdateTab(() => next)}
         />
@@ -98,6 +99,7 @@ export function PaneView(props: {
     case "sftpBrowser":
       return (
         <SftpBrowserPane
+          paneId={props.tab.id}
           tab={props.tab}
           onTabChange={(next) => props.onUpdateTab(() => next)}
           onEnqueueSftpDownload={props.onEnqueueSftpDownload}

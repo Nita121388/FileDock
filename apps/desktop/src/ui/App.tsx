@@ -564,6 +564,58 @@ export default function App() {
       );
     }
 
+    if (activePane?.pane === "localBrowser") {
+      items.push(
+        {
+          id: "local-choose",
+          title: "Local: Choose folder",
+          keywords: "local choose folder",
+          run: () => emitPaneCommand({ kind: "local.choose", paneId })
+        },
+        {
+          id: "local-up",
+          title: "Local: Up",
+          keywords: "local up parent",
+          run: () => emitPaneCommand({ kind: "local.up", paneId })
+        },
+        {
+          id: "local-refresh",
+          title: "Local: Refresh",
+          keywords: "local refresh",
+          run: () => emitPaneCommand({ kind: "local.refresh", paneId })
+        }
+      );
+    }
+
+    if (activePane?.pane === "sftpBrowser") {
+      items.push(
+        {
+          id: "sftp-refresh",
+          title: "SFTP: Refresh",
+          keywords: "sftp refresh",
+          run: () => emitPaneCommand({ kind: "sftp.refresh", paneId })
+        },
+        {
+          id: "sftp-up",
+          title: "SFTP: Up",
+          keywords: "sftp up parent",
+          run: () => emitPaneCommand({ kind: "sftp.up", paneId })
+        },
+        {
+          id: "sftp-mkdir",
+          title: "SFTP: Mkdir",
+          keywords: "sftp mkdir",
+          run: () => emitPaneCommand({ kind: "sftp.mkdir", paneId })
+        },
+        {
+          id: "sftp-upload",
+          title: "SFTP: Upload file",
+          keywords: "sftp upload",
+          run: () => emitPaneCommand({ kind: "sftp.upload", paneId })
+        }
+      );
+    }
+
     if (activePane?.pane === "transferQueue") {
       items.push(
         {

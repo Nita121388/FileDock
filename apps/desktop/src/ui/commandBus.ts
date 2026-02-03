@@ -10,6 +10,13 @@ export type PaneCommand =
   | { kind: "device.queueSelected"; paneId: string }
   | { kind: "device.selectAll"; paneId: string }
   | { kind: "device.clearSelection"; paneId: string }
+  | { kind: "local.choose"; paneId: string }
+  | { kind: "local.refresh"; paneId: string }
+  | { kind: "local.up"; paneId: string }
+  | { kind: "sftp.refresh"; paneId: string }
+  | { kind: "sftp.up"; paneId: string }
+  | { kind: "sftp.mkdir"; paneId: string }
+  | { kind: "sftp.upload"; paneId: string }
   | { kind: "queue.runSelected"; paneId: string }
   | { kind: "queue.cancelSelected"; paneId: string }
   | { kind: "queue.removeSelected"; paneId: string }

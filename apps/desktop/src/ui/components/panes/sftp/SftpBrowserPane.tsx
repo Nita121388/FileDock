@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PaneTab } from "../../../model/layout";
 import { uid } from "../../../model/layout";
 import { runFiledockPlugin } from "../../../api/tauri";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { onPaneCommand } from "../../../commandBus";
 
 type SftpTab = Extract<PaneTab, { pane: "sftpBrowser" }>;
 
@@ -30,6 +31,7 @@ function joinPosix(a: string, b: string): string {
 }
 
 export default function SftpBrowserPane(props: {
+  paneId: string;
   tab: SftpTab;
   onTabChange: (tab: SftpTab) => void;
   onEnqueueSftpDownload: (job: {
@@ -55,6 +57,7 @@ export default function SftpBrowserPane(props: {
     mkdirs?: boolean;
   }) => void;
 }) {
+  const { paneId } = props;
   const st = props.tab.state;
 
   const [loading, setLoading] = useState(false);
@@ -87,7 +90,7 @@ export default function SftpBrowserPane(props: {
     };
   }, [st.filedockPath, st.pluginDirs]);
 
-  async function call(op: string, args: any): Promise<any> {
+  const call = useCallback(async (op: string, args: any): Promise<any> => {
     const payload = {
       op,
       conn,
@@ -112,9 +115,9 @@ export default function SftpBrowserPane(props: {
       throw new Error(parsed?.error?.message || "plugin error");
     }
     return parsed.data;
-  }
+  }, [conn, st.filedockPath, st.pluginDirs]);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setErr(null);
     setLoading(true);
     try {
@@ -134,7 +137,7 @@ export default function SftpBrowserPane(props: {
     } finally {
       setLoading(false);
     }
-  }
+  }, [call, st.path]);
 
   useEffect(() => {
     // Refresh when connection or path changes.
@@ -143,16 +146,16 @@ export default function SftpBrowserPane(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function onEnterDir(name: string) {
+  const onEnterDir = useCallback(async (name: string) => {
     const next = st.path && st.path !== "/" ? joinPosix(st.path, name) : `/${name}`;
     props.onTabChange({
       ...props.tab,
       state: { ...st, path: next }
     });
     await refresh();
-  }
+  }, [props, refresh, st]);
 
-  async function onGoUp() {
+  const onGoUp = useCallback(async () => {
     const cur = st.path && st.path.trim() ? st.path.trim() : "/";
     if (cur === "/" || cur === "") return;
     const parts = cur.split("/").filter(Boolean);
@@ -160,9 +163,9 @@ export default function SftpBrowserPane(props: {
     const next = "/" + parts.join("/");
     props.onTabChange({ ...props.tab, state: { ...st, path: next === "/" ? "/" : next } });
     await refresh();
-  }
+  }, [props, refresh, st]);
 
-  async function onDownloadFile(name: string) {
+  const onDownloadFile = useCallback(async (name: string) => {
     const remote = st.path && st.path !== "/" ? joinPosix(st.path, name) : `/${name}`;
     const suggested = name;
     const dest = await save({
@@ -175,9 +178,9 @@ export default function SftpBrowserPane(props: {
       remotePath: remote,
       localPath: dest
     });
-  }
+  }, [conn, props, runner, st.path]);
 
-  async function onUploadFile() {
+  const onUploadFile = useCallback(async () => {
     const local = await open({
       multiple: false,
       directory: false
@@ -193,9 +196,9 @@ export default function SftpBrowserPane(props: {
       remotePath: remote,
       mkdirs: true
     });
-  }
+  }, [conn, props, runner, st.path]);
 
-  async function onMkdir() {
+  const onMkdir = useCallback(async () => {
     const name = prompt("New folder name?");
     if (!name) return;
     const remote = st.path && st.path !== "/" ? joinPosix(st.path, name) : `/${name}`;
@@ -209,9 +212,9 @@ export default function SftpBrowserPane(props: {
     } finally {
       setLoading(false);
     }
-  }
+  }, [call, refresh, st.path]);
 
-  async function onRenameEntry(ent: Entry) {
+  const onRenameEntry = useCallback(async (ent: Entry) => {
     const nextName = prompt("Rename to?", ent.name);
     if (!nextName) return;
     if (nextName.includes("/")) {
@@ -233,9 +236,9 @@ export default function SftpBrowserPane(props: {
     } finally {
       setLoading(false);
     }
-  }
+  }, [call, refresh, st.path]);
 
-  async function onMoveEntry(ent: Entry) {
+  const onMoveEntry = useCallback(async (ent: Entry) => {
     const from = st.path && st.path !== "/" ? joinPosix(st.path, ent.name) : `/${ent.name}`;
     const to = prompt("Move to (absolute POSIX path)?", from);
     if (!to) return;
@@ -250,9 +253,9 @@ export default function SftpBrowserPane(props: {
     } finally {
       setLoading(false);
     }
-  }
+  }, [call, refresh, st.path]);
 
-  async function onDeleteEntry(ent: Entry) {
+  const onDeleteEntry = useCallback(async (ent: Entry) => {
     const p = st.path && st.path !== "/" ? joinPosix(st.path, ent.name) : `/${ent.name}`;
     const ok = confirm(`Delete ${ent.kind} ${p}? (recursive delete is disabled)`);
     if (!ok) return;
@@ -267,7 +270,29 @@ export default function SftpBrowserPane(props: {
     } finally {
       setLoading(false);
     }
-  }
+  }, [call, refresh, st.path]);
+
+  useEffect(() => {
+    return onPaneCommand((cmd) => {
+      if (cmd.paneId !== paneId) return;
+      switch (cmd.kind) {
+        case "sftp.refresh":
+          void refresh();
+          return;
+        case "sftp.up":
+          void onGoUp();
+          return;
+        case "sftp.mkdir":
+          void onMkdir();
+          return;
+        case "sftp.upload":
+          void onUploadFile();
+          return;
+        default:
+          return;
+      }
+    });
+  }, [onGoUp, onMkdir, onUploadFile, paneId, refresh]);
 
   return (
     <div
