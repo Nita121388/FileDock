@@ -117,7 +117,7 @@ a {
   align-items: baseline;
   gap: var(--space-3);
   padding-right: 8px;
-  border-right: 1px solid var(--stroke);
+  border-right: 1px solid var(--stroke-subtle);
 }
 
 .brand h1 {
@@ -225,24 +225,53 @@ a {
   cursor: pointer;
 }
 
-.prefs-panel {
+.modal-panel {
   position: relative;
   z-index: 1;
   width: min(560px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
   border: 1px solid var(--stroke);
   border-radius: var(--radius);
   background: var(--bg1);
   box-shadow: none;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-.prefs-header {
+.modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--stroke);
+  border-bottom: 1px solid var(--stroke-subtle);
   background: var(--bg2);
+}
+
+.modal-body {
+  padding: var(--space-3);
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--stroke-subtle);
+  background: var(--bg2);
+}
+
+.prefs-panel {
+  /* Preferences-specific overrides go here. */
+}
+
+.prefs-header {
+  /* Uses modal-header recipe. */
 }
 
 .prefs-title {
@@ -253,7 +282,6 @@ a {
 }
 
 .prefs-body {
-  padding: var(--space-3);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -264,10 +292,6 @@ a {
   grid-template-columns: 110px 1fr 70px;
   gap: var(--space-3);
   align-items: center;
-}
-
-.prefs-row.prefs-actions {
-  grid-template-columns: 1fr 1fr;
 }
 
 .prefs-label {
@@ -354,7 +378,7 @@ a {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-2);
-  border-bottom: 1px solid var(--stroke);
+  border-bottom: 1px solid var(--stroke-subtle);
   background: var(--bg2);
 }
 
@@ -508,7 +532,7 @@ a {
   grid-template-columns: 1fr 90px 120px minmax(240px, 340px);
   gap: var(--space-3);
   padding: var(--space-3);
-  border-top: 1px solid var(--stroke);
+  border-top: 1px solid var(--stroke-subtle);
   align-items: center;
 }
 
@@ -637,7 +661,7 @@ a {
   padding: var(--space-2) var(--space-2);
   font-size: var(--text-xs);
   color: var(--fg2);
-  border-bottom: 1px solid var(--stroke);
+  border-bottom: 1px solid var(--stroke-subtle);
   letter-spacing: var(--caps-track-tight);
   text-transform: uppercase;
   display: flex;
@@ -681,7 +705,7 @@ a {
   display: grid;
   grid-template-columns: 1fr 1fr auto;
   gap: var(--space-1);
-  border-bottom: 1px solid var(--stroke);
+  border-bottom: 1px solid var(--stroke-subtle);
 }
 
 .db-reg:last-of-type {
@@ -791,7 +815,7 @@ a {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3);
-  border-top: 1px solid var(--stroke);
+  border-top: 1px solid var(--stroke-subtle);
   color: var(--fg2);
   font-size: var(--text-xs);
 }

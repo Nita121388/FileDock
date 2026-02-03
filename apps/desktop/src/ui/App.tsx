@@ -1649,15 +1649,15 @@ export default function App() {
 
       {showPrefs ? (
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Preferences">
-          <div className="prefs-panel">
-            <div className="prefs-header">
+          <div className="modal-panel prefs-panel">
+            <div className="modal-header prefs-header">
               <div className="prefs-title">Preferences</div>
               <button className="btn" onClick={() => setShowPrefs(false)} title="Close">
                 Close
               </button>
             </div>
 
-            <div className="prefs-body">
+            <div className="modal-body prefs-body">
               <div className="prefs-row">
                 <label className="prefs-label">Theme mode</label>
                 <select
@@ -1711,43 +1711,43 @@ export default function App() {
                 />
                 <div className="prefs-hint">{settings.theme.fontSizePx}px</div>
               </div>
+            </div>
 
-              <div className="prefs-row prefs-actions">
-                <button
-                  className="btn"
-                  title="Copy preferences JSON"
-                  onClick={async () => {
-                    const json = JSON.stringify(settings, null, 2);
-                    try {
-                      await navigator.clipboard.writeText(json);
-                    } catch {
-                      // Fallback: prompt copy.
-                      window.prompt("Copy settings JSON:", json);
-                    }
-                  }}
-                >
-                  Export JSON
-                </button>
+            <div className="modal-footer prefs-footer">
+              <button
+                className="btn"
+                title="Copy preferences JSON"
+                onClick={async () => {
+                  const json = JSON.stringify(settings, null, 2);
+                  try {
+                    await navigator.clipboard.writeText(json);
+                  } catch {
+                    // Fallback: prompt copy.
+                    window.prompt("Copy settings JSON:", json);
+                  }
+                }}
+              >
+                Export JSON
+              </button>
 
-                <button
-                  className="btn"
-                  title="Paste preferences JSON (replaces current settings)"
-                  onClick={() => {
-                    const pasted = window.prompt("Paste settings JSON:");
-                    if (!pasted) return;
-                    try {
-                      const parsed = JSON.parse(pasted);
-                      // Reuse the loader's validation logic by persisting and reloading.
-                      localStorage.setItem("filedock.desktop.settings.v1", JSON.stringify(parsed));
-                      setSettings(loadSettings());
-                    } catch {
-                      window.alert("Invalid JSON");
-                    }
-                  }}
-                >
-                  Import JSON
-                </button>
-              </div>
+              <button
+                className="btn"
+                title="Paste preferences JSON (replaces current settings)"
+                onClick={() => {
+                  const pasted = window.prompt("Paste settings JSON:");
+                  if (!pasted) return;
+                  try {
+                    const parsed = JSON.parse(pasted);
+                    // Reuse the loader's validation logic by persisting and reloading.
+                    localStorage.setItem("filedock.desktop.settings.v1", JSON.stringify(parsed));
+                    setSettings(loadSettings());
+                  } catch {
+                    window.alert("Invalid JSON");
+                  }
+                }}
+              >
+                Import JSON
+              </button>
             </div>
           </div>
           <button className="modal-backdrop" aria-label="Close" onClick={() => setShowPrefs(false)} />
