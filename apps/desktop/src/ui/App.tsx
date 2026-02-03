@@ -45,6 +45,7 @@ export default function App() {
   const [state, setState] = useState<AppState>(() => loadState() ?? DEFAULT_APP_STATE);
   const [settings, setSettings] = useState<Settings>(() => loadSettings() ?? DEFAULT_SETTINGS);
   const [transfers, setTransfers] = useState<TransferJob[]>(() => loadTransfers());
+  const [showPrefs, setShowPrefs] = useState(false);
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
   const presenceCacheRef = useRef<
     Map<
@@ -235,6 +236,18 @@ export default function App() {
   useEffect(() => {
     saveTransfers(transfers);
   }, [transfers]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === ",") {
+        e.preventDefault();
+        setShowPrefs((v) => !v);
+      }
+      if (e.key === "Escape") setShowPrefs(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const activeTab: TabState = useMemo(() => {
     const t = state.tabs.find((x) => x.id === state.activeTabId);
@@ -1609,6 +1622,10 @@ export default function App() {
           ))}
         </div>
 
+        <button className="btn" title="Preferences (Ctrl/⌘ + ,)" onClick={() => setShowPrefs(true)}>
+          Prefs
+        </button>
+
         <button
           className="btn"
           title="Toggle theme"
@@ -1629,6 +1646,113 @@ export default function App() {
           + Tab
         </button>
       </div>
+
+      {showPrefs ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Preferences">
+          <div className="prefs-panel">
+            <div className="prefs-header">
+              <div className="prefs-title">Preferences</div>
+              <button className="btn" onClick={() => setShowPrefs(false)} title="Close">
+                Close
+              </button>
+            </div>
+
+            <div className="prefs-body">
+              <div className="prefs-row">
+                <label className="prefs-label">Theme mode</label>
+                <select
+                  className="prefs-input"
+                  value={settings.theme.mode}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      theme: { ...s.theme, mode: e.target.value as any }
+                    }))
+                  }
+                >
+                  <option value="dark">dark</option>
+                  <option value="light">light</option>
+                  <option value="auto">auto</option>
+                </select>
+              </div>
+
+              <div className="prefs-row">
+                <label className="prefs-label">Radius</label>
+                <input
+                  className="prefs-range"
+                  type="range"
+                  min={0}
+                  max={12}
+                  value={settings.theme.radiusPx}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      theme: { ...s.theme, radiusPx: Number(e.target.value) }
+                    }))
+                  }
+                />
+                <div className="prefs-hint">{settings.theme.radiusPx}px</div>
+              </div>
+
+              <div className="prefs-row">
+                <label className="prefs-label">Font size</label>
+                <input
+                  className="prefs-range"
+                  type="range"
+                  min={12}
+                  max={18}
+                  value={settings.theme.fontSizePx}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      theme: { ...s.theme, fontSizePx: Number(e.target.value) }
+                    }))
+                  }
+                />
+                <div className="prefs-hint">{settings.theme.fontSizePx}px</div>
+              </div>
+
+              <div className="prefs-row prefs-actions">
+                <button
+                  className="btn"
+                  title="Copy preferences JSON"
+                  onClick={async () => {
+                    const json = JSON.stringify(settings, null, 2);
+                    try {
+                      await navigator.clipboard.writeText(json);
+                    } catch {
+                      // Fallback: prompt copy.
+                      window.prompt("Copy settings JSON:", json);
+                    }
+                  }}
+                >
+                  Export JSON
+                </button>
+
+                <button
+                  className="btn"
+                  title="Paste preferences JSON (replaces current settings)"
+                  onClick={() => {
+                    const pasted = window.prompt("Paste settings JSON:");
+                    if (!pasted) return;
+                    try {
+                      const parsed = JSON.parse(pasted);
+                      // Reuse the loader's validation logic by persisting and reloading.
+                      localStorage.setItem("filedock.desktop.settings.v1", JSON.stringify(parsed));
+                      setSettings(loadSettings());
+                    } catch {
+                      window.alert("Invalid JSON");
+                    }
+                  }}
+                >
+                  Import JSON
+                </button>
+              </div>
+            </div>
+          </div>
+          <button className="modal-backdrop" aria-label="Close" onClick={() => setShowPrefs(false)} />
+        </div>
+      ) : null}
 
       <div className="workspace" role="main">
         <WorkspaceView
