@@ -1,7 +1,9 @@
 import type { TransferJob } from "../../../model/transfers";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { PluginRunConfig, SftpConn } from "../../../model/transfers";
+import { onPaneCommand } from "../../../commandBus";
 
 const QUEUE_KEY = "filedock.desktop.queue.v1";
 
@@ -47,6 +49,7 @@ function saveQueueSettings(next: QueueSettings) {
 }
 
 export default function TransferQueuePane(props: {
+  paneId: string;
   transfers: TransferJob[];
   onUpdateTransfer: (id: string, updates: Partial<TransferJob>) => void;
   onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../../../model/transfers").Conn) => void;
@@ -62,9 +65,20 @@ export default function TransferQueuePane(props: {
   onRun: (id: string) => Promise<void>;
   onCancel: (id: string) => void;
 }) {
-  const { transfers, onUpdateTransfer, onEnqueueDownload, onEnqueueSftpDownload, onRemove, onRun, onCancel } = props;
+  const {
+    paneId,
+    transfers,
+    onUpdateTransfer,
+    onEnqueueDownload,
+    onEnqueueSftpDownload,
+    onRemove,
+    onRun,
+    onCancel
+  } = props;
   const [busy, setBusy] = useState(false);
   const [queue, setQueue] = useState<QueueSettings>(() => loadQueueSettings());
+  const [selected, setSelected] = useState<string[]>([]);
+  const [lastSelIndex, setLastSelIndex] = useState<number | null>(null);
   const pausedRef = useRef(queue.paused);
   const busyRef = useRef(busy);
 
@@ -77,6 +91,10 @@ export default function TransferQueuePane(props: {
     busyRef.current = busy;
   }, [busy]);
 
+  useEffect(() => {
+    setSelected((prev) => prev.filter((id) => transfers.some((t) => t.id === id)));
+  }, [transfers]);
+
   const counts = useMemo(() => {
     return {
       queued: transfers.filter((x) => x.status === "queued").length,
@@ -85,6 +103,116 @@ export default function TransferQueuePane(props: {
       done: transfers.filter((x) => x.status === "done").length
     };
   }, [transfers]);
+
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
+  const toggleSelect = (idx: number, id: string, ev: MouseEvent) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+
+    setSelected((prev) => {
+      const prevSet = new Set(prev);
+      const shift = ev.shiftKey;
+      const multi = ev.ctrlKey || ev.metaKey;
+
+      if (shift && lastSelIndex !== null) {
+        const a = Math.min(lastSelIndex, idx);
+        const b = Math.max(lastSelIndex, idx);
+        for (let i = a; i <= b; i++) prevSet.add(transfers[i]!.id);
+        return Array.from(prevSet);
+      }
+
+      if (multi) {
+        if (prevSet.has(id)) prevSet.delete(id);
+        else prevSet.add(id);
+        return Array.from(prevSet);
+      }
+
+      if (prevSet.size === 1 && prevSet.has(id)) return prev;
+      return [id];
+    });
+
+    setLastSelIndex(idx);
+  };
+
+  const clearSelection = () => {
+    setSelected([]);
+    setLastSelIndex(null);
+  };
+
+  const selectFailed = () => {
+    const ids = transfers.filter((t) => t.status === "failed").map((t) => t.id);
+    setSelected(ids);
+    setLastSelIndex(ids.length > 0 ? ids.length - 1 : null);
+  };
+
+  const selectQueued = () => {
+    const ids = transfers.filter((t) => t.status === "queued").map((t) => t.id);
+    setSelected(ids);
+    setLastSelIndex(ids.length > 0 ? ids.length - 1 : null);
+  };
+
+  const runSelected = async () => {
+    if (busyRef.current || queue.paused) return;
+    const ids = selected.filter((id) => {
+      const j = transfers.find((t) => t.id === id);
+      return j && j.status !== "running" && j.status !== "done";
+    });
+    for (const id of ids) {
+      await onRun(id);
+    }
+  };
+
+  const cancelSelected = () => {
+    for (const id of selected) {
+      const j = transfers.find((t) => t.id === id);
+      if (j?.status === "running") onCancel(id);
+    }
+  };
+
+  const removeSelected = () => {
+    for (const id of selected) onRemove(id);
+    clearSelection();
+  };
+
+  useEffect(() => {
+    return onPaneCommand((cmd) => {
+      if (cmd.paneId !== paneId) return;
+      switch (cmd.kind) {
+        case "queue.runSelected":
+          void runSelected();
+          return;
+        case "queue.cancelSelected":
+          cancelSelected();
+          return;
+        case "queue.removeSelected":
+          removeSelected();
+          return;
+        case "queue.selectFailed":
+          selectFailed();
+          return;
+        case "queue.selectQueued":
+          selectQueued();
+          return;
+        case "queue.clearSelection":
+          clearSelection();
+          return;
+        default:
+          return;
+      }
+    });
+  }, [
+    cancelSelected,
+    clearSelection,
+    paneId,
+    queue.paused,
+    removeSelected,
+    runSelected,
+    selectFailed,
+    selectQueued,
+    selected,
+    transfers
+  ]);
 
   const runAll = async (mode: "queued" | "failed" | "all") => {
     if (busyRef.current) return;
@@ -286,8 +414,15 @@ export default function TransferQueuePane(props: {
         <AutoRunner onTick={() => runAll("queued")} />
       ) : null}
 
-      {transfers.map((j) => (
-        <div key={j.id} className="queue-row">
+      {transfers.map((j, idx) => (
+        <div key={j.id} className={`queue-row${selectedSet.has(j.id) ? " active" : ""}`}>
+          <button
+            className="db-mini"
+            onClick={(ev) => toggleSelect(idx, j.id, ev)}
+            title={selectedSet.has(j.id) ? "Deselect" : "Select"}
+          >
+            {selectedSet.has(j.id) ? "[x]" : "[ ]"}
+          </button>
           <div className="queue-main">
             <div className="queue-title">
               <span className="accent">{j.id}</span>{" "}

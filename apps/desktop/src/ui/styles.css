@@ -390,9 +390,16 @@ a {
 }
 
 .cmd-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: var(--text-xs);
   color: var(--fg2);
   white-space: nowrap;
+}
+
+.cmd-kbd-plus {
+  color: var(--fg3);
 }
 
 .cmd-empty {
@@ -984,6 +991,11 @@ a {
   display: flex;
   gap: var(--space-3);
   align-items: center;
+}
+
+.queue-row.active {
+  border-color: var(--accent);
+  background: linear-gradient(var(--surface-selected), var(--surface-selected)), var(--bg2);
 }
 
 .queue-main {

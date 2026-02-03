@@ -19,6 +19,32 @@ export default function CommandPalette(props: {
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  const renderShortcut = (shortcut: string) => {
+    const parts = shortcut
+      .split("+")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length <= 1) {
+      return (
+        <div className="cmd-shortcut">
+          <span className="kbd">{shortcut}</span>
+        </div>
+      );
+    }
+    const nodes: JSX.Element[] = [];
+    parts.forEach((p, i) => {
+      if (i > 0) nodes.push(
+        <span key={`plus-${i}`} className="cmd-kbd-plus">+</span>
+      );
+      nodes.push(
+        <span key={`${p}-${i}`} className="kbd">
+          {p}
+        </span>
+      );
+    });
+    return <div className="cmd-shortcut">{nodes}</div>;
+  };
+
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
     if (!query) return commands;
@@ -122,7 +148,8 @@ export default function CommandPalette(props: {
             aria-label="Search commands"
           />
           <div className="cmd-kbd">
-            <span className="kbd">Enter</span> run <span className="kbd">Esc</span> close
+            <span className="kbd">↑/↓</span> navigate <span className="kbd">Enter</span> run{" "}
+            <span className="kbd">Esc</span> close
           </div>
         </div>
 
@@ -142,7 +169,7 @@ export default function CommandPalette(props: {
                 <div className="cmd-title">{c.title}</div>
                 {c.hint ? <div className="cmd-hint">{c.hint}</div> : null}
               </div>
-              {c.shortcut ? <div className="cmd-shortcut kbd">{c.shortcut}</div> : null}
+              {c.shortcut ? renderShortcut(c.shortcut) : null}
             </button>
           ))}
         </div>

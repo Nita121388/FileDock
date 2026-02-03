@@ -7,7 +7,7 @@ import {
   newTab,
   removeTab
 } from "./model/state";
-import { setLeafPane, type LayoutNode, type PaneKind } from "./model/layout";
+import { activeTab as activeLeafTab, findLeaf, setLeafPane, type LayoutNode, type PaneKind } from "./model/layout";
 import { loadState, saveState } from "./model/storage";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "./model/settings";
 import {
@@ -42,6 +42,7 @@ import {
 } from "./api/tauri";
 import { applyTheme } from "./theme/applyTheme";
 import CommandPalette, { type CommandItem } from "./components/CommandPalette";
+import { emitPaneCommand } from "./commandBus";
 
 const QUEUE_KEY = "filedock.desktop.queue.v1";
 
@@ -296,6 +297,14 @@ export default function App() {
     return t ?? state.tabs[0];
   }, [state]);
 
+  const activePane = useMemo(() => {
+    const leafId = getActiveLeafId(activeTab);
+    if (!leafId) return null;
+    const leaf = findLeaf(activeTab.root, leafId);
+    if (!leaf) return null;
+    return activeLeafTab(leaf);
+  }, [activeTab]);
+
   const setActiveTab = (tabId: string) => {
     setState((s) => ({ ...s, activeTabId: tabId }));
   };
@@ -435,6 +444,18 @@ export default function App() {
         title: "View: SFTP",
         keywords: "view sftp vps",
         run: () => setActiveLeafPane("sftpBrowser")
+      },
+      {
+        id: "view-queue",
+        title: "View: Transfer Queue",
+        keywords: "view queue transfers",
+        run: () => setActiveLeafPane("transferQueue")
+      },
+      {
+        id: "view-notes",
+        title: "View: Notes",
+        keywords: "view notes",
+        run: () => setActiveLeafPane("notes")
       }
     );
 
@@ -470,6 +491,119 @@ export default function App() {
         run: clearDoneTransfers
       }
     );
+
+    const paneId = activePane?.id ?? "";
+    if (activePane?.pane === "deviceBrowser") {
+      items.push(
+        {
+          id: "device-refresh",
+          title: "Device: Refresh snapshots",
+          keywords: "device refresh snapshots",
+          run: () => emitPaneCommand({ kind: "device.refresh", paneId })
+        },
+        {
+          id: "device-upload",
+          title: "Device: Upload file",
+          keywords: "device upload",
+          run: () => emitPaneCommand({ kind: "device.upload", paneId })
+        },
+        {
+          id: "device-toggle-history",
+          title: "Device: Toggle history list",
+          keywords: "device history toggle",
+          run: () => emitPaneCommand({ kind: "device.toggleHistory", paneId })
+        },
+        {
+          id: "device-view-all",
+          title: "Device: View all files",
+          keywords: "device all files",
+          run: () => emitPaneCommand({ kind: "device.viewAll", paneId })
+        },
+        {
+          id: "device-view-history",
+          title: "Device: View history snapshot",
+          keywords: "device history snapshot",
+          run: () => emitPaneCommand({ kind: "device.viewHistory", paneId })
+        },
+        {
+          id: "device-up",
+          title: "Device: Up",
+          keywords: "device up parent",
+          run: () => emitPaneCommand({ kind: "device.up", paneId })
+        },
+        {
+          id: "device-restore",
+          title: "Device: Restore snapshot",
+          keywords: "device restore snapshot",
+          run: () => emitPaneCommand({ kind: "device.restore", paneId })
+        },
+        {
+          id: "device-cancel-restore",
+          title: "Device: Cancel restore",
+          keywords: "device cancel restore",
+          run: () => emitPaneCommand({ kind: "device.cancelRestore", paneId })
+        },
+        {
+          id: "device-queue-selected",
+          title: "Device: Queue selected files",
+          keywords: "device queue selected",
+          run: () => emitPaneCommand({ kind: "device.queueSelected", paneId })
+        },
+        {
+          id: "device-select-all",
+          title: "Device: Select all",
+          keywords: "device select all",
+          run: () => emitPaneCommand({ kind: "device.selectAll", paneId })
+        },
+        {
+          id: "device-clear-selection",
+          title: "Device: Clear selection",
+          keywords: "device clear selection",
+          run: () => emitPaneCommand({ kind: "device.clearSelection", paneId })
+        }
+      );
+    }
+
+    if (activePane?.pane === "transferQueue") {
+      items.push(
+        {
+          id: "queue-run-selected",
+          title: "Queue: Run selected transfers",
+          keywords: "queue run selected",
+          run: () => emitPaneCommand({ kind: "queue.runSelected", paneId })
+        },
+        {
+          id: "queue-cancel-selected",
+          title: "Queue: Cancel selected transfers",
+          keywords: "queue cancel selected",
+          run: () => emitPaneCommand({ kind: "queue.cancelSelected", paneId })
+        },
+        {
+          id: "queue-remove-selected",
+          title: "Queue: Remove selected transfers",
+          keywords: "queue remove selected",
+          run: () => emitPaneCommand({ kind: "queue.removeSelected", paneId })
+        },
+        {
+          id: "queue-select-failed",
+          title: "Queue: Select failed transfers",
+          keywords: "queue select failed",
+          run: () => emitPaneCommand({ kind: "queue.selectFailed", paneId })
+        },
+        {
+          id: "queue-select-queued",
+          title: "Queue: Select queued transfers",
+          keywords: "queue select queued",
+          run: () => emitPaneCommand({ kind: "queue.selectQueued", paneId })
+        },
+        {
+          id: "queue-clear-selection",
+          title: "Queue: Clear selection",
+          keywords: "queue clear selection",
+          run: () => emitPaneCommand({ kind: "queue.clearSelection", paneId })
+        }
+      );
+    }
 
     for (const [idx, t] of state.tabs.entries()) {
       items.push({
@@ -508,6 +642,8 @@ export default function App() {
 
     return items;
   }, [
+    activePane?.id,
+    activePane?.pane,
     activeTab.id,
     activeTab.name,
     cancelRunningTransfers,

@@ -108,6 +108,7 @@ export function PaneView(props: {
     case "transferQueue":
       return (
         <TransferQueuePane
+          paneId={props.tab.id}
           transfers={props.transfers}
           onUpdateTransfer={props.onUpdateTransfer}
           onEnqueueDownload={props.onEnqueueDownload}

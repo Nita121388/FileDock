@@ -23,6 +23,7 @@ import {
 } from "../../../api/client";
 import { cancelRestoreSnapshot, restoreSnapshotToFolder, type RestoreSnapshotProgress } from "../../../api/tauri";
 import { chunkFile } from "../../../util/chunking";
+import { onPaneCommand } from "../../../commandBus";
 
 const RESTORE_KEY = "filedock.desktop.restore.v1";
 
@@ -484,6 +485,85 @@ export default function DeviceBrowserPane(props: {
     setLastSelIndex(idx);
   };
 
+  const clearSelection = useCallback(() => {
+    setSelected([]);
+    setLastSelIndex(null);
+  }, []);
+
+  const selectAll = useCallback(() => {
+    if (items.length === 0) return;
+    setSelected(items.map((it) => it.itemPath));
+    setLastSelIndex(items.length - 1);
+  }, [items]);
+
+  const queueSelected = useCallback(() => {
+    if (selected.length === 0) {
+      setStatus("no selection");
+      return;
+    }
+    let queued = 0;
+    let skipped = 0;
+    for (const p of selected) {
+      const found = items.find((it) => it.itemPath === p);
+      if (!found || found.e.kind !== "file") {
+        skipped++;
+        continue;
+      }
+      const fileSnapshotId = found.itemSnapshotId || snapshotId;
+      if (!fileSnapshotId) {
+        skipped++;
+        continue;
+      }
+      onEnqueueDownload(fileSnapshotId, found.itemPath, effConn);
+      queued++;
+    }
+    if (queued === 0) {
+      setStatus("no files queued");
+      return;
+    }
+    const suffix = skipped ? ` (${skipped} skipped)` : "";
+    setStatus(`queued ${queued} file${queued === 1 ? "" : "s"}${suffix}`);
+  }, [effConn, items, onEnqueueDownload, selected, snapshotId]);
+
+  const toggleHistoryList = useCallback(() => {
+    setShowHistory((v) => {
+      const next = !v;
+      if (!next) setViewMode("all");
+      return next;
+    });
+  }, []);
+
+  const showAllFiles = useCallback(() => {
+    setShowHistory(false);
+    setViewMode("all");
+  }, []);
+
+  const showHistoryView = useCallback(() => {
+    setShowHistory(true);
+    setViewMode("snapshot");
+    if (snapshotId) refreshSnapshotTree(snapshotId, path);
+  }, [path, refreshSnapshotTree, snapshotId]);
+
+  const goUp = useCallback(() => {
+    const up = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    if (viewMode === "snapshot") {
+      if (!snapshotId) return;
+      refreshSnapshotTree(snapshotId, up);
+      return;
+    }
+    if (tab.state.path !== up) {
+      onTabChange({ ...tab, state: { ...tab.state, path: up } });
+    }
+  }, [onTabChange, path, refreshSnapshotTree, snapshotId, tab, viewMode]);
+
+  const triggerUpload = useCallback(() => {
+    if (!deviceName) {
+      setStatus("select a device first");
+      return;
+    }
+    uploadInputRef.current?.click();
+  }, [deviceName]);
+
   const uploadFile = useCallback(
     async (file: File) => {
       if (!file) return;
@@ -571,6 +651,116 @@ export default function DeviceBrowserPane(props: {
     [deviceName, effSettings, latestSnapshot, onTabChange, path, refreshSnapshots, refreshSnapshotTree, tab, viewMode]
   );
 
+  const restoreSnapshot = useCallback(async () => {
+    if (!snapshotId) return;
+    try {
+      const picked = await open({
+        directory: true,
+        multiple: false,
+        title: "Restore backup to folder"
+      });
+      if (!picked || Array.isArray(picked)) return;
+
+      setRestorePct(0);
+      setLoading(true);
+      setStatus(`restoring ${snapshotId} -> ${picked}`);
+
+      const tok = effSettings.token?.trim() ? effSettings.token.trim() : undefined;
+      const devId = effSettings.deviceId?.trim() ? effSettings.deviceId.trim() : undefined;
+      const devTok = effSettings.deviceToken?.trim() ? effSettings.deviceToken.trim() : undefined;
+
+      const resp = await restoreSnapshotToFolder(
+        {
+          server_base_url: effSettings.serverBaseUrl,
+          token: tok,
+          device_id: devId,
+          device_token: devTok,
+          snapshot_id: snapshotId,
+          dest_dir: picked,
+          concurrency: restoreConcurrency
+        },
+        (p: RestoreSnapshotProgress) => {
+          const pct = p.total_bytes > 0 ? Math.floor((p.done_bytes / p.total_bytes) * 100) : 100;
+          setRestorePct(pct);
+          setStatus(`restore ${pct}%  [${p.done_files}/${p.total_files}]  ${p.path}`);
+        }
+      );
+
+      setRestorePct(100);
+      setStatus(`restored ${resp.total_files} files -> ${resp.dest_dir}`);
+    } catch (e: any) {
+      setStatus(String(e?.message ?? e));
+    } finally {
+      setLoading(false);
+    }
+  }, [effSettings, restoreConcurrency, snapshotId]);
+
+  const cancelRestore = useCallback(async () => {
+    if (!snapshotId) return;
+    try {
+      const ok = await cancelRestoreSnapshot(snapshotId);
+      setStatus(ok ? `cancel requested (${snapshotId})` : "no running restore found");
+    } catch (e: any) {
+      setStatus(String(e?.message ?? e));
+    }
+  }, [snapshotId]);
+
+  useEffect(() => {
+    return onPaneCommand((cmd) => {
+      if (cmd.paneId !== tab.id) return;
+      switch (cmd.kind) {
+        case "device.refresh":
+          refreshSnapshots();
+          return;
+        case "device.upload":
+          triggerUpload();
+          return;
+        case "device.toggleHistory":
+          toggleHistoryList();
+          return;
+        case "device.viewAll":
+          showAllFiles();
+          return;
+        case "device.viewHistory":
+          showHistoryView();
+          return;
+        case "device.up":
+          goUp();
+          return;
+        case "device.restore":
+          void restoreSnapshot();
+          return;
+        case "device.cancelRestore":
+          void cancelRestore();
+          return;
+        case "device.queueSelected":
+          queueSelected();
+          return;
+        case "device.selectAll":
+          selectAll();
+          return;
+        case "device.clearSelection":
+          clearSelection();
+          return;
+        default:
+          return;
+      }
+    });
+  }, [
+    cancelRestore,
+    clearSelection,
+    goUp,
+    queueSelected,
+    refreshSnapshots,
+    restoreSnapshot,
+    selectAll,
+    showAllFiles,
+    showHistoryView,
+    tab.id,
+    toggleHistoryList,
+    triggerUpload
+  ]);
+
   const snapshotLabel =
     viewMode === "all"
       ? latestSnapshot
@@ -647,7 +837,7 @@ export default function DeviceBrowserPane(props: {
             <button
               className="db-mini"
               disabled={loading || !deviceName}
-              onClick={() => uploadInputRef.current?.click()}
+              onClick={triggerUpload}
               title={
                 deviceName
                   ? "Upload a local file into the latest backup"
@@ -658,11 +848,7 @@ export default function DeviceBrowserPane(props: {
             </button>
             <button
               className="db-mini"
-              onClick={() => setShowHistory((v) => {
-                const next = !v;
-                if (!next) setViewMode("all");
-                return next;
-              })}
+              onClick={toggleHistoryList}
               title="Toggle history list"
             >
               {showHistory ? "Hide" : "History"}
@@ -670,17 +856,7 @@ export default function DeviceBrowserPane(props: {
             <button
               className="db-mini"
               disabled={loading || (viewMode === "snapshot" && !snapshotId)}
-              onClick={() => {
-                const up = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
-                if (viewMode === "snapshot") {
-                  if (!snapshotId) return;
-                  refreshSnapshotTree(snapshotId, up);
-                  return;
-                }
-                if (tab.state.path !== up) {
-                  onTabChange({ ...tab, state: { ...tab.state, path: up } });
-                }
-              }}
+              onClick={goUp}
               title="Up"
             >
               Up
@@ -700,50 +876,7 @@ export default function DeviceBrowserPane(props: {
             <button
               className="db-mini"
               disabled={!snapshotId || loading}
-              onClick={async () => {
-                if (!snapshotId) return;
-                try {
-                  const picked = await open({
-                    directory: true,
-                    multiple: false,
-                    title: "Restore backup to folder"
-                  });
-                  if (!picked || Array.isArray(picked)) return;
-
-                  setRestorePct(0);
-                  setLoading(true);
-                  setStatus(`restoring ${snapshotId} -> ${picked}`);
-
-                  const tok = effSettings.token?.trim() ? effSettings.token.trim() : undefined;
-                  const devId = effSettings.deviceId?.trim() ? effSettings.deviceId.trim() : undefined;
-                  const devTok = effSettings.deviceToken?.trim() ? effSettings.deviceToken.trim() : undefined;
-
-                  const resp = await restoreSnapshotToFolder(
-                    {
-                      server_base_url: effSettings.serverBaseUrl,
-                      token: tok,
-                      device_id: devId,
-                      device_token: devTok,
-                      snapshot_id: snapshotId,
-                      dest_dir: picked,
-                      concurrency: restoreConcurrency
-                    },
-                    (p: RestoreSnapshotProgress) => {
-                      const pct =
-                        p.total_bytes > 0 ? Math.floor((p.done_bytes / p.total_bytes) * 100) : 100;
-                      setRestorePct(pct);
-                      setStatus(`restore ${pct}%  [${p.done_files}/${p.total_files}]  ${p.path}`);
-                    }
-                  );
-
-                  setRestorePct(100);
-                  setStatus(`restored ${resp.total_files} files -> ${resp.dest_dir}`);
-                } catch (e: any) {
-                  setStatus(String(e?.message ?? e));
-                } finally {
-                  setLoading(false);
-                }
-              }}
+              onClick={restoreSnapshot}
               title="Restore the selected backup into a local folder"
             >
               RST{restorePct !== null ? ` ${restorePct}%` : ""}
@@ -751,15 +884,7 @@ export default function DeviceBrowserPane(props: {
             <button
               className="db-mini"
               disabled={!snapshotId || !loading || restorePct === null}
-              onClick={async () => {
-                if (!snapshotId) return;
-                try {
-                  const ok = await cancelRestoreSnapshot(snapshotId);
-                  setStatus(ok ? `cancel requested (${snapshotId})` : "no running restore found");
-                } catch (e: any) {
-                  setStatus(String(e?.message ?? e));
-                }
-              }}
+              onClick={cancelRestore}
               title="Cancel restore (stops scheduling new files; in-flight downloads finish)"
             >
               Cancel
