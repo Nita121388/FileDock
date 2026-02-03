@@ -27,6 +27,62 @@ a {
   text-decoration: none;
 }
 
+/* ----------------------------- */
+/* Standard component recipes    */
+/* ----------------------------- */
+
+/* Keyboard focus: flat ring (no shadow). */
+:where(button, input, select, textarea, [role="button"]):focus-visible {
+  outline: 2px solid hsl(var(--ring) / 0.40);
+  outline-offset: 1px;
+}
+
+/* Inputs / selects / textareas share the same field treatment. */
+:where(.conn-input, .prefs-input, .pane-select, .db-input, .notes-area, .pane-toolbar input, .pane-toolbar select) {
+  border: 1px solid var(--stroke);
+  background: var(--bg2);
+  color: var(--fg0);
+  border-radius: var(--radius);
+  outline: none;
+}
+
+:where(.conn-input, .prefs-input, .pane-select, .db-input, .pane-toolbar input, .pane-toolbar select) {
+  height: var(--control-h);
+  padding: 0 var(--space-2);
+}
+
+:where(.conn-input, .prefs-input, .pane-select, .db-input, .notes-area, .pane-toolbar input, .pane-toolbar select)::placeholder {
+  color: hsl(var(--muted-foreground) / 0.85);
+}
+
+:where(.conn-input, .prefs-input, .pane-select, .db-input, .notes-area, .pane-toolbar input, .pane-toolbar select):focus {
+  border-color: hsl(var(--ring) / 0.55);
+}
+
+/* Buttons share one flat treatment; variants override. */
+:where(.btn, .pane-btn, .db-mini) {
+  border: 1px solid var(--stroke);
+  background: var(--bg2);
+  color: var(--fg0);
+  height: var(--control-h);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+:where(.btn, .pane-btn, .db-mini):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+:where(.btn, .pane-btn, .db-mini):hover:not(:disabled) {
+  background: linear-gradient(var(--surface-hover), var(--surface-hover)), var(--bg2);
+}
+
+:where(.btn, .pane-btn, .db-mini):active:not(:disabled) {
+  background: linear-gradient(var(--surface-active), var(--surface-active)), var(--bg2);
+}
+
 .app {
   height: 100%;
   display: flex;
@@ -54,17 +110,6 @@ a {
 
 .conn-input {
   width: 190px;
-  border: 1px solid var(--stroke);
-  background: var(--bg2);
-  color: var(--fg0);
-  border-radius: var(--radius);
-  height: var(--control-h);
-  padding: 0 var(--space-2);
-  outline: none;
-}
-
-.conn-input:focus {
-  border-color: hsl(var(--ring) / 0.55);
 }
 
 .brand {
@@ -119,7 +164,11 @@ a {
 }
 
 .tab:hover {
-  background: var(--surface-hover);
+  background: linear-gradient(var(--surface-hover), var(--surface-hover)), var(--bg2);
+}
+
+.tab.active:hover {
+  background: linear-gradient(var(--surface-hover), var(--surface-hover)), hsl(var(--primary) / 0.12);
 }
 
 .tab .dot {
@@ -146,23 +195,17 @@ a {
   color: var(--danger);
 }
 
-.btn {
-  border: 1px solid var(--stroke);
-  background: var(--bg2);
-  color: var(--fg0);
-  height: var(--control-h);
-  padding: 0 var(--space-2);
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-
-.btn:hover {
-  background: var(--surface-hover);
-}
-
 .btn.primary {
   border-color: var(--accent);
   background: hsl(var(--primary) / 0.15);
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: linear-gradient(var(--surface-hover), var(--surface-hover)), hsl(var(--primary) / 0.15);
+}
+
+.btn.primary:active:not(:disabled) {
+  background: linear-gradient(var(--surface-active), var(--surface-active)), hsl(var(--primary) / 0.15);
 }
 
 .modal-overlay {
@@ -230,20 +273,6 @@ a {
 .prefs-label {
   font-size: var(--text-xs);
   color: var(--fg2);
-}
-
-.prefs-input {
-  border: 1px solid var(--stroke);
-  background: var(--bg2);
-  color: var(--fg0);
-  border-radius: var(--radius);
-  height: var(--control-h);
-  padding: 0 var(--space-2);
-  outline: none;
-}
-
-.prefs-input:focus {
-  border-color: hsl(var(--ring) / 0.55);
 }
 
 .prefs-range {
@@ -408,31 +437,20 @@ a {
 }
 
 .pane-select {
-  border: 1px solid var(--stroke);
-  background: var(--bg2);
-  color: var(--fg0);
-  border-radius: var(--radius);
-  height: var(--control-h);
-  padding: 0 var(--space-2);
+  /* Use the standard field recipe; keep here for any pane-select-specific overrides. */
 }
 
 .pane-btn {
-  border: 1px solid var(--stroke);
-  background: var(--bg2);
+  /* Slightly de-emphasize pane actions vs primary actions. */
   color: var(--fg1);
-  border-radius: var(--radius);
-  height: var(--control-h);
-  padding: 0 var(--space-2);
-  cursor: pointer;
 }
 
 .pane-btn:hover {
-  background: var(--surface-hover);
   color: var(--fg0);
 }
 
 .pane-btn.danger:hover {
-  background: hsl(var(--destructive) / 0.10);
+  background: linear-gradient(hsl(var(--destructive) / 0.10), hsl(var(--destructive) / 0.10)), var(--bg2);
   color: var(--danger);
 }
 
@@ -467,18 +485,7 @@ a {
 
 .pane-toolbar input,
 .pane-toolbar select {
-  border: 1px solid var(--stroke);
-  background: var(--bg2);
-  color: var(--fg0);
-  border-radius: var(--radius);
-  height: var(--control-h);
-  padding: 0 var(--space-2);
-  outline: none;
-}
-
-.pane-toolbar input:focus,
-.pane-toolbar select:focus {
-  border-color: hsl(var(--ring) / 0.55);
+  /* Use the standard field recipe. */
 }
 
 .pane-error {
@@ -647,19 +654,9 @@ a {
 }
 
 .db-mini {
-  border: 1px solid var(--stroke);
-  background: var(--bg2);
+  /* Use standard button recipe; keep db mini buttons a touch quieter. */
   color: var(--fg1);
-  border-radius: var(--radius);
-  height: var(--control-h);
-  padding: 0 var(--space-2);
-  cursor: pointer;
   font-size: var(--text-xs);
-}
-
-.db-mini:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
 }
 
 .db-path {
@@ -692,18 +689,7 @@ a {
 }
 
 .db-input {
-  border: 1px solid var(--stroke);
-  background: var(--bg2);
-  color: var(--fg0);
-  border-radius: var(--radius);
-  height: var(--control-h);
-  padding: 0 var(--space-2);
-  outline: none;
   min-width: 0;
-}
-
-.db-input:focus {
-  border-color: hsl(var(--ring) / 0.55);
 }
 
 .db-item {
@@ -717,7 +703,7 @@ a {
 }
 
 .db-item:hover {
-  background: var(--surface-hover);
+  background: linear-gradient(var(--surface-hover), var(--surface-hover)), var(--bg2);
   color: var(--fg0);
 }
 
@@ -771,7 +757,7 @@ a {
 }
 
 .db-row-main:hover {
-  background: var(--surface-hover);
+  background: linear-gradient(var(--surface-hover), var(--surface-hover)), var(--bg2);
   color: var(--fg0);
 }
 
