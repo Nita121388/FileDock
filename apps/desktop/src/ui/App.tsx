@@ -7,7 +7,16 @@ import {
   newTab,
   removeTab
 } from "./model/state";
-import { setLeafPane, splitLeaf, type LayoutNode, type PaneKind } from "./model/layout";
+import {
+  activeTab as activePaneTab,
+  addLeafTab,
+  closeLeaf,
+  setLeafPane,
+  splitLeaf,
+  type LayoutNode,
+  type LeafNode,
+  type PaneKind
+} from "./model/layout";
 import { loadState, saveState } from "./model/storage";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "./model/settings";
 import {
@@ -163,8 +172,19 @@ export default function App() {
     return findFirstLeaf(node.a) ?? findFirstLeaf(node.b);
   };
 
+  const findLeafById = (node: LayoutNode, id: string): LeafNode | null => {
+    if (node.kind === "leaf") return node.id === id ? node : null;
+    return findLeafById(node.a, id) ?? findLeafById(node.b, id);
+  };
+
   const getActiveLeafId = (tab: TabState): string | null => {
     return activeLeafByTab[tab.id] ?? findFirstLeaf(tab.root);
+  };
+
+  const getActiveLeaf = (tab: TabState): LeafNode | null => {
+    const id = getActiveLeafId(tab);
+    if (!id) return null;
+    return findLeafById(tab.root, id);
   };
 
   const ensureMissingOnDestShared = async (dst: Conn, hashes: string[], signal: AbortSignal) => {
@@ -320,6 +340,28 @@ export default function App() {
     updateActiveRoot((root) => setLeafPane(root, leafId, pane));
   };
 
+  const closeActiveLeaf = () => {
+    const leafId = getActiveLeafId(activeTab);
+    if (!leafId) return;
+    updateActiveRoot((root) => closeLeaf(root, leafId));
+  };
+
+  const addTabToActiveLeaf = () => {
+    const leafId = getActiveLeafId(activeTab);
+    if (!leafId) return;
+    const leaf = getActiveLeaf(activeTab);
+    const pane = leaf ? activePaneTab(leaf).pane : "notes";
+    updateActiveRoot((root) => addLeafTab(root, leafId, pane));
+  };
+
+  const goToNextWorkspace = (dir: 1 | -1) => {
+    const idx = state.tabs.findIndex((t) => t.id === activeTab.id);
+    if (idx < 0) return;
+    const next = (idx + dir + state.tabs.length) % state.tabs.length;
+    const target = state.tabs[next];
+    if (target) setActiveTab(target.id);
+  };
+
   const onNewTab = () => {
     setState((s) => {
       const t = newTab("Workspace");
@@ -432,6 +474,20 @@ export default function App() {
         run: () => splitActiveLeaf("col")
       },
       {
+        id: "pane-new-tab",
+        title: "Pane: New tab",
+        hint: "Add a tab to the active pane",
+        keywords: "pane new tab",
+        run: addTabToActiveLeaf
+      },
+      {
+        id: "pane-close",
+        title: "Pane: Close",
+        hint: "Close the active pane",
+        keywords: "pane close",
+        run: closeActiveLeaf
+      },
+      {
         id: "pane-device",
         title: "Pane: Device Browser",
         keywords: "pane device browser",
@@ -500,6 +556,23 @@ export default function App() {
     }
 
     if (state.tabs.length > 1) {
+      items.push(
+        {
+          id: "workspace-next",
+          title: "Next workspace tab",
+          keywords: "workspace next tab",
+          run: () => goToNextWorkspace(1)
+        },
+        {
+          id: "workspace-prev",
+          title: "Previous workspace tab",
+          keywords: "workspace previous tab",
+          run: () => goToNextWorkspace(-1)
+        }
+      );
+    }
+
+    if (state.tabs.length > 1) {
       items.push({
         id: "close-tab",
         title: "Close active workspace tab",
@@ -513,7 +586,10 @@ export default function App() {
     activeTab.id,
     activeTab.name,
     cancelRunningTransfers,
+    closeActiveLeaf,
     clearDoneTransfers,
+    addTabToActiveLeaf,
+    goToNextWorkspace,
     onNewTab,
     onCloseTab,
     openPrefs,

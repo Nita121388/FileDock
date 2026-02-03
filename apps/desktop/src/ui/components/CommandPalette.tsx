@@ -22,12 +22,49 @@ export default function CommandPalette(props: {
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
     if (!query) return commands;
+
+    const scoreFuzzy = (hay: string, needle: string): number | null => {
+      let h = 0;
+      let n = 0;
+      let score = 0;
+      let lastMatch = -2;
+      while (h < hay.length && n < needle.length) {
+        if (hay[h] === needle[n]) {
+          score += 5;
+          if (h === lastMatch + 1) score += 8; // consecutive bonus
+          if (h === 0 || hay[h - 1] === " " || hay[h - 1] === "-" || hay[h - 1] === "_") score += 4;
+          lastMatch = h;
+          n++;
+        }
+        h++;
+      }
+      if (n !== needle.length) return null;
+      return score;
+    };
+
+    const scoreToken = (hay: string, token: string): number | null => {
+      const idx = hay.indexOf(token);
+      if (idx >= 0) return 120 - Math.min(80, idx);
+      return scoreFuzzy(hay, token);
+    };
+
+    const tokens = query.split(/\s+/).filter(Boolean);
+
     return commands
       .map((c) => {
+        const title = c.title.toLowerCase();
         const hay = `${c.title} ${c.hint ?? ""} ${c.keywords ?? ""} ${c.id}`.toLowerCase();
-        return { c, score: hay.includes(query) ? 10 : 0 };
+        let total = 0;
+        for (const t of tokens) {
+          const score = scoreToken(hay, t);
+          if (score == null) return { c, score: 0 };
+          total += score;
+          if (title.includes(t)) total += 20;
+        }
+        return { c, score: total };
       })
       .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
       .map((x) => x.c);
   }, [q, commands]);
 
