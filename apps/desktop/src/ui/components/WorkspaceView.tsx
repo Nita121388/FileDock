@@ -23,6 +23,7 @@ export function WorkspaceView(props: {
   tab: TabState;
   settings: Settings;
   transfers: TransferJob[];
+  onActiveLeafChange?: (leafId: string) => void;
   onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../model/transfers").Conn) => void;
   onEnqueueSftpDownload: (job: {
     runner?: import("../model/transfers").PluginRunConfig;
@@ -90,6 +91,7 @@ export function WorkspaceView(props: {
     tab,
     settings,
     transfers,
+    onActiveLeafChange,
     onEnqueueDownload,
     onEnqueueSftpDownload,
     onEnqueueSftpUpload,
@@ -121,6 +123,7 @@ export function WorkspaceView(props: {
           node={node}
           settings={settings}
           transfers={transfers}
+          onActivate={onActiveLeafChange}
           onEnqueueDownload={onEnqueueDownload}
           onEnqueueSftpDownload={onEnqueueSftpDownload}
           onEnqueueSftpUpload={onEnqueueSftpUpload}

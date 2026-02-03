@@ -7,6 +7,7 @@ import {
   newTab,
   removeTab
 } from "./model/state";
+import { setLeafPane, splitLeaf, type LayoutNode, type PaneKind } from "./model/layout";
 import { loadState, saveState } from "./model/storage";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "./model/settings";
 import {
@@ -42,13 +43,17 @@ import {
 import { applyTheme } from "./theme/applyTheme";
 import CommandPalette, { type CommandItem } from "./components/CommandPalette";
 
+const QUEUE_KEY = "filedock.desktop.queue.v1";
+
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadState() ?? DEFAULT_APP_STATE);
   const [settings, setSettings] = useState<Settings>(() => loadSettings() ?? DEFAULT_SETTINGS);
   const [transfers, setTransfers] = useState<TransferJob[]>(() => loadTransfers());
   const [showPrefs, setShowPrefs] = useState(false);
   const [showCommand, setShowCommand] = useState(false);
+  const [activeLeafByTab, setActiveLeafByTab] = useState<Record<string, string>>({});
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
+  const runAllBusyRef = useRef(false);
   const presenceCacheRef = useRef<
     Map<
       string,
@@ -138,6 +143,28 @@ export default function App() {
     } catch {
       return 4;
     }
+  };
+
+  const getQueueConcurrency = (): number => {
+    try {
+      const raw = localStorage.getItem(QUEUE_KEY);
+      if (!raw) return 2;
+      const parsed = JSON.parse(raw) as any;
+      const concurrency = Number(parsed?.concurrency);
+      if (!Number.isFinite(concurrency) || concurrency < 1) return 2;
+      return Math.min(8, Math.floor(concurrency));
+    } catch {
+      return 2;
+    }
+  };
+
+  const findFirstLeaf = (node: LayoutNode): string | null => {
+    if (node.kind === "leaf") return node.id;
+    return findFirstLeaf(node.a) ?? findFirstLeaf(node.b);
+  };
+
+  const getActiveLeafId = (tab: TabState): string | null => {
+    return activeLeafByTab[tab.id] ?? findFirstLeaf(tab.root);
   };
 
   const ensureMissingOnDestShared = async (dst: Conn, hashes: string[], signal: AbortSignal) => {
@@ -274,6 +301,25 @@ export default function App() {
     setState((s) => ({ ...s, activeTabId: tabId }));
   };
 
+  const updateActiveRoot = (updater: (root: LayoutNode) => LayoutNode) => {
+    setState((s) => ({
+      ...s,
+      tabs: s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, root: updater(t.root) } : t))
+    }));
+  };
+
+  const splitActiveLeaf = (dir: "row" | "col") => {
+    const leafId = getActiveLeafId(activeTab);
+    if (!leafId) return;
+    updateActiveRoot((root) => splitLeaf(root, leafId, dir));
+  };
+
+  const setActiveLeafPane = (pane: PaneKind) => {
+    const leafId = getActiveLeafId(activeTab);
+    if (!leafId) return;
+    updateActiveRoot((root) => setLeafPane(root, leafId, pane));
+  };
+
   const onNewTab = () => {
     setState((s) => {
       const t = newTab("Workspace");
@@ -307,6 +353,47 @@ export default function App() {
     }));
   };
 
+  const runTransfers = async (mode: "queued" | "failed" | "all") => {
+    if (runAllBusyRef.current) return;
+    runAllBusyRef.current = true;
+    try {
+      const ids = transfers
+        .filter((j) => {
+          if (j.status === "running") return false;
+          if (mode === "queued") return j.status === "queued";
+          if (mode === "failed") return j.status === "failed";
+          return j.status === "queued" || j.status === "failed";
+        })
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .map((j) => j.id);
+
+      const limit = Math.max(1, Math.min(8, Math.floor(getQueueConcurrency() || 1)));
+      let next = 0;
+      const worker = async () => {
+        while (true) {
+          const i = next++;
+          if (i >= ids.length) return;
+          await runTransfer(ids[i]!);
+        }
+      };
+
+      const workers = Array.from({ length: Math.min(limit, ids.length) }, () => worker());
+      await Promise.all(workers);
+    } finally {
+      runAllBusyRef.current = false;
+    }
+  };
+
+  const clearDoneTransfers = () => {
+    setTransfers((xs) => xs.filter((x) => x.status !== "done"));
+  };
+
+  const cancelRunningTransfers = () => {
+    for (const j of transfers) {
+      if (j.status === "running") cancelTransfer(j.id);
+    }
+  };
+
   const commands: CommandItem[] = useMemo(() => {
     const items: CommandItem[] = [
       {
@@ -329,6 +416,80 @@ export default function App() {
       }
     ];
 
+    items.push(
+      {
+        id: "pane-split-vertical",
+        title: "Split pane vertical",
+        hint: "Split active pane into left/right",
+        keywords: "split pane vertical row",
+        run: () => splitActiveLeaf("row")
+      },
+      {
+        id: "pane-split-horizontal",
+        title: "Split pane horizontal",
+        hint: "Split active pane into top/bottom",
+        keywords: "split pane horizontal col",
+        run: () => splitActiveLeaf("col")
+      },
+      {
+        id: "pane-device",
+        title: "Pane: Device Browser",
+        keywords: "pane device browser",
+        run: () => setActiveLeafPane("deviceBrowser")
+      },
+      {
+        id: "pane-sftp",
+        title: "Pane: SFTP Browser",
+        keywords: "pane sftp vps",
+        run: () => setActiveLeafPane("sftpBrowser")
+      },
+      {
+        id: "pane-transfer",
+        title: "Pane: Transfer Queue",
+        keywords: "pane transfer queue",
+        run: () => setActiveLeafPane("transferQueue")
+      },
+      {
+        id: "pane-notes",
+        title: "Pane: Notes",
+        keywords: "pane notes",
+        run: () => setActiveLeafPane("notes")
+      }
+    );
+
+    items.push(
+      {
+        id: "queue-run-queued",
+        title: "Queue: Run queued transfers",
+        keywords: "queue run queued",
+        run: () => runTransfers("queued")
+      },
+      {
+        id: "queue-retry-failed",
+        title: "Queue: Retry failed transfers",
+        keywords: "queue retry failed",
+        run: () => runTransfers("failed")
+      },
+      {
+        id: "queue-run-all",
+        title: "Queue: Run all pending",
+        keywords: "queue run all pending",
+        run: () => runTransfers("all")
+      },
+      {
+        id: "queue-cancel-running",
+        title: "Queue: Cancel running transfers",
+        keywords: "queue cancel running",
+        run: cancelRunningTransfers
+      },
+      {
+        id: "queue-clear-done",
+        title: "Queue: Clear done transfers",
+        keywords: "queue clear done",
+        run: clearDoneTransfers
+      }
+    );
+
     for (const [idx, t] of state.tabs.entries()) {
       items.push({
         id: `workspace-${t.id}`,
@@ -348,7 +509,22 @@ export default function App() {
     }
 
     return items;
-  }, [activeTab.id, activeTab.name, onNewTab, onCloseTab, openPrefs, setActiveTab, settings.theme.mode, state.tabs]);
+  }, [
+    activeTab.id,
+    activeTab.name,
+    cancelRunningTransfers,
+    clearDoneTransfers,
+    onNewTab,
+    onCloseTab,
+    openPrefs,
+    runTransfers,
+    setActiveLeafPane,
+    setActiveTab,
+    settings.theme.mode,
+    splitActiveLeaf,
+    state.tabs,
+    toggleTheme
+  ]);
 
   const enqueueDownload = (snapshotId: string, path: string, conn?: Conn) => {
     const job: TransferJob = {
@@ -1823,6 +1999,12 @@ export default function App() {
           tab={activeTab}
           settings={settings}
           transfers={transfers}
+          onActiveLeafChange={(leafId) =>
+            setActiveLeafByTab((s) => ({
+              ...s,
+              [activeTab.id]: leafId
+            }))
+          }
           onEnqueueDownload={enqueueDownload}
           onEnqueueSftpDownload={enqueueSftpDownload}
           onEnqueueSftpUpload={enqueueSftpUpload}

@@ -15,6 +15,7 @@ export default function LeafPane(props: {
   node: LeafNode;
   settings: Settings;
   transfers: TransferJob[];
+  onActivate?: (leafId: string) => void;
   onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../../model/transfers").Conn) => void;
   onEnqueueSftpDownload: (job: {
     runner?: import("../../model/transfers").PluginRunConfig;
@@ -91,6 +92,7 @@ export default function LeafPane(props: {
     node,
     settings,
     transfers,
+    onActivate,
     onEnqueueDownload,
     onEnqueueSftpDownload,
     onEnqueueSftpUpload,
@@ -120,7 +122,11 @@ export default function LeafPane(props: {
   const tab = activeTab(node);
 
   return (
-    <div className="pane">
+    <div
+      className="pane"
+      onMouseDown={() => onActivate?.(node.id)}
+      onFocusCapture={() => onActivate?.(node.id)}
+    >
       <div className="pane-titlebar">
         <span
           className="drag-handle"
