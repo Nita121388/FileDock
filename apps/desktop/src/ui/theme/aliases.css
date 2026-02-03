@@ -11,9 +11,16 @@
   --accent: hsl(var(--primary));
   --warn: hsl(var(--warning));
   --danger: hsl(var(--destructive));
-  --border: hsl(var(--border));
+
+  /* IMPORTANT: keep semantic token `--border` as HSL components (shadcn-style).
+     Use `--stroke*` for computed colors in the existing app CSS. */
+  --stroke: hsl(var(--border));
+  --stroke-subtle: hsl(var(--border) / 0.7);
+
+  /* Cross-theme safe interaction fills (black on light, white on dark). */
+  --surface-hover: hsl(var(--foreground) / 0.04);
+  --surface-active: hsl(var(--foreground) / 0.07);
 
   /* Flat: no shadows anywhere. */
   --shadow: none;
 }
-

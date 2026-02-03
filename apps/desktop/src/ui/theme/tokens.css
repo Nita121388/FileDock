@@ -29,9 +29,30 @@
   /* Flat + compact defaults */
   --radius: 0.25rem;
   --font-size-base: 14px;
+
+  /* Typography scale */
+  --line-height: 1.45;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: var(--font-size-base);
+  --text-lg: 16px;
+  --caps-track: 0.08em;
+  --caps-track-tight: 0.06em;
+
+  /* Spacing scale (flat workbench) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+
+  /* Control sizing */
+  --control-h: 32px;
+  --control-h-lg: 36px;
+
   --pane-header-h: 40px;
   --row-h: 32px;
-  --gutter: 8px;
+  --gutter: var(--space-2);
 
   color-scheme: light;
 }
