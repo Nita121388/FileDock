@@ -40,12 +40,14 @@ import {
   runFiledockPlugin
 } from "./api/tauri";
 import { applyTheme } from "./theme/applyTheme";
+import CommandPalette, { type CommandItem } from "./components/CommandPalette";
 
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadState() ?? DEFAULT_APP_STATE);
   const [settings, setSettings] = useState<Settings>(() => loadSettings() ?? DEFAULT_SETTINGS);
   const [transfers, setTransfers] = useState<TransferJob[]>(() => loadTransfers());
   const [showPrefs, setShowPrefs] = useState(false);
+  const [showCommand, setShowCommand] = useState(false);
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
   const presenceCacheRef = useRef<
     Map<
@@ -241,9 +243,23 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === ",") {
         e.preventDefault();
-        setShowPrefs((v) => !v);
+        setShowPrefs((v) => {
+          const next = !v;
+          if (next) setShowCommand(false);
+          return next;
+        });
+        return;
       }
-      if (e.key === "Escape") setShowPrefs(false);
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setShowCommand(true);
+        setShowPrefs(false);
+        return;
+      }
+      if (e.key === "Escape") {
+        setShowPrefs(false);
+        setShowCommand(false);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -275,6 +291,64 @@ export default function App() {
       return next;
     });
   };
+
+  const openPrefs = () => {
+    setShowPrefs(true);
+    setShowCommand(false);
+  };
+
+  const toggleTheme = () => {
+    setSettings((s) => ({
+      ...s,
+      theme: {
+        ...s.theme,
+        mode: s.theme.mode === "dark" ? "light" : "dark"
+      }
+    }));
+  };
+
+  const commands: CommandItem[] = useMemo(() => {
+    const items: CommandItem[] = [
+      {
+        id: "prefs",
+        title: "Preferences",
+        hint: "Open preferences",
+        shortcut: "Ctrl/⌘ + ,",
+        run: openPrefs
+      },
+      {
+        id: "new-tab",
+        title: "New workspace tab",
+        run: onNewTab
+      },
+      {
+        id: "toggle-theme",
+        title: settings.theme.mode === "dark" ? "Switch to light theme" : "Switch to dark theme",
+        hint: `Current: ${settings.theme.mode}`,
+        run: toggleTheme
+      }
+    ];
+
+    for (const [idx, t] of state.tabs.entries()) {
+      items.push({
+        id: `workspace-${t.id}`,
+        title: `Switch to ${t.name || "Workspace"} ${idx + 1}`,
+        hint: `Workspace ${idx + 1}`,
+        run: () => setActiveTab(t.id)
+      });
+    }
+
+    if (state.tabs.length > 1) {
+      items.push({
+        id: "close-tab",
+        title: "Close active workspace tab",
+        hint: `Close ${activeTab.name || "workspace"}`,
+        run: () => onCloseTab(activeTab.id)
+      });
+    }
+
+    return items;
+  }, [activeTab.id, activeTab.name, onNewTab, onCloseTab, openPrefs, setActiveTab, settings.theme.mode, state.tabs]);
 
   const enqueueDownload = (snapshotId: string, path: string, conn?: Conn) => {
     const job: TransferJob = {
@@ -1622,23 +1696,11 @@ export default function App() {
           ))}
         </div>
 
-        <button className="btn" title="Preferences (Ctrl/⌘ + ,)" onClick={() => setShowPrefs(true)}>
+        <button className="btn" title="Preferences (Ctrl/⌘ + ,)" onClick={openPrefs}>
           Prefs
         </button>
 
-        <button
-          className="btn"
-          title="Toggle theme"
-          onClick={() =>
-            setSettings((s) => ({
-              ...s,
-              theme: {
-                ...s.theme,
-                mode: s.theme.mode === "dark" ? "light" : "dark"
-              }
-            }))
-          }
-        >
+        <button className="btn" title="Toggle theme" onClick={toggleTheme}>
           {settings.theme.mode === "dark" ? "Dark" : "Light"}
         </button>
 
@@ -1646,6 +1708,8 @@ export default function App() {
           + Tab
         </button>
       </div>
+
+      <CommandPalette open={showCommand} onClose={() => setShowCommand(false)} commands={commands} />
 
       {showPrefs ? (
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Preferences">

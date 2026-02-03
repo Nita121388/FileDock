@@ -38,7 +38,7 @@ a {
 }
 
 /* Inputs / selects / textareas share the same field treatment. */
-:where(.conn-input, .prefs-input, .pane-select, .db-input, .notes-area, .pane-toolbar input, .pane-toolbar select) {
+:where(.conn-input, .prefs-input, .pane-select, .db-input, .cmd-input, .notes-area, .pane-toolbar input, .pane-toolbar select) {
   border: 1px solid var(--stroke);
   background: var(--bg2);
   color: var(--fg0);
@@ -46,16 +46,16 @@ a {
   outline: none;
 }
 
-:where(.conn-input, .prefs-input, .pane-select, .db-input, .pane-toolbar input, .pane-toolbar select) {
+:where(.conn-input, .prefs-input, .pane-select, .db-input, .cmd-input, .pane-toolbar input, .pane-toolbar select) {
   height: var(--control-h);
   padding: 0 var(--space-2);
 }
 
-:where(.conn-input, .prefs-input, .pane-select, .db-input, .notes-area, .pane-toolbar input, .pane-toolbar select)::placeholder {
+:where(.conn-input, .prefs-input, .pane-select, .db-input, .cmd-input, .notes-area, .pane-toolbar input, .pane-toolbar select)::placeholder {
   color: hsl(var(--muted-foreground) / 0.85);
 }
 
-:where(.conn-input, .prefs-input, .pane-select, .db-input, .notes-area, .pane-toolbar input, .pane-toolbar select):focus {
+:where(.conn-input, .prefs-input, .pane-select, .db-input, .cmd-input, .notes-area, .pane-toolbar input, .pane-toolbar select):focus {
   border-color: hsl(var(--ring) / 0.55);
 }
 
@@ -303,6 +303,93 @@ a {
   padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--stroke-subtle);
   background: var(--bg2);
+}
+
+/* Command palette */
+.cmd-panel {
+  width: min(720px, 92vw);
+  max-height: min(70vh, 560px);
+  border: 1px solid var(--stroke);
+  border-radius: calc(var(--radius) + 4px);
+  background: var(--bg1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.cmd-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--stroke-subtle);
+  background: var(--bg1);
+}
+
+.cmd-input {
+  flex: 1;
+  height: var(--control-h-lg);
+}
+
+.cmd-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--fg2);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.cmd-list {
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  overflow: auto;
+  min-height: 180px;
+}
+
+.cmd-item {
+  --item-bg: var(--bg1);
+  --item-border: var(--stroke-subtle);
+  --item-fg: var(--fg1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: calc(var(--radius) + 2px);
+  text-align: left;
+}
+
+.cmd-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cmd-title {
+  font-size: var(--text-sm);
+  color: var(--fg0);
+}
+
+.cmd-hint {
+  font-size: var(--text-xs);
+  color: var(--fg2);
+}
+
+.cmd-shortcut {
+  font-size: var(--text-xs);
+  color: var(--fg2);
+  white-space: nowrap;
+}
+
+.cmd-empty {
+  padding: var(--space-3);
+  color: var(--fg2);
+  font-size: var(--text-xs);
 }
 
 .prefs-panel {

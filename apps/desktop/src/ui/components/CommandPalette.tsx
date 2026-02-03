@@ -94,7 +94,7 @@ export default function CommandPalette(props: {
           {filtered.map((c, idx) => (
             <button
               key={c.id}
-              className={idx === active ? "cmd-item active" : "cmd-item"}
+              className={idx === active ? "cmd-item ui-item active" : "cmd-item ui-item"}
               role="option"
               aria-selected={idx === active}
               onMouseEnter={() => setActive(idx)}
@@ -105,7 +105,7 @@ export default function CommandPalette(props: {
                 <div className="cmd-title">{c.title}</div>
                 {c.hint ? <div className="cmd-hint">{c.hint}</div> : null}
               </div>
-              {c.shortcut ? <div className="cmd-shortcut">{c.shortcut}</div> : null}
+              {c.shortcut ? <div className="cmd-shortcut kbd">{c.shortcut}</div> : null}
             </button>
           ))}
         </div>
@@ -113,4 +113,3 @@ export default function CommandPalette(props: {
     </div>
   );
 }
-
