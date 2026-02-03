@@ -8,12 +8,14 @@ import {
   apiGetBytes,
   chunksPresence,
   createSnapshot,
+  getManifest,
   getTree,
   listDevices,
   listSnapshots,
   putChunk,
   putManifest,
   registerDevice,
+  type ManifestFileEntry,
   type DeviceInfo,
   type SnapshotMeta,
   type TreeEntry
@@ -125,6 +127,7 @@ export default function DeviceBrowserPane(props: {
   const [lastSelIndex, setLastSelIndex] = useState<number | null>(null);
   const [restorePct, setRestorePct] = useState<number | null>(null);
   const [restoreConcurrency, setRestoreConcurrency] = useState<number>(() => loadRestoreConcurrency());
+  const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
     saveRestoreConcurrency(restoreConcurrency);
@@ -181,8 +184,15 @@ export default function DeviceBrowserPane(props: {
   }, [devicesApi]);
 
   const filtered = useMemo(() => {
-    return snapshots.filter((s) => (deviceName ? s.device_name === deviceName : true));
+    const list = snapshots.filter((s) => (deviceName ? s.device_name === deviceName : true));
+    return [...list].sort((a, b) => b.created_unix - a.created_unix);
   }, [snapshots, deviceName]);
+
+  const latestSnapshot = filtered[0];
+  const activeSnapshot = useMemo(
+    () => filtered.find((s) => s.snapshot_id === snapshotId) ?? null,
+    [filtered, snapshotId]
+  );
 
   const refreshDevices = useCallback(async () => {
     try {
@@ -252,6 +262,22 @@ export default function DeviceBrowserPane(props: {
   }, [path, refreshDevices, refreshSnapshots, refreshTree, effSettings.serverBaseUrl, effSettings.token, effSettings.deviceId, effSettings.deviceToken, snapshotId]);
 
   useEffect(() => {
+    if (!deviceName) return;
+    if (!latestSnapshot) {
+      if (snapshotId) {
+        onTabChange({ ...tab, state: { ...tab.state, snapshotId: "", path: "" } });
+        setEntries([]);
+      }
+      return;
+    }
+    if (!snapshotId || !filtered.some((s) => s.snapshot_id === snapshotId)) {
+      onTabChange({ ...tab, state: { ...tab.state, snapshotId: latestSnapshot.snapshot_id, path: "" } });
+      setEntries([]);
+      refreshTree(latestSnapshot.snapshot_id, "");
+    }
+  }, [deviceName, filtered, latestSnapshot, onTabChange, refreshTree, snapshotId, tab]);
+
+  useEffect(() => {
     // When switching pane tabs, sync the tree view to the tab state.
     if (!snapshotId) {
       setEntries([]);
@@ -315,6 +341,7 @@ export default function DeviceBrowserPane(props: {
       if (!deviceName) return;
       setLoading(true);
       try {
+        const now = Math.floor(Date.now() / 1000);
         setStatus(`hashing ${file.name}...`);
         const refs = await chunkFile(file, undefined, (done, total) => {
           const pct = total > 0 ? Math.floor((done / total) * 100) : 0;
@@ -344,45 +371,62 @@ export default function DeviceBrowserPane(props: {
           setStatus(`uploading ${file.name}... ${pct}%`);
         }
 
-        // Create a one-file snapshot manifest on destination.
-        const now = Math.floor(Date.now() / 1000);
-        const snap = await createSnapshot(effSettings, {
-          device_name: deviceName,
-          device_id: tab.state.deviceId?.trim() ? tab.state.deviceId.trim() : null,
-          root_path: "(upload)"
-        });
+        let targetSnapshotId = snapshotId || latestSnapshot?.snapshot_id;
+        if (!targetSnapshotId) {
+          const snap = await createSnapshot(effSettings, {
+            device_name: deviceName,
+            device_id: tab.state.deviceId?.trim() ? tab.state.deviceId.trim() : null,
+            root_path: "(upload)"
+          });
+          targetSnapshotId = snap.snapshot_id;
+        }
         const dstPath = path ? `${path}/${file.name}` : file.name;
-        await putManifest(effSettings, snap.snapshot_id, {
-          snapshot_id: snap.snapshot_id,
-          created_unix: now,
-          files: [
-            {
-              path: dstPath,
-              size: file.size,
-              mtime_unix: now,
-              chunk_hash: null,
-              chunks: manifestChunks
-            }
-          ]
+        let files: ManifestFileEntry[] = [];
+        let createdUnix = now;
+        try {
+          const manifest = await getManifest(effSettings, targetSnapshotId);
+          createdUnix = manifest.created_unix || createdUnix;
+          files = Array.isArray(manifest.files) ? manifest.files : [];
+        } catch {
+          files = [];
+        }
+        const nextFiles = files.filter((f) => f.path !== dstPath);
+        nextFiles.push({
+          path: dstPath,
+          size: file.size,
+          mtime_unix: now,
+          chunk_hash: null,
+          chunks: manifestChunks
+        });
+        await putManifest(effSettings, targetSnapshotId, {
+          snapshot_id: targetSnapshotId,
+          created_unix: createdUnix,
+          files: nextFiles
         });
 
-        setStatus(`uploaded ${file.name} -> /${dstPath} (snapshot ${snap.snapshot_id})`);
+        setStatus(`uploaded ${file.name} -> /${dstPath} (snapshot ${targetSnapshotId})`);
         await refreshSnapshots();
 
         // Jump into the new snapshot at the current directory.
-        onTabChange({ ...tab, state: { ...tab.state, snapshotId: snap.snapshot_id } });
-        await refreshTree(snap.snapshot_id, path);
+        onTabChange({ ...tab, state: { ...tab.state, snapshotId: targetSnapshotId } });
+        await refreshTree(targetSnapshotId, path);
       } catch (e: any) {
         setStatus(String(e?.message ?? e));
       } finally {
         setLoading(false);
       }
     },
-    [deviceName, effSettings, onTabChange, path, refreshSnapshots, refreshTree, tab]
+    [deviceName, effSettings, latestSnapshot, onTabChange, path, refreshSnapshots, refreshTree, snapshotId, tab]
   );
 
+  const snapshotLabel = activeSnapshot
+    ? latestSnapshot && activeSnapshot.snapshot_id === latestSnapshot.snapshot_id
+      ? `Latest · ${fmtUnix(activeSnapshot.created_unix)}`
+      : `History · ${fmtUnix(activeSnapshot.created_unix)}`
+    : "No snapshot";
+
   return (
-    <div className="device-browser">
+    <div className={`device-browser ${showHistory ? "" : "history-hidden"}`}>
       <div className="db-col">
         <div className="db-head">
           Devices
@@ -520,33 +564,36 @@ export default function DeviceBrowserPane(props: {
         </div>
       </div>
 
-      <div className="db-col">
-        <div className="db-head">Snapshots</div>
-        <div className="db-list">
-          {filtered.map((s) => (
-            <button
-              key={s.snapshot_id}
-              className={s.snapshot_id === snapshotId ? "db-item ui-item active" : "db-item ui-item"}
-              onClick={() => {
-                onTabChange({ ...tab, state: { ...tab.state, snapshotId: s.snapshot_id, path: "" } });
-                setEntries([]);
-                refreshTree(s.snapshot_id, "");
-              }}
-            >
-              <div className="db-title">{s.snapshot_id}</div>
-              <div className="db-sub">
-                {fmtUnix(s.created_unix)} · {s.root_path}
-              </div>
-            </button>
-          ))}
-          {filtered.length === 0 ? <div className="db-empty">No snapshots</div> : null}
+      {showHistory ? (
+        <div className="db-col">
+          <div className="db-head">History</div>
+          <div className="db-list">
+            {filtered.map((s) => (
+              <button
+                key={s.snapshot_id}
+                className={s.snapshot_id === snapshotId ? "db-item ui-item active" : "db-item ui-item"}
+                onClick={() => {
+                  onTabChange({ ...tab, state: { ...tab.state, snapshotId: s.snapshot_id, path: "" } });
+                  setEntries([]);
+                  refreshTree(s.snapshot_id, "");
+                }}
+              >
+                <div className="db-title">{s.snapshot_id}</div>
+                <div className="db-sub">
+                  {fmtUnix(s.created_unix)} · {s.root_path}
+                </div>
+              </button>
+            ))}
+            {filtered.length === 0 ? <div className="db-empty">No snapshots</div> : null}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div className="db-col db-col-wide">
         <div className="db-head">
           Tree
           <span className="db-head-right">
+            <span className="db-meta">{snapshotLabel}</span>
             <span className="db-path">/{path || ""}</span>
             <input
               ref={uploadInputRef}
@@ -565,11 +612,14 @@ export default function DeviceBrowserPane(props: {
               onClick={() => uploadInputRef.current?.click()}
               title={
                 deviceName
-                  ? "Upload a local file into this device/path (creates a new snapshot)"
+                  ? "Upload a local file into the latest snapshot"
                   : "Select a device first"
               }
             >
               UL
+            </button>
+            <button className="db-mini" onClick={() => setShowHistory((v) => !v)} title="Toggle history list">
+              {showHistory ? "Hide" : "History"}
             </button>
             <button
               className="db-mini"
@@ -803,7 +853,7 @@ export default function DeviceBrowserPane(props: {
           }}
         >
           {!snapshotId ? (
-            <div className="db-empty">Select a snapshot to browse</div>
+            <div className="db-empty">No snapshots yet. Upload a file to create the latest snapshot.</div>
           ) : (
             <div className="db-tree-list">
               {items.map(({ e, idx, itemPath }) => (

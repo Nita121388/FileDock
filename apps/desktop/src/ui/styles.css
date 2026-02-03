@@ -761,6 +761,10 @@ a {
   min-height: 0;
 }
 
+.device-browser.history-hidden {
+  grid-template-columns: 220px 1fr;
+}
+
 .db-col {
   min-height: 0;
   border: 1px solid var(--stroke);
@@ -793,6 +797,12 @@ a {
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+}
+
+.db-meta {
+  color: var(--fg2);
+  font-size: var(--text-xs);
+  white-space: nowrap;
 }
 
 .db-mini {
