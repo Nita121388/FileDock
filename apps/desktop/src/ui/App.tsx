@@ -2238,8 +2238,13 @@ export default function App() {
           {settings.theme.mode === "dark" ? t("app.buttons.themeDark") : t("app.buttons.themeLight")}
         </button>
 
-        <button className="btn primary" onClick={onNewTab} title={t("app.buttons.newTabTitle")}>
-          {t("app.buttons.newTab")}
+        <button
+          className="btn primary"
+          onClick={onNewTab}
+          title={t("app.buttons.newTabTitle")}
+          aria-label={t("app.buttons.newTabTitle")}
+        >
+          +
         </button>
       </div>
 

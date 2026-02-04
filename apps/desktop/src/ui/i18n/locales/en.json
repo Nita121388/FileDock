@@ -76,8 +76,8 @@
       "toggleThemeTitle": "Toggle theme",
       "themeDark": "Dark",
       "themeLight": "Light",
-      "newTab": "+ Tab",
-      "newTabTitle": "New tab"
+      "newTab": "New workspace",
+      "newTabTitle": "New workspace"
     },
     "preview": {
       "title": "Web preview",

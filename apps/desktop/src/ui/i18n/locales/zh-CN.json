@@ -76,8 +76,8 @@
       "toggleThemeTitle": "切换主题",
       "themeDark": "深色",
       "themeLight": "浅色",
-      "newTab": "+ 标签",
-      "newTabTitle": "新标签"
+      "newTab": "新增工作区",
+      "newTabTitle": "新增工作区"
     },
     "preview": {
       "title": "Web 预览",
