@@ -18,6 +18,38 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+.boot-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 24px;
+  margin: 24px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  background: var(--bg1);
+  color: var(--fg0);
+}
+
+.boot-error-title {
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.boot-error-desc {
+  color: var(--fg1);
+}
+
+.boot-error pre {
+  margin: 0;
+  padding: var(--space-2);
+  background: var(--bg2);
+  border-radius: var(--radius);
+  border: 1px solid var(--stroke);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg1);
+}
+
 button {
   font: inherit;
 }
@@ -156,6 +188,21 @@ a {
   border-radius: var(--radius);
   background: var(--bg1);
   box-shadow: var(--shadow);
+}
+
+.preview-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--stroke);
+  border-radius: var(--radius);
+  background: var(--bg2);
+  color: var(--fg1);
+}
+
+.preview-banner strong {
+  color: var(--fg0);
 }
 
 .conn {

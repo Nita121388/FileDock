@@ -1,7 +1,7 @@
 import type { TransferJob } from "../../../model/transfers";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
-import { save } from "@tauri-apps/plugin-dialog";
+import { saveDialog } from "../../../api/dialog";
 import type { PluginRunConfig, SftpConn } from "../../../model/transfers";
 import { onPaneCommand } from "../../../commandBus";
 import { useTranslation } from "react-i18next";
@@ -281,7 +281,7 @@ export default function TransferQueuePane(props: {
               const runner = parsed?.runner as PluginRunConfig | undefined;
               if (!remotePath || !conn) return;
               const base = remotePath.split("/").filter(Boolean).pop() || "download";
-              const dest = await save({ defaultPath: base });
+              const dest = await saveDialog({ defaultPath: base });
               if (!dest) return;
               onEnqueueSftpDownload({ runner, conn, remotePath, localPath: dest });
             } catch {

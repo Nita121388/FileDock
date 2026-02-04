@@ -45,6 +45,7 @@ import { applyTheme } from "./theme/applyTheme";
 import CommandPalette, { type CommandItem } from "./components/CommandPalette";
 import { emitPaneCommand } from "./commandBus";
 import { setLanguage } from "./i18n";
+import { isTauri } from "./util/tauriEnv";
 
 const QUEUE_KEY = "filedock.desktop.queue.v1";
 
@@ -55,6 +56,7 @@ export default function App() {
   const [transfers, setTransfers] = useState<TransferJob[]>(() => loadTransfers());
   const [showPrefs, setShowPrefs] = useState(false);
   const [showCommand, setShowCommand] = useState(false);
+  const webPreview = !isTauri();
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
   const runAllBusyRef = useRef(false);
   const presenceCacheRef = useRef<
@@ -2230,6 +2232,13 @@ export default function App() {
           {t("app.buttons.newTab")}
         </button>
       </div>
+
+      {webPreview ? (
+        <div className="preview-banner" role="note">
+          <strong>{t("app.preview.title")}</strong>
+          <span>{t("app.preview.desc")}</span>
+        </div>
+      ) : null}
 
       <CommandPalette open={showCommand} onClose={() => setShowCommand(false)} commands={commands} />
 

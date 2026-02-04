@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { openDialog } from "../../../api/dialog";
 import type { PaneTab } from "../../../model/layout";
 import { listLocalDir, type LocalDirEntry } from "../../../api/tauri";
 import { onPaneCommand } from "../../../commandBus";
@@ -70,7 +70,7 @@ export default function LocalBrowserPane(props: {
   }, [refresh]);
 
   const pickFolder = useCallback(async () => {
-    const picked = await open({
+    const picked = await openDialog({
       directory: true,
       multiple: false,
       title: t("local.dialog.chooseTitle")

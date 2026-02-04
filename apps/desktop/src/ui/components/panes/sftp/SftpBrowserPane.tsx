@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { PaneTab } from "../../../model/layout";
 import { uid } from "../../../model/layout";
 import { runFiledockPlugin } from "../../../api/tauri";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { openDialog, saveDialog } from "../../../api/dialog";
 import { onPaneCommand } from "../../../commandBus";
 
 type SftpTab = Extract<PaneTab, { pane: "sftpBrowser" }>;
@@ -170,7 +170,7 @@ export default function SftpBrowserPane(props: {
   const onDownloadFile = useCallback(async (name: string) => {
     const remote = st.path && st.path !== "/" ? joinPosix(st.path, name) : `/${name}`;
     const suggested = name;
-    const dest = await save({
+    const dest = await saveDialog({
       defaultPath: suggested
     });
     if (!dest) return;
@@ -183,7 +183,7 @@ export default function SftpBrowserPane(props: {
   }, [conn, props, runner, st.path]);
 
   const onUploadFile = useCallback(async () => {
-    const local = await open({
+    const local = await openDialog({
       multiple: false,
       directory: false
     });

@@ -71,6 +71,10 @@
       "newTab": "+ 标签",
       "newTabTitle": "新标签"
     },
+    "preview": {
+      "title": "Web 预览",
+      "desc": "浏览器里部分桌面功能不可用。"
+    },
     "prefs": {
       "title": "偏好设置",
       "close": "关闭",

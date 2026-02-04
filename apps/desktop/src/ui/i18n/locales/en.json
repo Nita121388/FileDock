@@ -71,6 +71,10 @@
       "newTab": "+ Tab",
       "newTabTitle": "New tab"
     },
+    "preview": {
+      "title": "Web preview",
+      "desc": "Some desktop-only features are disabled in the browser."
+    },
     "prefs": {
       "title": "Preferences",
       "close": "Close",

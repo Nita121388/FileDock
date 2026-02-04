@@ -1,5 +1,24 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { isTauri } from "../util/tauriEnv";
+
+type UnlistenFn = () => Promise<void>;
+
+function assertTauri() {
+  if (!isTauri()) {
+    throw new Error("Tauri API is unavailable in web preview.");
+  }
+}
+
+async function getInvoke() {
+  assertTauri();
+  const mod = await import("@tauri-apps/api/core");
+  return mod.invoke;
+}
+
+async function getListen() {
+  assertTauri();
+  const mod = await import("@tauri-apps/api/event");
+  return mod.listen;
+}
 
 export type RestoreSnapshotRequest = {
   server_base_url: string;
@@ -33,6 +52,7 @@ export async function restoreSnapshotToFolder(
 ): Promise<RestoreSnapshotResponse> {
   let unlisten: UnlistenFn | null = null;
   if (onProgress) {
+    const listen = await getListen();
     unlisten = await listen<RestoreSnapshotProgress>("filedock_restore_progress", (e) => {
       if (e.payload.snapshot_id !== req.snapshot_id) return;
       onProgress(e.payload);
@@ -40,6 +60,7 @@ export async function restoreSnapshotToFolder(
   }
 
   try {
+    const invoke = await getInvoke();
     return await invoke<RestoreSnapshotResponse>("restore_snapshot_to_folder", { req });
   } finally {
     if (unlisten) await unlisten();
@@ -47,6 +68,7 @@ export async function restoreSnapshotToFolder(
 }
 
 export async function cancelRestoreSnapshot(snapshotId: string): Promise<boolean> {
+  const invoke = await getInvoke();
   return await invoke<boolean>("cancel_restore_snapshot", { snapshotId });
 }
 
@@ -59,6 +81,7 @@ export type LocalDirEntry = {
 };
 
 export async function listLocalDir(path: string): Promise<LocalDirEntry[]> {
+  const invoke = await getInvoke();
   return await invoke<LocalDirEntry[]>("list_local_dir", { path });
 }
 
@@ -79,10 +102,12 @@ export type RunFiledockPluginResponse = {
 export async function runFiledockPlugin(
   req: RunFiledockPluginRequest
 ): Promise<RunFiledockPluginResponse> {
+  const invoke = await getInvoke();
   return await invoke<RunFiledockPluginResponse>("run_filedock_plugin", { req });
 }
 
 export async function cancelFiledockPluginRun(runId: string): Promise<boolean> {
+  const invoke = await getInvoke();
   return await invoke<boolean>("cancel_filedock_plugin_run", { runId });
 }
 
@@ -105,6 +130,7 @@ export type CopySnapshotFileToSftpRequest = {
 };
 
 export async function copySnapshotFileToSftp(req: CopySnapshotFileToSftpRequest): Promise<void> {
+  const invoke = await getInvoke();
   await invoke("copy_snapshot_file_to_sftp", { req });
 }
 
@@ -142,6 +168,7 @@ export async function importSftpFileToSnapshot(
 ): Promise<void> {
   let unlisten: UnlistenFn | null = null;
   if (onProgress) {
+    const listen = await getListen();
     unlisten = await listen<ImportSftpProgress>("filedock_import_progress", (e) => {
       if (e.payload.run_id !== req.run_id) return;
       onProgress(e.payload);
@@ -149,6 +176,7 @@ export async function importSftpFileToSnapshot(
   }
 
   try {
+    const invoke = await getInvoke();
     await invoke("import_sftp_file_to_snapshot", { req });
   } finally {
     if (unlisten) await unlisten();

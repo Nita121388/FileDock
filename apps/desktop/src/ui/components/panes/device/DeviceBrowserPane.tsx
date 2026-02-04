@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { openDialog } from "../../../api/dialog";
 import type { PaneTab } from "../../../model/layout";
 import type { Settings } from "../../../model/settings";
 import type { Conn, PluginRunConfig, SftpConn } from "../../../model/transfers";
@@ -656,7 +656,7 @@ export default function DeviceBrowserPane(props: {
   const restoreSnapshot = useCallback(async () => {
     if (!snapshotId) return;
     try {
-      const picked = await open({
+      const picked = await openDialog({
         directory: true,
         multiple: false,
         title: t("device.dialog.restoreTitle")
