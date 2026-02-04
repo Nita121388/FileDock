@@ -56,6 +56,7 @@ export default function App() {
   const [transfers, setTransfers] = useState<TransferJob[]>(() => loadTransfers());
   const [showPrefs, setShowPrefs] = useState(false);
   const [showCommand, setShowCommand] = useState(false);
+  const [showConnHelp, setShowConnHelp] = useState(false);
   const webPreview = !isTauri();
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
   const runAllBusyRef = useRef(false);
@@ -2182,6 +2183,13 @@ export default function App() {
             placeholder={t("app.conn.deviceToken.placeholder")}
             title={t("app.conn.deviceToken.title")}
           />
+          <button
+            className="btn"
+            title={t("app.conn.helpTitle")}
+            onClick={() => setShowConnHelp((v) => !v)}
+          >
+            {t("app.conn.help")}
+          </button>
         </div>
 
         <div className="tabs" role="tablist" aria-label={t("app.workspaces.label")}>
@@ -2234,6 +2242,18 @@ export default function App() {
           {t("app.buttons.newTab")}
         </button>
       </div>
+
+      {showConnHelp ? (
+        <div className="conn-help" role="note">
+          <div className="conn-help-title">{t("app.conn.helpTitle")}</div>
+          <ul>
+            <li>{t("app.conn.helpText.serverBaseUrl")}</li>
+            <li>{t("app.conn.helpText.token")}</li>
+            <li>{t("app.conn.helpText.deviceId")}</li>
+            <li>{t("app.conn.helpText.deviceToken")}</li>
+          </ul>
+        </div>
+      ) : null}
 
       {webPreview ? (
         <div className="preview-banner" role="note">

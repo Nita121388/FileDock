@@ -55,6 +55,14 @@
       "deviceToken": {
         "title": "X-FileDock-Device-Token（可选）",
         "placeholder": "设备 token（可选）"
+      },
+      "help": "说明",
+      "helpTitle": "连接参数说明",
+      "helpText": {
+        "serverBaseUrl": "服务器基础地址：FileDock 服务端地址（例：http://127.0.0.1:8787 或 https://你的服务器）。",
+        "token": "Token：如果服务端开启鉴权，填这里。",
+        "deviceId": "设备 ID：可选，用于访问特定设备。",
+        "deviceToken": "设备 Token：可选，特定设备的鉴权。"
       }
     },
     "workspaces": {

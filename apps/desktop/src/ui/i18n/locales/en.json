@@ -55,6 +55,14 @@
       "deviceToken": {
         "title": "X-FileDock-Device-Token (optional)",
         "placeholder": "device token (optional)"
+      },
+      "help": "Help",
+      "helpTitle": "Connection fields",
+      "helpText": {
+        "serverBaseUrl": "Server base URL: FileDock server address (e.g. http://127.0.0.1:8787 or https://your-server).",
+        "token": "Token: optional auth token if the server requires it.",
+        "deviceId": "Device ID: optional, used to access a specific device.",
+        "deviceToken": "Device token: optional auth for the specific device."
       }
     },
     "workspaces": {

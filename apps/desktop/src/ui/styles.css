@@ -211,6 +211,29 @@ a {
   gap: 8px;
 }
 
+.conn-help {
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--stroke);
+  border-radius: var(--radius);
+  background: var(--bg2);
+  color: var(--fg1);
+}
+
+.conn-help-title {
+  font-weight: 600;
+  color: var(--fg0);
+  margin-bottom: var(--space-1);
+}
+
+.conn-help ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.conn-help li + li {
+  margin-top: 4px;
+}
+
 .conn-input {
   width: 190px;
 }
