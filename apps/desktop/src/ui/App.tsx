@@ -462,11 +462,11 @@ export default function App() {
 
   const onNewTab = () => {
     setState((s) => {
-      const t = newTab(t("tab.workspace"));
+      const nextTab = newTab(t("tab.workspace"));
       return {
         ...s,
-        tabs: [...s.tabs, t],
-        activeTabId: t.id
+        tabs: [...s.tabs, nextTab],
+        activeTabId: nextTab.id
       };
     });
   };
