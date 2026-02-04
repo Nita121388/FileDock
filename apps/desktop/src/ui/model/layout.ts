@@ -202,14 +202,12 @@ export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
   };
 
   if (node.kind === "split") {
-    const normalized = {
+    return {
       ...node,
       ratio: clampRatio(node.ratio),
       a: normalizeLayoutNode(node.a),
       b: normalizeLayoutNode(node.b)
     };
-    const leaf = firstLeaf(normalized);
-    return leaf ? toSingleLeaf(leaf) : leafFromPane("deviceBrowser");
   }
 
   // Migration: legacy leaf schema had {pane}.
@@ -313,12 +311,17 @@ export function updateSplitRatio(node: LayoutNode, splitId: string, ratio: numbe
   });
 }
 
-export function splitLeaf(node: LayoutNode, leafId: string, dir: SplitDir): LayoutNode {
+export function splitLeaf(
+  node: LayoutNode,
+  leafId: string,
+  dir: SplitDir,
+  newPane: PaneKind = "notes"
+): LayoutNode {
   return mapNode(node, (n) => {
     if (n.kind !== "leaf") return n;
     if (n.id !== leafId) return n;
     const left: LeafNode = { ...n };
-    const right: LeafNode = leafFromPane("notes");
+    const right: LeafNode = leafFromPane(newPane);
     return {
       kind: "split",
       id: uid("split"),

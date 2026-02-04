@@ -8,7 +8,14 @@ import {
   newTab,
   removeTab
 } from "./model/state";
-import { activeTab as activeLeafTab, findLeaf, setLeafPane, type LayoutNode, type PaneKind } from "./model/layout";
+import {
+  activeTab as activeLeafTab,
+  findLeaf,
+  setLeafPane,
+  splitLeaf,
+  type LayoutNode,
+  type PaneKind
+} from "./model/layout";
 import { loadState, saveState } from "./model/storage";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type LocaleSetting, type Settings } from "./model/settings";
 import {
@@ -57,6 +64,7 @@ export default function App() {
   const [showPrefs, setShowPrefs] = useState(false);
   const [showCommand, setShowCommand] = useState(false);
   const [showConnHelp, setShowConnHelp] = useState(false);
+  const [activeLeafByTab, setActiveLeafByTab] = useState<Record<string, string>>({});
   const webPreview = !isTauri();
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
   const runAllBusyRef = useRef(false);
@@ -282,15 +290,19 @@ export default function App() {
   }, [state]);
 
   const activePane = useMemo(() => {
-    const leafId = getActiveLeafId(activeTab);
+    const leafId = activeLeafByTab[activeTab.id] ?? getActiveLeafId(activeTab);
     if (!leafId) return null;
     const leaf = findLeaf(activeTab.root, leafId);
     if (!leaf) return null;
     return activeLeafTab(leaf);
-  }, [activeTab]);
+  }, [activeLeafByTab, activeTab]);
 
   const setActiveTab = (tabId: string) => {
     setState((s) => ({ ...s, activeTabId: tabId }));
+  };
+
+  const setActiveLeaf = (tabId: string, leafId: string) => {
+    setActiveLeafByTab((prev) => ({ ...prev, [tabId]: leafId }));
   };
 
   const updateActiveRoot = (updater: (root: LayoutNode) => LayoutNode) => {
@@ -304,6 +316,12 @@ export default function App() {
     const leafId = getActiveLeafId(activeTab);
     if (!leafId) return;
     updateActiveRoot((root) => setLeafPane(root, leafId, pane));
+  };
+
+  const addView = () => {
+    const leafId = activeLeafByTab[activeTab.id] ?? getActiveLeafId(activeTab);
+    if (!leafId) return;
+    updateActiveRoot((root) => splitLeaf(root, leafId, "row", "localBrowser"));
   };
 
   const goToNextWorkspace = (dir: 1 | -1) => {
@@ -2395,31 +2413,44 @@ export default function App() {
       ) : null}
 
       <div className="workspace" role="main">
-        <WorkspaceView
-          tab={activeTab}
-          settings={settings}
-          transfers={transfers}
-          onEnqueueDownload={enqueueDownload}
-          onEnqueueSftpDownload={enqueueSftpDownload}
-          onEnqueueSftpUpload={enqueueSftpUpload}
-          onEnqueueSnapshotToSftp={enqueueSnapshotToSftp}
-          onEnqueueSftpToSnapshot={enqueueSftpToSnapshot}
-          onEnqueueCopy={enqueueCopy}
-          onEnqueueCopyFolder={enqueueCopyFolder}
-          onRemoveTransfer={removeTransfer}
-          onRunTransfer={runTransfer}
-          onCancelTransfer={cancelTransfer}
-          onUpdateTransfer={updateTransfer}
-          onSetDeviceAuth={(deviceId, deviceToken) =>
-            setSettings((s) => ({ ...s, deviceId, deviceToken }))
-          }
-          onTabChange={(tab) => {
-            setState((s) => ({
-              ...s,
-              tabs: s.tabs.map((x) => (x.id === tab.id ? tab : x))
-            }));
-          }}
-        />
+        <div className="workspace-shell">
+          <WorkspaceView
+            tab={activeTab}
+            settings={settings}
+            transfers={transfers}
+            onEnqueueDownload={enqueueDownload}
+            onEnqueueSftpDownload={enqueueSftpDownload}
+            onEnqueueSftpUpload={enqueueSftpUpload}
+            onEnqueueSnapshotToSftp={enqueueSnapshotToSftp}
+            onEnqueueSftpToSnapshot={enqueueSftpToSnapshot}
+            onEnqueueCopy={enqueueCopy}
+            onEnqueueCopyFolder={enqueueCopyFolder}
+            onRemoveTransfer={removeTransfer}
+            onRunTransfer={runTransfer}
+            onCancelTransfer={cancelTransfer}
+            onUpdateTransfer={updateTransfer}
+            onSetDeviceAuth={(deviceId, deviceToken) =>
+              setSettings((s) => ({ ...s, deviceId, deviceToken }))
+            }
+            onTabChange={(tab) => {
+              setState((s) => ({
+                ...s,
+                tabs: s.tabs.map((x) => (x.id === tab.id ? tab : x))
+              }));
+            }}
+            onActivateLeaf={(leafId) => setActiveLeaf(activeTab.id, leafId)}
+          />
+          <div className="workspace-tools" role="toolbar" aria-label={t("workspace.tools.aria")}>
+            <button
+              className="tool-btn"
+              onClick={addView}
+              title={t("workspace.tools.addViewTitle")}
+              aria-label={t("workspace.tools.addViewTitle")}
+            >
+              +
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="statusbar">

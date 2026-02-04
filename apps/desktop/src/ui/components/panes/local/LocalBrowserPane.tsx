@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { openDialog } from "../../../api/dialog";
+import { isTauri } from "../../../util/tauriEnv";
 import type { PaneTab } from "../../../model/layout";
 import { listLocalDir, type LocalDirEntry } from "../../../api/tauri";
 import { onPaneCommand } from "../../../commandBus";
@@ -70,6 +71,10 @@ export default function LocalBrowserPane(props: {
   }, [refresh]);
 
   const pickFolder = useCallback(async () => {
+    if (!isTauri()) {
+      setStatus(t("local.status.desktopOnly"));
+      return;
+    }
     const picked = await openDialog({
       directory: true,
       multiple: false,

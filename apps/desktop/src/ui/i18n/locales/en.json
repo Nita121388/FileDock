@@ -1,7 +1,7 @@
 {
   "common": {
     "actions": {
-      "refresh": "Refresh",
+      "refresh": "⟳",
       "up": "Up",
       "close": "Close",
       "cancel": "Cancel",
@@ -247,6 +247,10 @@
     "actions": {
       "refreshDevices": "Refresh Devices",
       "refreshDevicesTitle": "Refresh server devices"
+    },
+    "tools": {
+      "aria": "Workspace tools",
+      "addViewTitle": "Add view (Local)"
     }
   },
   "pane": {
@@ -283,6 +287,7 @@
       "refreshTitle": "Refresh"
     },
     "status": {
+      "desktopOnly": "Local file picker is available only in the desktop app.",
       "items": "items: {{count}}"
     },
     "empty": {

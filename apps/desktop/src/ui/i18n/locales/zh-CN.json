@@ -1,7 +1,7 @@
 {
   "common": {
     "actions": {
-      "refresh": "刷新",
+      "refresh": "⟳",
       "up": "上级",
       "close": "关闭",
       "cancel": "取消",
@@ -247,6 +247,10 @@
     "actions": {
       "refreshDevices": "刷新设备",
       "refreshDevicesTitle": "刷新服务器设备"
+    },
+    "tools": {
+      "aria": "工作区工具栏",
+      "addViewTitle": "新增视窗（本地）"
     }
   },
   "pane": {
@@ -283,6 +287,7 @@
       "refreshTitle": "刷新"
     },
     "status": {
+      "desktopOnly": "本地文件选择仅在桌面端可用。",
       "items": "项目数：{{count}}"
     },
     "empty": {
