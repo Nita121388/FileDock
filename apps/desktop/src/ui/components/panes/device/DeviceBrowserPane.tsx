@@ -24,6 +24,7 @@ import {
 import { cancelRestoreSnapshot, restoreSnapshotToFolder, type RestoreSnapshotProgress } from "../../../api/tauri";
 import { chunkFile } from "../../../util/chunking";
 import { onPaneCommand } from "../../../commandBus";
+import { useTranslation } from "react-i18next";
 
 const RESTORE_KEY = "filedock.desktop.restore.v1";
 
@@ -113,6 +114,7 @@ export default function DeviceBrowserPane(props: {
     conflictPolicy?: "overwrite" | "skip" | "rename";
   }) => void;
 }) {
+  const { t } = useTranslation();
   const {
     settings,
     tab,
@@ -201,23 +203,23 @@ export default function DeviceBrowserPane(props: {
     try {
       const ds = await listDevices(effSettings);
       setDevicesApi(ds);
-      setStatus((prev) => prev || `devices: ${ds.length}`);
+      setStatus((prev) => prev || t("device.status.devices", { count: ds.length }));
     } catch (e: any) {
       // Device registry may be unused; keep it non-fatal.
       setDevicesApi([]);
       setStatus(String(e?.message ?? e));
     }
-  }, [effSettings]);
+  }, [effSettings, t]);
 
   const handleRegisterDevice = useCallback(async () => {
-    const name = prompt("Device name?");
+    const name = prompt(t("device.prompt.deviceName"));
     if (!name || !name.trim()) return;
-    const os = prompt("OS?", detectOs()) ?? "";
+    const os = prompt(t("device.prompt.os"), detectOs()) ?? "";
     if (!os.trim()) return;
     setLoading(true);
     try {
       const resp = await registerDevice(effSettings, { device_name: name.trim(), os: os.trim() });
-      setStatus(`registered ${name.trim()} (id=${resp.device_id})`);
+      setStatus(t("device.status.registered", { name: name.trim(), id: resp.device_id }));
       onTabChange({
         ...tab,
         state: {
@@ -234,7 +236,7 @@ export default function DeviceBrowserPane(props: {
     } finally {
       setLoading(false);
     }
-  }, [effSettings, onSetDeviceAuth, onTabChange, refreshDevices, tab]);
+  }, [effSettings, onSetDeviceAuth, onTabChange, refreshDevices, t, tab]);
 
   const refreshSnapshots = useCallback(async () => {
     setLoading(true);
@@ -244,13 +246,13 @@ export default function DeviceBrowserPane(props: {
       if (!deviceName && s.length > 0) {
         onTabChange({ ...tab, state: { ...tab.state, deviceName: s[0]!.device_name } });
       }
-      setStatus(`backups: ${s.length}`);
+      setStatus(t("device.status.backups", { count: s.length }));
     } catch (e: any) {
       setStatus(String(e?.message ?? e));
     } finally {
       setLoading(false);
     }
-  }, [deviceName, effSettings, onTabChange, tab]);
+  }, [deviceName, effSettings, onTabChange, t, tab]);
 
   const refreshSnapshotTree = useCallback(async (nextSnapshotId: string, nextPath: string) => {
     setLoading(true);
@@ -262,13 +264,13 @@ export default function DeviceBrowserPane(props: {
       if (tab.state.snapshotId !== nextSnapshotId || tab.state.path !== tr.path) {
         onTabChange({ ...tab, state: { ...tab.state, snapshotId: nextSnapshotId, path: tr.path } });
       }
-      setStatus(`tree: ${tr.entries.length}`);
+      setStatus(t("device.status.tree", { count: tr.entries.length }));
     } catch (e: any) {
       setStatus(String(e?.message ?? e));
     } finally {
       setLoading(false);
     }
-  }, [effSettings, onTabChange, tab]);
+  }, [effSettings, onTabChange, t, tab]);
 
   const refreshMergedIndex = useCallback(async () => {
     if (!deviceName) {
@@ -307,13 +309,13 @@ export default function DeviceBrowserPane(props: {
       }
 
       setMergedIndex(merged);
-      setStatus(`files: ${merged.size}`);
+      setStatus(t("device.status.files", { count: merged.size }));
     } catch (e: any) {
       setStatus(String(e?.message ?? e));
     } finally {
       setLoading(false);
     }
-  }, [deviceName, effSettings, filtered, latestSnapshot]);
+  }, [deviceName, effSettings, filtered, latestSnapshot, t]);
 
   useEffect(() => {
     // Keep device selection valid if the device list changes.
@@ -498,7 +500,7 @@ export default function DeviceBrowserPane(props: {
 
   const queueSelected = useCallback(() => {
     if (selected.length === 0) {
-      setStatus("no selection");
+      setStatus(t("device.status.noSelection"));
       return;
     }
     let queued = 0;
@@ -518,12 +520,12 @@ export default function DeviceBrowserPane(props: {
       queued++;
     }
     if (queued === 0) {
-      setStatus("no files queued");
+      setStatus(t("device.status.noFilesQueued"));
       return;
     }
-    const suffix = skipped ? ` (${skipped} skipped)` : "";
-    setStatus(`queued ${queued} file${queued === 1 ? "" : "s"}${suffix}`);
-  }, [effConn, items, onEnqueueDownload, selected, snapshotId]);
+    const suffix = skipped ? t("device.status.skippedSuffix", { count: skipped }) : "";
+    setStatus(t("device.status.queuedFiles", { count: queued, suffix }));
+  }, [effConn, items, onEnqueueDownload, selected, snapshotId, t]);
 
   const toggleHistoryList = useCallback(() => {
     setShowHistory((v) => {
@@ -558,11 +560,11 @@ export default function DeviceBrowserPane(props: {
 
   const triggerUpload = useCallback(() => {
     if (!deviceName) {
-      setStatus("select a device first");
+      setStatus(t("device.status.selectDeviceFirst"));
       return;
     }
     uploadInputRef.current?.click();
-  }, [deviceName]);
+  }, [deviceName, t]);
 
   const uploadFile = useCallback(
     async (file: File) => {
@@ -571,10 +573,10 @@ export default function DeviceBrowserPane(props: {
       setLoading(true);
       try {
         const now = Math.floor(Date.now() / 1000);
-        setStatus(`hashing ${file.name}...`);
+        setStatus(t("device.status.hashing", { name: file.name }));
         const refs = await chunkFile(file, undefined, (done, total) => {
           const pct = total > 0 ? Math.floor((done / total) * 100) : 0;
-          setStatus(`hashing ${file.name}... ${pct}%`);
+          setStatus(t("device.status.hashingPct", { name: file.name, pct }));
         });
         const hashes = refs.map((c) => c.hash);
         const manifestChunks = refs.map((c) => ({ hash: c.hash, size: c.size }));
@@ -597,7 +599,7 @@ export default function DeviceBrowserPane(props: {
           const chunkBuf = new Uint8Array(await file.slice(c.offset, end).arrayBuffer());
           await putChunk(effSettings, c.hash, chunkBuf);
           const pct = file.size > 0 ? Math.floor((doneBytes / file.size) * 100) : 0;
-          setStatus(`uploading ${file.name}... ${pct}%`);
+          setStatus(t("device.status.uploadingPct", { name: file.name, pct }));
         }
 
         let targetSnapshotId = latestSnapshot?.snapshot_id;
@@ -634,7 +636,7 @@ export default function DeviceBrowserPane(props: {
         });
 
         manifestCacheRef.current.delete(targetSnapshotId);
-        setStatus(`uploaded ${file.name} -> /${dstPath}`);
+        setStatus(t("device.status.uploaded", { name: file.name, path: dstPath }));
         await refreshSnapshots();
 
         if (viewMode === "snapshot") {
@@ -648,7 +650,7 @@ export default function DeviceBrowserPane(props: {
         setLoading(false);
       }
     },
-    [deviceName, effSettings, latestSnapshot, onTabChange, path, refreshSnapshots, refreshSnapshotTree, tab, viewMode]
+    [deviceName, effSettings, latestSnapshot, onTabChange, path, refreshSnapshots, refreshSnapshotTree, t, tab, viewMode]
   );
 
   const restoreSnapshot = useCallback(async () => {
@@ -657,13 +659,13 @@ export default function DeviceBrowserPane(props: {
       const picked = await open({
         directory: true,
         multiple: false,
-        title: "Restore backup to folder"
+        title: t("device.dialog.restoreTitle")
       });
       if (!picked || Array.isArray(picked)) return;
 
       setRestorePct(0);
       setLoading(true);
-      setStatus(`restoring ${snapshotId} -> ${picked}`);
+      setStatus(t("device.status.restoring", { snapshotId, dest: picked }));
 
       const tok = effSettings.token?.trim() ? effSettings.token.trim() : undefined;
       const devId = effSettings.deviceId?.trim() ? effSettings.deviceId.trim() : undefined;
@@ -682,28 +684,28 @@ export default function DeviceBrowserPane(props: {
         (p: RestoreSnapshotProgress) => {
           const pct = p.total_bytes > 0 ? Math.floor((p.done_bytes / p.total_bytes) * 100) : 100;
           setRestorePct(pct);
-          setStatus(`restore ${pct}%  [${p.done_files}/${p.total_files}]  ${p.path}`);
+          setStatus(t("device.status.restoreProgress", { pct, done: p.done_files, total: p.total_files, path: p.path }));
         }
       );
 
       setRestorePct(100);
-      setStatus(`restored ${resp.total_files} files -> ${resp.dest_dir}`);
+      setStatus(t("device.status.restored", { count: resp.total_files, dest: resp.dest_dir }));
     } catch (e: any) {
       setStatus(String(e?.message ?? e));
     } finally {
       setLoading(false);
     }
-  }, [effSettings, restoreConcurrency, snapshotId]);
+  }, [effSettings, restoreConcurrency, snapshotId, t]);
 
   const cancelRestore = useCallback(async () => {
     if (!snapshotId) return;
     try {
       const ok = await cancelRestoreSnapshot(snapshotId);
-      setStatus(ok ? `cancel requested (${snapshotId})` : "no running restore found");
+      setStatus(ok ? t("device.status.cancelRequested", { snapshotId }) : t("device.status.noRunningRestore"));
     } catch (e: any) {
       setStatus(String(e?.message ?? e));
     }
-  }, [snapshotId]);
+  }, [snapshotId, t]);
 
   useEffect(() => {
     return onPaneCommand((cmd) => {
@@ -764,17 +766,17 @@ export default function DeviceBrowserPane(props: {
   const snapshotLabel =
     viewMode === "all"
       ? latestSnapshot
-        ? `All files · ${fmtUnix(latestSnapshot.created_unix)}`
-        : "All files"
+        ? t("device.meta.allFilesWithDate", { date: fmtUnix(latestSnapshot.created_unix) })
+        : t("device.meta.allFiles")
       : activeSnapshot
-        ? `History · ${fmtUnix(activeSnapshot.created_unix)}`
-        : "History";
+        ? t("device.meta.historyWithDate", { date: fmtUnix(activeSnapshot.created_unix) })
+        : t("device.meta.history");
 
   return (
     <div className={`device-browser ${showHistory ? "" : "history-hidden"}`}>
       {showHistory ? (
         <div className="db-col">
-          <div className="db-head">History</div>
+          <div className="db-head">{t("device.history.title")}</div>
           <div className="db-list">
             {filtered.map((s) => (
               <button
@@ -795,16 +797,18 @@ export default function DeviceBrowserPane(props: {
                 </div>
               </button>
             ))}
-            {filtered.length === 0 ? <div className="db-empty">No history yet</div> : null}
+            {filtered.length === 0 ? <div className="db-empty">{t("device.history.empty")}</div> : null}
           </div>
         </div>
       ) : null}
 
       <div className="db-col db-col-wide">
         <div className="db-head">
-          Files
+          {t("device.files.title")}
           <span className="db-head-right">
-            <span className="db-meta">{deviceName ? `Device: ${deviceName}` : "No device selected"}</span>
+            <span className="db-meta">
+              {deviceName ? t("device.meta.device", { name: deviceName }) : t("device.meta.noDevice")}
+            </span>
             <span className="db-meta">{snapshotLabel}</span>
             <span className="db-path">/{path || ""}</span>
             <input
@@ -822,17 +826,17 @@ export default function DeviceBrowserPane(props: {
               className="db-mini"
               onClick={refreshSnapshots}
               disabled={loading}
-              title="Refresh snapshots"
+              title={t("device.actions.refreshTitle")}
             >
-              Refresh
+              {t("device.actions.refresh")}
             </button>
             <button
               className="db-mini"
               onClick={handleRegisterDevice}
               disabled={loading}
-              title="Register device"
+              title={t("device.actions.registerTitle")}
             >
-              Register
+              {t("device.actions.register")}
             </button>
             <button
               className="db-mini"
@@ -840,26 +844,26 @@ export default function DeviceBrowserPane(props: {
               onClick={triggerUpload}
               title={
                 deviceName
-                  ? "Upload a local file into the latest backup"
-                  : "Select a device first"
+                  ? t("device.actions.uploadTitle")
+                  : t("device.actions.uploadTitleNoDevice")
               }
             >
-              UL
+              {t("device.actions.upload")}
             </button>
             <button
               className="db-mini"
               onClick={toggleHistoryList}
-              title="Toggle history list"
+              title={t("device.actions.toggleHistoryTitle")}
             >
-              {showHistory ? "Hide" : "History"}
+              {showHistory ? t("device.actions.historyHide") : t("device.actions.historyShow")}
             </button>
             <button
               className="db-mini"
               disabled={loading || (viewMode === "snapshot" && !snapshotId)}
               onClick={goUp}
-              title="Up"
+              title={t("device.actions.upTitle")}
             >
-              Up
+              {t("device.actions.up")}
             </button>
             <input
               className="conn-input"
@@ -871,23 +875,24 @@ export default function DeviceBrowserPane(props: {
               value={restoreConcurrency}
               disabled={loading}
               onChange={(e) => setRestoreConcurrency(Math.max(1, Math.min(16, Number(e.target.value) || 1)))}
-              title="Restore concurrency (files in parallel)"
+              title={t("device.restore.concurrencyTitle")}
             />
             <button
               className="db-mini"
               disabled={!snapshotId || loading}
               onClick={restoreSnapshot}
-              title="Restore the selected backup into a local folder"
+              title={t("device.actions.restoreTitle")}
             >
-              RST{restorePct !== null ? ` ${restorePct}%` : ""}
+              {t("device.actions.restoreLabel")}
+              {restorePct !== null ? ` ${restorePct}%` : ""}
             </button>
             <button
               className="db-mini"
               disabled={!snapshotId || !loading || restorePct === null}
               onClick={cancelRestore}
-              title="Cancel restore (stops scheduling new files; in-flight downloads finish)"
+              title={t("device.actions.cancelTitle")}
             >
-              Cancel
+              {t("device.actions.cancel")}
             </button>
           </span>
         </div>
@@ -914,7 +919,7 @@ export default function DeviceBrowserPane(props: {
 
                 const base = remotePath.split("/").filter(Boolean).pop() || "file";
                 const defaultDstPath = path ? `${path}/${base}` : base;
-                const dst = prompt("Import to snapshot path (relative POSIX path)?", defaultDstPath);
+                const dst = prompt(t("device.prompt.importPath"), defaultDstPath);
                 if (!dst) return;
 
                 onEnqueueSftpToSnapshot({
@@ -928,7 +933,7 @@ export default function DeviceBrowserPane(props: {
                   dstBaseSnapshotId: snapshotId || undefined,
                   conflictPolicy: "overwrite"
                 });
-                setStatus(`queued sftp import: ${remotePath} -> ${dst}`);
+                setStatus(t("device.status.queuedSftpImport", { src: remotePath, dst }));
               } catch {
                 // ignore
               }
@@ -983,7 +988,7 @@ export default function DeviceBrowserPane(props: {
                       files++;
                     }
                   }
-                  setStatus(`queued copy: ${files} files, ${dirs} dirs`);
+                  setStatus(t("device.status.queuedCopySummary", { files, dirs }));
                   return;
                 }
 
@@ -1001,7 +1006,7 @@ export default function DeviceBrowserPane(props: {
                     dstDirPath,
                     dstBaseSnapshotId: snapshotId || undefined
                   });
-                  setStatus(`queued copy dir: ${parsed.path} -> ${dstDirPath}`);
+                  setStatus(t("device.status.queuedCopyDir", { src: parsed.path, dst: dstDirPath }));
                 } else {
                   // Drop means: copy file from source server into this destination server/device context.
                   // For MVP we create a new snapshot on destination (one-file manifest) under this device.
@@ -1018,7 +1023,7 @@ export default function DeviceBrowserPane(props: {
                     dstPath,
                     dstBaseSnapshotId: snapshotId || undefined
                   });
-                  setStatus(`queued copy: ${parsed.path} -> ${dstPath}`);
+                  setStatus(t("device.status.queuedCopy", { src: parsed.path, dst: dstPath }));
                 }
               } catch {
                 // ignore
@@ -1034,11 +1039,11 @@ export default function DeviceBrowserPane(props: {
           }}
         >
           {!deviceName ? (
-            <div className="db-empty">Select a server device to browse snapshots and files.</div>
+            <div className="db-empty">{t("device.empty.selectDevice")}</div>
           ) : (viewMode === "all" && mergedIndex.size === 0) || (viewMode === "snapshot" && !snapshotId) ? (
-            <div className="db-empty">No backups yet. Upload a file to start.</div>
+            <div className="db-empty">{t("device.empty.noBackups")}</div>
           ) : items.length === 0 ? (
-            <div className="db-empty">No files in this folder.</div>
+            <div className="db-empty">{t("device.empty.noFiles")}</div>
           ) : (
             <div className="db-tree-list">
               {items.map(({ e, idx, itemPath, itemSnapshotId }) => (
@@ -1046,7 +1051,7 @@ export default function DeviceBrowserPane(props: {
                   <button
                     className={selectedSet.has(itemPath) ? "db-mini" : "db-mini"}
                     onClick={(ev) => toggleSelect(idx, itemPath, ev)}
-                    title={selectedSet.has(itemPath) ? "Deselect" : "Select"}
+                    title={selectedSet.has(itemPath) ? t("device.selection.deselectTitle") : t("device.selection.selectTitle")}
                   >
                     {selectedSet.has(itemPath) ? "[x]" : "[ ]"}
                   </button>
@@ -1121,11 +1126,11 @@ export default function DeviceBrowserPane(props: {
                           const fileSnapshotId = itemSnapshotId || snapshotId;
                           if (!fileSnapshotId) return;
                           onEnqueueDownload(fileSnapshotId, filePath, effConn);
-                          setStatus(`queued ${filePath}`);
+                          setStatus(t("device.status.queuedPath", { path: filePath }));
                         }}
-                        title="Add to transfer queue"
+                        title={t("device.actions.queueTitle")}
                       >
-                        +Q
+                        {t("device.actions.queue")}
                       </button>
                       <button
                         className="db-mini"
@@ -1145,26 +1150,26 @@ export default function DeviceBrowserPane(props: {
                             a.download = e.name;
                             a.click();
                             URL.revokeObjectURL(url);
-                            setStatus(`downloaded ${filePath}`);
+                            setStatus(t("device.status.downloaded", { path: filePath }));
                           } catch (err: any) {
                             setStatus(String(err?.message ?? err));
                           }
                         }}
-                        title="Download"
+                        title={t("device.actions.downloadTitle")}
                       >
-                        DL
+                        {t("device.actions.download")}
                       </button>
                     </>
                   ) : null}
                 </div>
               ))}
-              {displayEntries.length === 0 ? <div className="db-empty">Empty directory</div> : null}
+              {displayEntries.length === 0 ? <div className="db-empty">{t("device.empty.emptyDir")}</div> : null}
             </div>
           )}
         </div>
 
         <div className="db-foot">
-          <span className={loading ? "db-spin" : ""}>{loading ? "Loading..." : "Ready"}</span>
+          <span className={loading ? "db-spin" : ""}>{loading ? t("common.labels.loading") : t("common.labels.ready")}</span>
           <span className="db-status">{status}</span>
         </div>
       </div>

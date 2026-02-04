@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { PaneTab } from "../../../model/layout";
 import { uid } from "../../../model/layout";
 import { runFiledockPlugin } from "../../../api/tauri";
@@ -58,6 +59,7 @@ export default function SftpBrowserPane(props: {
   }) => void;
 }) {
   const { paneId } = props;
+  const { t } = useTranslation();
   const st = props.tab.state;
 
   const [loading, setLoading] = useState(false);
@@ -109,13 +111,13 @@ export default function SftpBrowserPane(props: {
     try {
       parsed = JSON.parse(resp.stdout);
     } catch {
-      throw new Error(`plugin returned non-JSON: ${resp.stdout.slice(0, 200)}`);
+      throw new Error(t("sftp.error.pluginNonJson", { output: resp.stdout.slice(0, 200) }));
     }
     if (!parsed.ok) {
-      throw new Error(parsed?.error?.message || "plugin error");
+      throw new Error(parsed?.error?.message || t("sftp.error.plugin"));
     }
     return parsed.data;
-  }, [conn, st.filedockPath, st.pluginDirs]);
+  }, [conn, st.filedockPath, st.pluginDirs, t]);
 
   const refresh = useCallback(async () => {
     setErr(null);
@@ -199,7 +201,7 @@ export default function SftpBrowserPane(props: {
   }, [conn, props, runner, st.path]);
 
   const onMkdir = useCallback(async () => {
-    const name = prompt("New folder name?");
+    const name = prompt(t("sftp.prompt.newFolder"));
     if (!name) return;
     const remote = st.path && st.path !== "/" ? joinPosix(st.path, name) : `/${name}`;
     setErr(null);
@@ -212,13 +214,13 @@ export default function SftpBrowserPane(props: {
     } finally {
       setLoading(false);
     }
-  }, [call, refresh, st.path]);
+  }, [call, refresh, st.path, t]);
 
   const onRenameEntry = useCallback(async (ent: Entry) => {
-    const nextName = prompt("Rename to?", ent.name);
+    const nextName = prompt(t("sftp.prompt.rename"), ent.name);
     if (!nextName) return;
     if (nextName.includes("/")) {
-      setErr("Invalid name: must not contain '/'");
+      setErr(t("sftp.error.invalidName"));
       return;
     }
 
@@ -236,11 +238,11 @@ export default function SftpBrowserPane(props: {
     } finally {
       setLoading(false);
     }
-  }, [call, refresh, st.path]);
+  }, [call, refresh, st.path, t]);
 
   const onMoveEntry = useCallback(async (ent: Entry) => {
     const from = st.path && st.path !== "/" ? joinPosix(st.path, ent.name) : `/${ent.name}`;
-    const to = prompt("Move to (absolute POSIX path)?", from);
+    const to = prompt(t("sftp.prompt.move"), from);
     if (!to) return;
 
     setErr(null);
@@ -253,11 +255,12 @@ export default function SftpBrowserPane(props: {
     } finally {
       setLoading(false);
     }
-  }, [call, refresh, st.path]);
+  }, [call, refresh, st.path, t]);
 
   const onDeleteEntry = useCallback(async (ent: Entry) => {
     const p = st.path && st.path !== "/" ? joinPosix(st.path, ent.name) : `/${ent.name}`;
-    const ok = confirm(`Delete ${ent.kind} ${p}? (recursive delete is disabled)`);
+    const kindLabel = t(`sftp.kind.${ent.kind}`);
+    const ok = confirm(t("sftp.confirm.delete", { kind: kindLabel, path: p }));
     if (!ok) return;
 
     setErr(null);
@@ -270,7 +273,7 @@ export default function SftpBrowserPane(props: {
     } finally {
       setLoading(false);
     }
-  }, [call, refresh, st.path]);
+  }, [call, refresh, st.path, t]);
 
   useEffect(() => {
     return onPaneCommand((cmd) => {
@@ -313,7 +316,7 @@ export default function SftpBrowserPane(props: {
           if (!src || !snapshotId || !snapshotPath) return;
           const base = String(snapshotPath).split("/").filter(Boolean).pop() || "upload";
           const defaultRemote = st.path && st.path !== "/" ? joinPosix(st.path, base) : `/${base}`;
-          const remote = prompt("Upload to remote path (absolute POSIX path)?", defaultRemote);
+          const remote = prompt(t("sftp.prompt.uploadRemote"), defaultRemote);
           if (!remote) return;
           props.onEnqueueSnapshotToSftp({
             src,
@@ -331,16 +334,16 @@ export default function SftpBrowserPane(props: {
     >
       <div className="pane-toolbar">
         <div className="toolbar-row">
-          <label title="Host (IP or domain)">
-            Host{" "}
+          <label title={t("sftp.titles.host")}>
+            {t("sftp.labels.host")}{" "}
             <input
               value={st.host}
               onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, host: e.target.value } })}
-              placeholder="example.com"
+              placeholder={t("sftp.placeholders.host")}
             />
           </label>
-          <label title="Port">
-            Port{" "}
+          <label title={t("sftp.titles.port")}>
+            {t("sftp.labels.port")}{" "}
             <input
               value={String(st.port || 22)}
               onChange={(e) =>
@@ -352,36 +355,36 @@ export default function SftpBrowserPane(props: {
               style={{ width: 80 }}
             />
           </label>
-          <label title="Username">
-            User{" "}
+          <label title={t("sftp.titles.user")}>
+            {t("sftp.labels.user")}{" "}
             <input
               value={st.user}
               onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, user: e.target.value } })}
-              placeholder="root"
+              placeholder={t("sftp.placeholders.user")}
             />
           </label>
         </div>
 
         <div className="toolbar-row">
-          <label title="Password auth (optional)">
-            Password{" "}
+          <label title={t("sftp.titles.password")}>
+            {t("sftp.labels.password")}{" "}
             <input
               value={st.password}
               onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, password: e.target.value } })}
               type="password"
-              placeholder="(optional)"
+              placeholder={t("sftp.placeholders.optional")}
             />
           </label>
-          <label title="Private key path (optional)">
-            Key{" "}
+          <label title={t("sftp.titles.key")}>
+            {t("sftp.labels.key")}{" "}
             <input
               value={st.keyPath}
               onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, keyPath: e.target.value } })}
-              placeholder="~/.ssh/id_ed25519"
+              placeholder={t("sftp.placeholders.keyPath")}
             />
           </label>
-          <label title="Use SSH agent">
-            Agent{" "}
+          <label title={t("sftp.titles.agent")}>
+            {t("sftp.labels.agent")}{" "}
             <input
               checked={st.useAgent}
               onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, useAgent: e.target.checked } })}
@@ -391,8 +394,8 @@ export default function SftpBrowserPane(props: {
         </div>
 
         <div className="toolbar-row">
-          <label title="Host key checking policy">
-            known_hosts{" "}
+          <label title={t("sftp.titles.knownHostsPolicy")}>
+            {t("sftp.labels.knownHosts")}{" "}
             <select
               value={st.knownHostsPolicy}
               onChange={(e) =>
@@ -402,80 +405,80 @@ export default function SftpBrowserPane(props: {
                 })
               }
             >
-              <option value="strict">strict</option>
-              <option value="accept-new">accept-new</option>
-              <option value="insecure">insecure</option>
+              <option value="strict">{t("sftp.knownHosts.strict")}</option>
+              <option value="accept-new">{t("sftp.knownHosts.acceptNew")}</option>
+              <option value="insecure">{t("sftp.knownHosts.insecure")}</option>
             </select>
           </label>
-          <label title="known_hosts path (optional)">
-            known_hosts path{" "}
+          <label title={t("sftp.titles.knownHostsPath")}>
+            {t("sftp.labels.knownHostsPath")}{" "}
             <input
               value={st.knownHostsPath}
               onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, knownHostsPath: e.target.value } })}
-              placeholder="~/.ssh/known_hosts"
+              placeholder={t("sftp.placeholders.knownHostsPath")}
             />
           </label>
         </div>
 
         <div className="toolbar-row">
-          <label title="Base path (optional)">
-            Base{" "}
+          <label title={t("sftp.titles.basePath")}>
+            {t("sftp.labels.base")}{" "}
             <input
               value={st.basePath}
               onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, basePath: e.target.value } })}
-              placeholder="(optional)"
+              placeholder={t("sftp.placeholders.basePath")}
             />
           </label>
-          <label title="Current path">
-            Path{" "}
+          <label title={t("sftp.titles.currentPath")}>
+            {t("sftp.labels.path")}{" "}
             <input
               value={st.path}
               onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, path: e.target.value } })}
-              placeholder="/"
+              placeholder={t("sftp.placeholders.path")}
             />
           </label>
           <button className="pane-btn" onClick={() => refresh()} disabled={loading}>
-            Refresh
+            {t("sftp.actions.refresh")}
           </button>
           <button className="pane-btn" onClick={() => onGoUp()} disabled={loading}>
-            Up
+            {t("sftp.actions.up")}
           </button>
           <button className="pane-btn" onClick={() => onMkdir()} disabled={loading}>
-            Mkdir
+            {t("sftp.actions.mkdir")}
           </button>
           <button className="pane-btn" onClick={() => onUploadFile()} disabled={loading}>
-            Upload
+            {t("sftp.actions.upload")}
           </button>
         </div>
 
         <div className="toolbar-row">
-          <label title="Optional path to filedock binary (for packaged apps)">
-            filedock{" "}
+          <label title={t("sftp.titles.filedock")}>
+            {t("sftp.labels.filedock")}{" "}
             <input
               value={st.filedockPath}
               onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, filedockPath: e.target.value } })}
-              placeholder="filedock"
+              placeholder={t("sftp.placeholders.filedock")}
             />
           </label>
-          <label title="Optional plugin dirs (colon-separated)">
-            plugin dirs{" "}
+          <label title={t("sftp.titles.pluginDirs")}>
+            {t("sftp.labels.pluginDirs")}{" "}
             <input
               value={st.pluginDirs}
               onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, pluginDirs: e.target.value } })}
-              placeholder="./plugins/bin"
+              placeholder={t("sftp.placeholders.pluginDirs")}
             />
           </label>
         </div>
       </div>
 
-      {err ? <div className="pane-error">Error: {err}</div> : null}
+      {err ? <div className="pane-error">{t("sftp.error.prefix", { message: err })}</div> : null}
 
       <div className="pane-table">
         <div className="pane-row header">
-          <div>Name</div>
-          <div>Type</div>
-          <div>Size</div>
-          <div>Actions</div>
+          <div>{t("sftp.table.name")}</div>
+          <div>{t("sftp.table.type")}</div>
+          <div>{t("sftp.table.size")}</div>
+          <div>{t("sftp.table.actions")}</div>
         </div>
         {entries.map((e) => (
           <div key={e.name} className="pane-row">
@@ -487,7 +490,7 @@ export default function SftpBrowserPane(props: {
               ) : (
                 <span
                   draggable={e.kind === "file"}
-                  title={e.kind === "file" ? "Drag to Transfer Queue to download" : undefined}
+                  title={e.kind === "file" ? t("sftp.drag.downloadHint") : undefined}
                   onDragStart={(ev) => {
                     if (e.kind !== "file") return;
                     const remote = st.path && st.path !== "/" ? joinPosix(st.path, e.name) : `/${e.name}`;
@@ -505,23 +508,23 @@ export default function SftpBrowserPane(props: {
                 </span>
               )}
             </div>
-            <div>{e.kind}</div>
+            <div>{t(`sftp.kind.${e.kind}`)}</div>
             <div className="mono">{typeof e.size === "number" ? e.size : ""}</div>
             <div>
               <div className="pane-actions">
                 {e.kind === "file" ? (
                   <button className="pane-btn" onClick={() => onDownloadFile(e.name)} disabled={loading}>
-                    Download
+                    {t("sftp.actions.download")}
                   </button>
                 ) : null}
                 <button className="pane-btn" onClick={() => onRenameEntry(e)} disabled={loading}>
-                  Rename
+                  {t("sftp.actions.rename")}
                 </button>
                 <button className="pane-btn" onClick={() => onMoveEntry(e)} disabled={loading}>
-                  Move
+                  {t("sftp.actions.move")}
                 </button>
                 <button className="pane-btn danger" onClick={() => onDeleteEntry(e)} disabled={loading}>
-                  Delete
+                  {t("sftp.actions.delete")}
                 </button>
               </div>
             </div>

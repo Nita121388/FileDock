@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { PaneTab } from "../../../model/layout";
 import { listLocalDir, type LocalDirEntry } from "../../../api/tauri";
 import { onPaneCommand } from "../../../commandBus";
+import { useTranslation } from "react-i18next";
 
 const FORMAT_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 
@@ -31,6 +32,7 @@ export default function LocalBrowserPane(props: {
   tab: LocalTab;
   onTabChange: (tab: LocalTab) => void;
 }) {
+  const { t } = useTranslation();
   const { paneId, tab, onTabChange } = props;
   const [entries, setEntries] = useState<LocalDirEntry[]>([]);
   const [status, setStatus] = useState<string>("");
@@ -54,7 +56,7 @@ export default function LocalBrowserPane(props: {
         return a.name.localeCompare(b.name);
       });
       setEntries(sorted);
-      setStatus(`items: ${sorted.length}`);
+      setStatus(t("local.status.items", { count: sorted.length }));
     } catch (e: any) {
       setEntries([]);
       setStatus(String(e?.message ?? e));
@@ -71,7 +73,7 @@ export default function LocalBrowserPane(props: {
     const picked = await open({
       directory: true,
       multiple: false,
-      title: "Choose local folder"
+      title: t("local.dialog.chooseTitle")
     });
     if (!picked || Array.isArray(picked)) return;
     onTabChange({ ...tab, state: { ...tab.state, basePath: picked, path: "" } });
@@ -106,19 +108,19 @@ export default function LocalBrowserPane(props: {
   return (
     <div className="db-col local-browser">
       <div className="db-head">
-        Local
+        {t("local.title")}
         <span className="db-head-right">
-          <span className="db-path" title={fullPath || "No folder selected"}>
-            {fullPath || "No folder selected"}
+          <span className="db-path" title={fullPath || t("local.pathNone")}>
+            {fullPath || t("local.pathNone")}
           </span>
-          <button className="db-mini" onClick={pickFolder} disabled={loading} title="Choose folder">
-            Choose
+          <button className="db-mini" onClick={pickFolder} disabled={loading} title={t("local.actions.chooseTitle")}>
+            {t("local.actions.choose")}
           </button>
-          <button className="db-mini" onClick={goUp} disabled={loading || !relPath} title="Up">
-            Up
+          <button className="db-mini" onClick={goUp} disabled={loading || !relPath} title={t("local.actions.upTitle")}>
+            {t("local.actions.up")}
           </button>
-          <button className="db-mini" onClick={refresh} disabled={loading || !basePath} title="Refresh">
-            Refresh
+          <button className="db-mini" onClick={refresh} disabled={loading || !basePath} title={t("local.actions.refreshTitle")}>
+            {t("local.actions.refresh")}
           </button>
         </span>
       </div>
@@ -127,9 +129,9 @@ export default function LocalBrowserPane(props: {
 
       <div className="db-list">
         {!basePath ? (
-          <div className="db-empty">Choose a folder to browse local files.</div>
+          <div className="db-empty">{t("local.empty.choose")}</div>
         ) : entries.length === 0 ? (
-          <div className="db-empty">No files in this folder.</div>
+          <div className="db-empty">{t("local.empty.noFiles")}</div>
         ) : (
           entries.map((entry) => (
             <button
@@ -144,7 +146,7 @@ export default function LocalBrowserPane(props: {
             >
               <div className="db-title">{entry.name}</div>
               <div className="db-sub">
-                {entry.kind === "dir" ? "Folder" : formatBytes(entry.size)}
+                {entry.kind === "dir" ? t("local.entry.folder") : formatBytes(entry.size)}
               </div>
             </button>
           ))

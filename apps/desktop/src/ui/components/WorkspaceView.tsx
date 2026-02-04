@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type { TabState } from "../model/state";
 import type { PaneKind, PaneTab } from "../model/layout";
@@ -88,6 +89,7 @@ export function WorkspaceView(props: {
   onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
   onTabChange: (tab: TabState) => void;
 }) {
+  const { t } = useTranslation();
   const {
     tab,
     settings,
@@ -216,20 +218,20 @@ export function WorkspaceView(props: {
     <div className="workspace-inner">
       <div className="pane">
         <div className="pane-titlebar">
-          <span className="pane-title">Source</span>
+          <span className="pane-title">{t("workspace.source.label")}</span>
           <select
             className="pane-select"
             value={sourceValue}
             onChange={(e) => onSourceChange(e.target.value)}
-            aria-label="Source"
+            aria-label={t("workspace.source.aria")}
           >
-            <option value={SOURCE_LOCAL}>Local</option>
-            <option value={SOURCE_SFTP}>SFTP</option>
-            <option value={SOURCE_QUEUE}>Transfer Queue</option>
-            <option value={SOURCE_NOTES}>Notes</option>
-            <option value={SOURCE_DEVICE_NONE}>Server Device...</option>
+            <option value={SOURCE_LOCAL}>{t("workspace.source.local")}</option>
+            <option value={SOURCE_SFTP}>{t("workspace.source.sftp")}</option>
+            <option value={SOURCE_QUEUE}>{t("workspace.source.queue")}</option>
+            <option value={SOURCE_NOTES}>{t("workspace.source.notes")}</option>
+            <option value={SOURCE_DEVICE_NONE}>{t("workspace.source.serverDevice")}</option>
             {deviceNames.length > 0 ? (
-              <optgroup label="Server Devices">
+              <optgroup label={t("workspace.source.serverDevicesGroup")}>
                 {deviceNames.map((name) => (
                   <option key={name} value={`${SOURCE_DEVICE_PREFIX}${name}`}>
                     {name}
@@ -242,9 +244,9 @@ export function WorkspaceView(props: {
             className="pane-btn"
             onClick={refreshDevices}
             disabled={deviceLoading || !serverBaseUrl.trim()}
-            title="Refresh server devices"
+            title={t("workspace.actions.refreshDevicesTitle")}
           >
-            Refresh Devices
+            {t("workspace.actions.refreshDevices")}
           </button>
           <span className="pane-spacer" />
         </div>

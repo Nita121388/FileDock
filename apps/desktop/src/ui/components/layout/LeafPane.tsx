@@ -3,14 +3,7 @@ import { activeTab, displayTabTitle } from "../../model/layout";
 import type { Settings } from "../../model/settings";
 import type { TransferJob } from "../../model/transfers";
 import { PaneView } from "../panes/PaneView";
-
-const PANE_LABELS: Record<PaneKind, string> = {
-  deviceBrowser: "Device Browser (Server)",
-  sftpBrowser: "SFTP (VPS)",
-  localBrowser: "Local",
-  transferQueue: "Transfer Queue",
-  notes: "Notes"
-};
+import { useTranslation } from "react-i18next";
 
 export default function LeafPane(props: {
   node: LeafNode;
@@ -89,6 +82,7 @@ export default function LeafPane(props: {
   onCloseTab: (tabId: string) => void;
   onUpdateActiveTab: (updater: (tab: PaneTab) => PaneTab) => void;
 }) {
+  const { t } = useTranslation();
   const {
     node,
     settings,
@@ -131,7 +125,7 @@ export default function LeafPane(props: {
       <div className="pane-titlebar">
         <span
           className="drag-handle"
-          title="Drag to dock/split"
+          title={t("pane.dragHandleTitle")}
           draggable
           onDragStart={(e) => {
             e.dataTransfer.effectAllowed = "move";
@@ -142,7 +136,7 @@ export default function LeafPane(props: {
         >
           ::
         </span>
-        <div className="pane-tabs" role="tablist" aria-label="Pane tabs">
+        <div className="pane-tabs" role="tablist" aria-label={t("pane.tabsAria")}>
           {node.tabs.map((t) => (
             <button
               key={t.id}
@@ -154,7 +148,7 @@ export default function LeafPane(props: {
               {node.tabs.length > 1 ? (
                 <span
                   className="pane-tab-close"
-                  title="Close tab"
+                  title={t("pane.tabCloseTitle")}
                   onClick={(e) => {
                     e.stopPropagation();
                     onCloseTab(t.id);
@@ -165,7 +159,7 @@ export default function LeafPane(props: {
               ) : null}
             </button>
           ))}
-          <button className="pane-tab ui-item add" onClick={() => onAddTab(tab.pane)} title="New tab">
+          <button className="pane-tab ui-item add" onClick={() => onAddTab(tab.pane)} title={t("pane.tabNewTitle")}>
             +
           </button>
         </div>
@@ -176,29 +170,29 @@ export default function LeafPane(props: {
           className="pane-select"
           value={tab.pane}
           onChange={(e) => onSetPane(e.target.value as PaneKind)}
-          aria-label="Pane type"
+          aria-label={t("pane.typeAria")}
         >
-          <option value="deviceBrowser">Device Browser (Server)</option>
-          <option value="localBrowser">Local</option>
-          <option value="sftpBrowser">SFTP (VPS)</option>
-          <option value="transferQueue">Transfer Queue</option>
-          <option value="notes">Notes</option>
+          <option value="deviceBrowser">{t("pane.types.device")}</option>
+          <option value="localBrowser">{t("pane.types.local")}</option>
+          <option value="sftpBrowser">{t("pane.types.sftp")}</option>
+          <option value="transferQueue">{t("pane.types.queue")}</option>
+          <option value="notes">{t("pane.types.notes")}</option>
         </select>
 
-        <button className="pane-btn" onClick={() => onSplit("row")} title="Split vertical">
-          Split |
+        <button className="pane-btn" onClick={() => onSplit("row")} title={t("pane.splitVertical")}>
+          {t("pane.splitVertical")}
         </button>
-        <button className="pane-btn" onClick={() => onSplit("col")} title="Split horizontal">
-          Split -
+        <button className="pane-btn" onClick={() => onSplit("col")} title={t("pane.splitHorizontal")}>
+          {t("pane.splitHorizontal")}
         </button>
 
-        <button className="pane-btn danger" onClick={onClose} title="Close pane">
-          Close
+        <button className="pane-btn danger" onClick={onClose} title={t("pane.closePaneTitle")}>
+          {t("common.actions.close")}
         </button>
       </div>
 
       {canDrop ? (
-        <div className="drop-overlay" aria-label="Drop zones">
+        <div className="drop-overlay" aria-label={t("pane.dropZonesAria")}>
           <DropZoneBox
             zone="left"
             onDrop={(sourceId) => onDrop(sourceId, node.id, "left")}

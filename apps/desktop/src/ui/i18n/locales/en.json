@@ -1,0 +1,541 @@
+{
+  "common": {
+    "actions": {
+      "refresh": "Refresh",
+      "up": "Up",
+      "close": "Close",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "rename": "Rename",
+      "move": "Move",
+      "download": "Download",
+      "upload": "Upload",
+      "choose": "Choose",
+      "register": "Register",
+      "history": "History",
+      "hide": "Hide",
+      "show": "Show",
+      "select": "Select",
+      "deselect": "Deselect",
+      "run": "Run",
+      "remove": "Remove",
+      "clear": "Clear",
+      "retry": "Retry",
+      "pause": "Pause",
+      "resume": "Resume"
+    },
+    "labels": {
+      "loading": "Loading...",
+      "ready": "Ready",
+      "error": "Error",
+      "name": "Name",
+      "type": "Type",
+      "size": "Size",
+      "actions": "Actions"
+    }
+  },
+  "app": {
+    "brand": {
+      "title": "FileDock",
+      "meta": "desktop UI shell"
+    },
+    "conn": {
+      "serverBaseUrl": {
+        "title": "Server base URL",
+        "placeholder": "http://127.0.0.1:8787"
+      },
+      "token": {
+        "title": "X-FileDock-Token (optional)",
+        "placeholder": "token (optional)"
+      },
+      "deviceId": {
+        "title": "X-FileDock-Device-Id (optional)",
+        "placeholder": "device id (optional)"
+      },
+      "deviceToken": {
+        "title": "X-FileDock-Device-Token (optional)",
+        "placeholder": "device token (optional)"
+      }
+    },
+    "workspaces": {
+      "label": "Workspaces",
+      "hint": "Workspace = a tab + its view state. Use multiple tabs to switch tasks.",
+      "closeTab": "Close tab"
+    },
+    "buttons": {
+      "prefs": "Prefs",
+      "prefsTitle": "Preferences (Ctrl/⌘ + ,)",
+      "toggleThemeTitle": "Toggle theme",
+      "themeDark": "Dark",
+      "themeLight": "Light",
+      "newTab": "+ Tab",
+      "newTabTitle": "New tab"
+    },
+    "prefs": {
+      "title": "Preferences",
+      "close": "Close",
+      "themeMode": "Theme mode",
+      "radius": "Radius",
+      "fontSize": "Font size",
+      "language": "Language",
+      "themeOption": {
+        "dark": "dark",
+        "light": "light",
+        "auto": "auto"
+      },
+      "languageOption": {
+        "auto": "Auto (system)",
+        "en": "English",
+        "zhCN": "中文"
+      },
+      "export": "Export JSON",
+      "exportTitle": "Copy preferences JSON",
+      "exportPrompt": "Copy settings JSON:",
+      "import": "Import JSON",
+      "importTitle": "Paste preferences JSON (replaces current settings)",
+      "importPrompt": "Paste settings JSON:",
+      "invalidJson": "Invalid JSON"
+    },
+    "statusbar": {
+      "source": "Source",
+      "sourceHint": "switch Local / Server / SFTP / Queue / Notes",
+      "newTab": "+ Tab",
+      "newTabHint": "new workspace",
+      "persist": "Persist",
+      "persistHint": "state saved locally per tab"
+    }
+  },
+  "commandPalette": {
+    "aria": "Command palette",
+    "searchPlaceholder": "Type a command…",
+    "searchAria": "Search commands",
+    "kbd": {
+      "navigate": "navigate",
+      "run": "run",
+      "close": "close"
+    },
+    "listAria": "Commands",
+    "noMatches": "No matches."
+  },
+  "command": {
+    "prefs": {
+      "title": "Preferences",
+      "hint": "Open preferences"
+    },
+    "newTab": {
+      "title": "New workspace tab"
+    },
+    "theme": {
+      "toggleToLight": "Switch to light theme",
+      "toggleToDark": "Switch to dark theme",
+      "hint": "Current: {{mode}}"
+    },
+    "view": {
+      "device": "View: Server Device",
+      "local": "View: Local",
+      "sftp": "View: SFTP",
+      "queue": "View: Transfer Queue",
+      "notes": "View: Notes"
+    },
+    "queue": {
+      "runQueued": "Queue: Run queued transfers",
+      "retryFailed": "Queue: Retry failed transfers",
+      "runAll": "Queue: Run all pending",
+      "cancelRunning": "Queue: Cancel running transfers",
+      "clearDone": "Queue: Clear done transfers",
+      "runSelected": "Queue: Run selected transfers",
+      "cancelSelected": "Queue: Cancel selected transfers",
+      "removeSelected": "Queue: Remove selected transfers",
+      "selectFailed": "Queue: Select failed transfers",
+      "selectQueued": "Queue: Select queued transfers",
+      "clearSelection": "Queue: Clear selection"
+    },
+    "device": {
+      "refresh": "Device: Refresh snapshots",
+      "upload": "Device: Upload file",
+      "toggleHistory": "Device: Toggle history list",
+      "viewAll": "Device: View all files",
+      "viewHistory": "Device: View history snapshot",
+      "up": "Device: Up",
+      "restore": "Device: Restore snapshot",
+      "cancelRestore": "Device: Cancel restore",
+      "queueSelected": "Device: Queue selected files",
+      "selectAll": "Device: Select all",
+      "clearSelection": "Device: Clear selection"
+    },
+    "local": {
+      "choose": "Local: Choose folder",
+      "up": "Local: Up",
+      "refresh": "Local: Refresh"
+    },
+    "sftp": {
+      "refresh": "SFTP: Refresh",
+      "up": "SFTP: Up",
+      "mkdir": "SFTP: Mkdir",
+      "upload": "SFTP: Upload file"
+    },
+    "workspace": {
+      "switchTo": "Switch to {{name}} {{index}}",
+      "hint": "Workspace {{index}}",
+      "next": "Next workspace tab",
+      "prev": "Previous workspace tab",
+      "closeActive": "Close active workspace tab",
+      "closeHint": "Close {{name}}"
+    },
+    "keywords": {
+      "viewDevice": "view device server",
+      "viewLocal": "view local",
+      "viewSftp": "view sftp vps",
+      "viewQueue": "view queue transfers",
+      "viewNotes": "view notes",
+      "queueRunQueued": "queue run queued",
+      "queueRetryFailed": "queue retry failed",
+      "queueRunAll": "queue run all pending",
+      "queueCancelRunning": "queue cancel running",
+      "queueClearDone": "queue clear done",
+      "deviceRefresh": "device refresh snapshots",
+      "deviceUpload": "device upload",
+      "deviceToggleHistory": "device history toggle",
+      "deviceViewAll": "device all files",
+      "deviceViewHistory": "device history snapshot",
+      "deviceUp": "device up parent",
+      "deviceRestore": "device restore snapshot",
+      "deviceCancelRestore": "device cancel restore",
+      "deviceQueueSelected": "device queue selected",
+      "deviceSelectAll": "device select all",
+      "deviceClearSelection": "device clear selection",
+      "localChoose": "local choose folder",
+      "localUp": "local up parent",
+      "localRefresh": "local refresh",
+      "sftpRefresh": "sftp refresh",
+      "sftpUp": "sftp up parent",
+      "sftpMkdir": "sftp mkdir",
+      "sftpUpload": "sftp upload",
+      "queueRunSelected": "queue run selected",
+      "queueCancelSelected": "queue cancel selected",
+      "queueRemoveSelected": "queue remove selected",
+      "queueSelectFailed": "queue select failed",
+      "queueSelectQueued": "queue select queued",
+      "queueClearSelection": "queue clear selection",
+      "workspaceNext": "workspace next tab",
+      "workspacePrev": "workspace previous tab"
+    }
+  },
+  "workspace": {
+    "source": {
+      "label": "Source",
+      "aria": "Source",
+      "local": "Local",
+      "sftp": "SFTP",
+      "queue": "Transfer Queue",
+      "notes": "Notes",
+      "serverDevice": "Server Device...",
+      "serverDevicesGroup": "Server Devices"
+    },
+    "actions": {
+      "refreshDevices": "Refresh Devices",
+      "refreshDevicesTitle": "Refresh server devices"
+    }
+  },
+  "pane": {
+    "dragHandleTitle": "Drag to dock/split",
+    "tabsAria": "Pane tabs",
+    "tabCloseTitle": "Close tab",
+    "tabNewTitle": "New tab",
+    "typeAria": "Pane type",
+    "dropZonesAria": "Drop zones",
+    "types": {
+      "device": "Device Browser (Server)",
+      "local": "Local",
+      "sftp": "SFTP (VPS)",
+      "queue": "Transfer Queue",
+      "notes": "Notes"
+    },
+    "splitVertical": "Split |",
+    "splitHorizontal": "Split -",
+    "closePaneTitle": "Close pane"
+  },
+  "notes": {
+    "hint": "This pane is a scratchpad. (Later: device/snapshot details, filters, settings.)",
+    "placeholder": "Write notes here..."
+  },
+  "local": {
+    "title": "Local",
+    "pathNone": "No folder selected",
+    "actions": {
+      "choose": "Choose",
+      "chooseTitle": "Choose folder",
+      "up": "Up",
+      "upTitle": "Up",
+      "refresh": "Refresh",
+      "refreshTitle": "Refresh"
+    },
+    "status": {
+      "items": "items: {{count}}"
+    },
+    "empty": {
+      "choose": "Choose a folder to browse local files.",
+      "noFiles": "No files in this folder."
+    },
+    "entry": {
+      "folder": "Folder"
+    },
+    "dialog": {
+      "chooseTitle": "Choose local folder"
+    }
+  },
+  "sftp": {
+    "error": {
+      "pluginNonJson": "plugin returned non-JSON: {{output}}",
+      "plugin": "plugin error",
+      "invalidName": "Invalid name: must not contain '/'",
+      "prefix": "Error: {{message}}"
+    },
+    "prompt": {
+      "newFolder": "New folder name?",
+      "rename": "Rename to?",
+      "move": "Move to (absolute POSIX path)?",
+      "uploadRemote": "Upload to remote path (absolute POSIX path)?"
+    },
+    "confirm": {
+      "delete": "Delete {{kind}} {{path}}? (recursive delete is disabled)"
+    },
+    "labels": {
+      "host": "Host",
+      "port": "Port",
+      "user": "User",
+      "password": "Password",
+      "key": "Key",
+      "agent": "Agent",
+      "knownHosts": "known_hosts",
+      "knownHostsPath": "known_hosts path",
+      "base": "Base",
+      "path": "Path",
+      "filedock": "filedock",
+      "pluginDirs": "plugin dirs"
+    },
+    "titles": {
+      "host": "Host (IP or domain)",
+      "port": "Port",
+      "user": "Username",
+      "password": "Password auth (optional)",
+      "key": "Private key path (optional)",
+      "agent": "Use SSH agent",
+      "knownHostsPolicy": "Host key checking policy",
+      "knownHostsPath": "known_hosts path (optional)",
+      "basePath": "Base path (optional)",
+      "currentPath": "Current path",
+      "filedock": "Optional path to filedock binary (for packaged apps)",
+      "pluginDirs": "Optional plugin dirs (colon-separated)"
+    },
+    "placeholders": {
+      "host": "example.com",
+      "user": "root",
+      "optional": "(optional)",
+      "keyPath": "~/.ssh/id_ed25519",
+      "knownHostsPath": "~/.ssh/known_hosts",
+      "basePath": "(optional)",
+      "path": "/",
+      "filedock": "filedock",
+      "pluginDirs": "./plugins/bin"
+    },
+    "actions": {
+      "refresh": "Refresh",
+      "up": "Up",
+      "mkdir": "Mkdir",
+      "upload": "Upload",
+      "download": "Download",
+      "rename": "Rename",
+      "move": "Move",
+      "delete": "Delete"
+    },
+    "table": {
+      "name": "Name",
+      "type": "Type",
+      "size": "Size",
+      "actions": "Actions"
+    },
+    "drag": {
+      "downloadHint": "Drag to Transfer Queue to download"
+    },
+    "kind": {
+      "file": "file",
+      "dir": "dir",
+      "other": "other"
+    },
+    "knownHosts": {
+      "strict": "strict",
+      "acceptNew": "accept-new",
+      "insecure": "insecure"
+    }
+  },
+  "device": {
+    "prompt": {
+      "deviceName": "Device name?",
+      "os": "OS?",
+      "importPath": "Import to snapshot path (relative POSIX path)?"
+    },
+    "status": {
+      "devices": "devices: {{count}}",
+      "backups": "backups: {{count}}",
+      "tree": "tree: {{count}}",
+      "files": "files: {{count}}",
+      "registered": "registered {{name}} (id={{id}})",
+      "noSelection": "no selection",
+      "noFilesQueued": "no files queued",
+      "queuedFiles": "queued {{count}} file{{suffix}}",
+      "queuedFiles_plural": "queued {{count}} files{{suffix}}",
+      "skippedSuffix": " ({{count}} skipped)",
+      "selectDeviceFirst": "select a device first",
+      "hashing": "hashing {{name}}...",
+      "hashingPct": "hashing {{name}}... {{pct}}%",
+      "uploadingPct": "uploading {{name}}... {{pct}}%",
+      "uploaded": "uploaded {{name}} -> /{{path}}",
+      "restoring": "restoring {{snapshotId}} -> {{dest}}",
+      "restoreProgress": "restore {{pct}}%  [{{done}}/{{total}}]  {{path}}",
+      "restored": "restored {{count}} files -> {{dest}}",
+      "cancelRequested": "cancel requested ({{snapshotId}})",
+      "noRunningRestore": "no running restore found",
+      "queuedSftpImport": "queued sftp import: {{src}} -> {{dst}}",
+      "queuedCopySummary": "queued copy: {{files}} files, {{dirs}} dirs",
+      "queuedCopyDir": "queued copy dir: {{src}} -> {{dst}}",
+      "queuedCopy": "queued copy: {{src}} -> {{dst}}",
+      "queuedPath": "queued {{path}}",
+      "downloaded": "downloaded {{path}}"
+    },
+    "history": {
+      "title": "History",
+      "empty": "No history yet"
+    },
+    "files": {
+      "title": "Files"
+    },
+    "meta": {
+      "device": "Device: {{name}}",
+      "noDevice": "No device selected",
+      "allFilesWithDate": "All files · {{date}}",
+      "allFiles": "All files",
+      "historyWithDate": "History · {{date}}",
+      "history": "History"
+    },
+    "actions": {
+      "refresh": "Refresh",
+      "refreshTitle": "Refresh snapshots",
+      "register": "Register",
+      "registerTitle": "Register device",
+      "upload": "UL",
+      "uploadTitle": "Upload a local file into the latest backup",
+      "uploadTitleNoDevice": "Select a device first",
+      "toggleHistoryTitle": "Toggle history list",
+      "historyHide": "Hide",
+      "historyShow": "History",
+      "up": "Up",
+      "upTitle": "Up",
+      "restoreTitle": "Restore the selected backup into a local folder",
+      "restoreLabel": "RST",
+      "cancel": "Cancel",
+      "cancelTitle": "Cancel restore (stops scheduling new files; in-flight downloads finish)",
+      "queue": "+Q",
+      "queueTitle": "Add to transfer queue",
+      "download": "DL",
+      "downloadTitle": "Download"
+    },
+    "restore": {
+      "concurrencyTitle": "Restore concurrency (files in parallel)"
+    },
+    "dialog": {
+      "restoreTitle": "Restore backup to folder"
+    },
+    "empty": {
+      "selectDevice": "Select a server device to browse snapshots and files.",
+      "noBackups": "No backups yet. Upload a file to start.",
+      "noFiles": "No files in this folder.",
+      "emptyDir": "Empty directory"
+    },
+    "selection": {
+      "selectTitle": "Select",
+      "deselectTitle": "Deselect"
+    }
+  },
+  "queue": {
+    "empty": "No transfers yet. Queue a file from Device Browser (Server) (+Q).",
+    "title": "Queue",
+    "counts": {
+      "queued": "{{count}} queued",
+      "running": "{{count}} running",
+      "failed": "{{count}} failed",
+      "done": "{{count}} done"
+    },
+    "labels": {
+      "concurrency": "concurrency",
+      "mbps": "MB/s",
+      "copyFolder": "copy-folder"
+    },
+    "titles": {
+      "maxJobs": "Max concurrent jobs",
+      "bandwidth": "Bandwidth limit (0 = unlimited). Applied by the desktop client.",
+      "copyFolder": "Max concurrent files within a copy-folder job"
+    },
+    "actions": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "autoOn": "Auto: ON",
+      "autoOff": "Auto: OFF",
+      "runQueued": "Run queued",
+      "retryFailed": "Retry failed",
+      "runAll": "Run all",
+      "clearDone": "Clear done",
+      "run": "Run",
+      "cancel": "Cancel",
+      "remove": "Remove"
+    },
+    "actionTitles": {
+      "pause": "Pause scheduling (running jobs will finish)",
+      "resume": "Resume scheduling",
+      "autoOn": "Disable auto-run",
+      "autoOff": "Auto-run queued jobs when possible",
+      "runQueued": "Run queued",
+      "retryFailed": "Retry failed",
+      "runAll": "Run all pending",
+      "clearDone": "Clear done",
+      "run": "Run transfer",
+      "cancel": "Cancel",
+      "remove": "Remove"
+    },
+    "selection": {
+      "select": "Select",
+      "deselect": "Deselect"
+    },
+    "item": {
+      "download": "dl {{snapshotId}}:{{path}}",
+      "copy": "copy {{srcBase}} {{srcSnapshot}}:{{srcPath}} → {{dstBase}} {{dstPath}}",
+      "snapshotToSftp": "snap→sftp {{srcBase}} {{snapshotId}}:{{snapshotPath}} → {{user}}@{{host}}:{{remotePath}}",
+      "sftpToSnapshot": "sftp→snap {{user}}@{{host}}:{{remotePath}} → {{dstBase}} {{dstPath}}",
+      "sftpDownload": "sftp-dl {{user}}@{{host}}:{{remotePath}} → {{localPath}}",
+      "sftpUpload": "sftp-ul {{localPath}} → {{user}}@{{host}}:{{remotePath}}",
+      "copyFolder": "copy-dir {{srcBase}} {{srcSnapshot}}:{{srcDir}} → {{dstBase}} {{dstDir}}"
+    },
+    "status": {
+      "queued": "queued",
+      "running": "running",
+      "failed": "failed",
+      "done": "done"
+    },
+    "conflict": {
+      "title": "Conflict policy when destination already has the same path",
+      "overwrite": "overwrite",
+      "skip": "skip",
+      "rename": "rename"
+    },
+    "progressAria": "progress",
+    "hint": "Next: drag files between panes to create cross-device transfers."
+  },
+  "tab": {
+    "device": "Device",
+    "vps": "VPS",
+    "local": "Local",
+    "transfers": "Transfers",
+    "notes": "Notes",
+    "workspace": "Workspace"
+  }
+}

@@ -3,6 +3,7 @@ export interface Settings {
   token: string;
   deviceId: string;
   deviceToken: string;
+  locale: LocaleSetting;
   theme: {
     mode: "light" | "dark" | "auto";
     builtinType: string;
@@ -11,6 +12,8 @@ export interface Settings {
   };
 }
 
+export type LocaleSetting = "auto" | "en" | "zh-CN";
+
 const KEY = "filedock.desktop.settings.v1";
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -18,6 +21,7 @@ export const DEFAULT_SETTINGS: Settings = {
   token: "",
   deviceId: "",
   deviceToken: "",
+  locale: "auto",
   theme: {
     mode: "dark",
     builtinType: "filedock-flat",
@@ -38,6 +42,10 @@ export function loadSettings(): Settings {
       token: typeof parsed.token === "string" ? parsed.token : "",
       deviceId: typeof parsed.deviceId === "string" ? parsed.deviceId : "",
       deviceToken: typeof parsed.deviceToken === "string" ? parsed.deviceToken : "",
+      locale:
+        parsed.locale === "auto" || parsed.locale === "en" || parsed.locale === "zh-CN"
+          ? parsed.locale
+          : DEFAULT_SETTINGS.locale,
       theme: {
         mode: parsed.theme?.mode === "light" || parsed.theme?.mode === "dark" || parsed.theme?.mode === "auto"
           ? parsed.theme.mode

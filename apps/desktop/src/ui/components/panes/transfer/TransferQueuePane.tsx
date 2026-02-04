@@ -4,6 +4,7 @@ import type { MouseEvent } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { PluginRunConfig, SftpConn } from "../../../model/transfers";
 import { onPaneCommand } from "../../../commandBus";
+import { useTranslation } from "react-i18next";
 
 const QUEUE_KEY = "filedock.desktop.queue.v1";
 
@@ -65,6 +66,7 @@ export default function TransferQueuePane(props: {
   onRun: (id: string) => Promise<void>;
   onCancel: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   const {
     paneId,
     transfers,
@@ -308,27 +310,27 @@ export default function TransferQueuePane(props: {
       }}
     >
       {transfers.length === 0 ? (
-        <div className="db-empty">No transfers yet. Queue a file from Device Browser (Server) (+Q).</div>
+        <div className="db-empty">{t("queue.empty")}</div>
       ) : null}
 
       {transfers.length > 0 ? (
         <div className="queue-row" style={{ justifyContent: "space-between" }}>
           <div className="queue-main">
-            <div className="queue-title">Queue</div>
+            <div className="queue-title">{t("queue.title")}</div>
             <div className="queue-sub">
               <span className="pill pill-queued">
-                {counts.queued} queued
+                {t("queue.counts.queued", { count: counts.queued })}
               </span>
               <span className="pill pill-running">
-                {counts.running} running
+                {t("queue.counts.running", { count: counts.running })}
               </span>
               <span className="pill pill-failed">
-                {counts.failed} failed
+                {t("queue.counts.failed", { count: counts.failed })}
               </span>
               <span className="pill pill-done">
-                {counts.done} done
+                {t("queue.counts.done", { count: counts.done })}
               </span>
-              <span className="queue-path">concurrency</span>
+              <span className="queue-path">{t("queue.labels.concurrency")}</span>
               <input
                 className="conn-input"
                 style={{ width: 70 }}
@@ -341,9 +343,9 @@ export default function TransferQueuePane(props: {
                 onChange={(e) =>
                   setQueue((q) => ({ ...q, concurrency: Math.max(1, Math.min(8, Number(e.target.value) || 1)) }))
                 }
-                title="Max concurrent jobs"
+                title={t("queue.titles.maxJobs")}
               />
-              <span className="queue-path">MB/s</span>
+              <span className="queue-path">{t("queue.labels.mbps")}</span>
               <input
                 className="conn-input"
                 style={{ width: 80 }}
@@ -353,9 +355,9 @@ export default function TransferQueuePane(props: {
                 value={queue.maxMBps}
                 disabled={busy}
                 onChange={(e) => setQueue((q) => ({ ...q, maxMBps: Math.max(0, Number(e.target.value) || 0) }))}
-                title="Bandwidth limit (0 = unlimited). Applied by the desktop client."
+                title={t("queue.titles.bandwidth")}
               />
-              <span className="queue-path">copy-folder</span>
+              <span className="queue-path">{t("queue.labels.copyFolder")}</span>
               <input
                 className="conn-input"
                 style={{ width: 70 }}
@@ -371,7 +373,7 @@ export default function TransferQueuePane(props: {
                     copyFolderFileConcurrency: Math.max(1, Math.min(8, Number(e.target.value) || 1))
                   }))
                 }
-                title="Max concurrent files within a copy-folder job"
+                title={t("queue.titles.copyFolder")}
               />
             </div>
           </div>
@@ -380,29 +382,29 @@ export default function TransferQueuePane(props: {
               className="db-mini"
               disabled={busy || counts.running > 0}
               onClick={() => setQueue((q) => ({ ...q, paused: !q.paused }))}
-              title={queue.paused ? "Resume scheduling" : "Pause scheduling (running jobs will finish)"}
+              title={queue.paused ? t("queue.actionTitles.resume") : t("queue.actionTitles.pause")}
             >
-              {queue.paused ? "Resume" : "Pause"}
+              {queue.paused ? t("queue.actions.resume") : t("queue.actions.pause")}
             </button>
             <button
               className="db-mini"
               disabled={busy}
               onClick={() => setQueue((q) => ({ ...q, autoRun: !q.autoRun }))}
-              title={queue.autoRun ? "Disable auto-run" : "Auto-run queued jobs when possible"}
+              title={queue.autoRun ? t("queue.actionTitles.autoOn") : t("queue.actionTitles.autoOff")}
             >
-              {queue.autoRun ? "Auto: ON" : "Auto: OFF"}
+              {queue.autoRun ? t("queue.actions.autoOn") : t("queue.actions.autoOff")}
             </button>
-            <button className="db-mini" disabled={busy || queue.paused} onClick={() => runAll("queued")} title="Run queued">
-              Run queued
+            <button className="db-mini" disabled={busy || queue.paused} onClick={() => runAll("queued")} title={t("queue.actionTitles.runQueued")}>
+              {t("queue.actions.runQueued")}
             </button>
-            <button className="db-mini" disabled={busy || queue.paused} onClick={() => runAll("failed")} title="Retry failed">
-              Retry failed
+            <button className="db-mini" disabled={busy || queue.paused} onClick={() => runAll("failed")} title={t("queue.actionTitles.retryFailed")}>
+              {t("queue.actions.retryFailed")}
             </button>
-            <button className="db-mini" disabled={busy || queue.paused} onClick={() => runAll("all")} title="Run all pending">
-              Run all
+            <button className="db-mini" disabled={busy || queue.paused} onClick={() => runAll("all")} title={t("queue.actionTitles.runAll")}>
+              {t("queue.actions.runAll")}
             </button>
-            <button className="db-mini" disabled={busy} onClick={clearDone} title="Clear done">
-              Clear done
+            <button className="db-mini" disabled={busy} onClick={clearDone} title={t("queue.actionTitles.clearDone")}>
+              {t("queue.actions.clearDone")}
             </button>
           </div>
         </div>
@@ -419,7 +421,7 @@ export default function TransferQueuePane(props: {
           <button
             className="db-mini"
             onClick={(ev) => toggleSelect(idx, j.id, ev)}
-            title={selectedSet.has(j.id) ? "Deselect" : "Select"}
+            title={selectedSet.has(j.id) ? t("queue.selection.deselect") : t("queue.selection.select")}
           >
             {selectedSet.has(j.id) ? "[x]" : "[ ]"}
           </button>
@@ -428,37 +430,71 @@ export default function TransferQueuePane(props: {
               <span className="accent">{j.id}</span>{" "}
               {j.kind === "download" ? (
                 <span className="queue-path">
-                  dl {j.snapshotId}:{j.path}
+                  {t("queue.item.download", { snapshotId: j.snapshotId, path: j.path })}
                 </span>
               ) : j.kind === "copy_file" ? (
                 <span className="queue-path">
-                  copy {j.src.serverBaseUrl} {j.srcSnapshotId}:{j.srcPath} → {j.dst.serverBaseUrl} {j.dstPath}
+                  {t("queue.item.copy", {
+                    srcBase: j.src.serverBaseUrl,
+                    srcSnapshot: j.srcSnapshotId,
+                    srcPath: j.srcPath,
+                    dstBase: j.dst.serverBaseUrl,
+                    dstPath: j.dstPath
+                  })}
                 </span>
               ) : j.kind === "snapshot_to_sftp" ? (
                 <span className="queue-path">
-                  snap→sftp {j.src.serverBaseUrl} {j.snapshotId}:{j.snapshotPath} → {j.conn.user}@{j.conn.host}:{j.remotePath}
+                  {t("queue.item.snapshotToSftp", {
+                    srcBase: j.src.serverBaseUrl,
+                    snapshotId: j.snapshotId,
+                    snapshotPath: j.snapshotPath,
+                    user: j.conn.user,
+                    host: j.conn.host,
+                    remotePath: j.remotePath
+                  })}
                 </span>
               ) : j.kind === "sftp_to_snapshot" ? (
                 <span className="queue-path">
-                  sftp→snap {j.conn.user}@{j.conn.host}:{j.remotePath} → {j.dst.serverBaseUrl} {j.dstPath}
+                  {t("queue.item.sftpToSnapshot", {
+                    user: j.conn.user,
+                    host: j.conn.host,
+                    remotePath: j.remotePath,
+                    dstBase: j.dst.serverBaseUrl,
+                    dstPath: j.dstPath
+                  })}
                 </span>
               ) : j.kind === "sftp_download" ? (
                 <span className="queue-path">
-                  sftp-dl {j.conn.user}@{j.conn.host}:{j.remotePath} → {j.localPath}
+                  {t("queue.item.sftpDownload", {
+                    user: j.conn.user,
+                    host: j.conn.host,
+                    remotePath: j.remotePath,
+                    localPath: j.localPath
+                  })}
                 </span>
               ) : j.kind === "sftp_upload" ? (
                 <span className="queue-path">
-                  sftp-ul {j.localPath} → {j.conn.user}@{j.conn.host}:{j.remotePath}
+                  {t("queue.item.sftpUpload", {
+                    localPath: j.localPath,
+                    user: j.conn.user,
+                    host: j.conn.host,
+                    remotePath: j.remotePath
+                  })}
                 </span>
               ) : (
                 <span className="queue-path">
-                  copy-dir {j.src.serverBaseUrl} {j.srcSnapshotId}:{j.srcDirPath || "/"} → {j.dst.serverBaseUrl}{" "}
-                  {j.dstDirPath || "/"}
+                  {t("queue.item.copyFolder", {
+                    srcBase: j.src.serverBaseUrl,
+                    srcSnapshot: j.srcSnapshotId,
+                    srcDir: j.srcDirPath || "/",
+                    dstBase: j.dst.serverBaseUrl,
+                    dstDir: j.dstDirPath || "/"
+                  })}
                 </span>
               )}
             </div>
             <div className="queue-sub">
-              <span className={`pill pill-${j.status}`}>{j.status}</span>
+              <span className={`pill pill-${j.status}`}>{t(`queue.status.${j.status}`)}</span>
               {j.progress?.phase ? <span className="queue-path">{j.progress.phase}</span> : null}
               {typeof j.progress?.pct === "number" ? (
                 <span className="pill pill-running">{j.progress.pct}%</span>
@@ -478,18 +514,18 @@ export default function TransferQueuePane(props: {
                         conflictPolicy: e.target.value as any
                       })
                     }
-                    title="Conflict policy when destination already has the same path"
+                    title={t("queue.conflict.title")}
                   >
-                    <option value="overwrite">overwrite</option>
-                    <option value="skip">skip</option>
-                    <option value="rename">rename</option>
+                    <option value="overwrite">{t("queue.conflict.overwrite")}</option>
+                    <option value="skip">{t("queue.conflict.skip")}</option>
+                    <option value="rename">{t("queue.conflict.rename")}</option>
                   </select>
                 </>
               ) : null}
               {j.error ? <span className="queue-err">{j.error}</span> : null}
             </div>
             {typeof j.progress?.pct === "number" ? (
-              <div className="queue-bar" aria-label="progress">
+              <div className="queue-bar" aria-label={t("queue.progressAria")}>
                 <div className="queue-bar-fill" style={{ width: `${Math.max(0, Math.min(100, j.progress.pct))}%` }} />
               </div>
             ) : null}
@@ -500,24 +536,24 @@ export default function TransferQueuePane(props: {
               className="db-mini"
               disabled={busy || queue.paused || j.status === "done" || j.status === "running"}
               onClick={() => onRun(j.id)}
-              title="Run transfer"
+              title={t("queue.actionTitles.run")}
             >
-              Run
+              {t("queue.actions.run")}
             </button>
             {j.status === "running" ? (
-              <button className="db-mini danger" onClick={() => onCancel(j.id)} title="Cancel">
-                Cancel
+              <button className="db-mini danger" onClick={() => onCancel(j.id)} title={t("queue.actionTitles.cancel")}>
+                {t("queue.actions.cancel")}
               </button>
             ) : null}
-            <button className="db-mini" onClick={() => onRemove(j.id)} title="Remove">
-              Remove
+            <button className="db-mini" onClick={() => onRemove(j.id)} title={t("queue.actionTitles.remove")}>
+              {t("queue.actions.remove")}
             </button>
           </div>
         </div>
       ))}
 
       <div className="queue-hint">
-        Next: drag files between panes to create cross-device transfers.
+        {t("queue.hint")}
       </div>
     </div>
   );

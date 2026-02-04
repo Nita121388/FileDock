@@ -1,0 +1,541 @@
+{
+  "common": {
+    "actions": {
+      "refresh": "刷新",
+      "up": "上级",
+      "close": "关闭",
+      "cancel": "取消",
+      "delete": "删除",
+      "rename": "重命名",
+      "move": "移动",
+      "download": "下载",
+      "upload": "上传",
+      "choose": "选择",
+      "register": "注册",
+      "history": "历史",
+      "hide": "隐藏",
+      "show": "显示",
+      "select": "选择",
+      "deselect": "取消选择",
+      "run": "运行",
+      "remove": "移除",
+      "clear": "清除",
+      "retry": "重试",
+      "pause": "暂停",
+      "resume": "继续"
+    },
+    "labels": {
+      "loading": "加载中...",
+      "ready": "就绪",
+      "error": "错误",
+      "name": "名称",
+      "type": "类型",
+      "size": "大小",
+      "actions": "操作"
+    }
+  },
+  "app": {
+    "brand": {
+      "title": "FileDock",
+      "meta": "桌面 UI 外壳"
+    },
+    "conn": {
+      "serverBaseUrl": {
+        "title": "服务器基础地址",
+        "placeholder": "http://127.0.0.1:8787"
+      },
+      "token": {
+        "title": "X-FileDock-Token（可选）",
+        "placeholder": "token（可选）"
+      },
+      "deviceId": {
+        "title": "X-FileDock-Device-Id（可选）",
+        "placeholder": "设备 id（可选）"
+      },
+      "deviceToken": {
+        "title": "X-FileDock-Device-Token（可选）",
+        "placeholder": "设备 token（可选）"
+      }
+    },
+    "workspaces": {
+      "label": "工作区",
+      "hint": "工作区 = 标签 + 视图状态。用多个标签切换任务。",
+      "closeTab": "关闭标签"
+    },
+    "buttons": {
+      "prefs": "偏好",
+      "prefsTitle": "偏好设置 (Ctrl/⌘ + ,)",
+      "toggleThemeTitle": "切换主题",
+      "themeDark": "深色",
+      "themeLight": "浅色",
+      "newTab": "+ 标签",
+      "newTabTitle": "新标签"
+    },
+    "prefs": {
+      "title": "偏好设置",
+      "close": "关闭",
+      "themeMode": "主题模式",
+      "radius": "圆角",
+      "fontSize": "字号",
+      "language": "语言",
+      "themeOption": {
+        "dark": "深色",
+        "light": "浅色",
+        "auto": "自动"
+      },
+      "languageOption": {
+        "auto": "自动（跟随系统）",
+        "en": "English",
+        "zhCN": "中文"
+      },
+      "export": "导出 JSON",
+      "exportTitle": "复制偏好设置 JSON",
+      "exportPrompt": "复制设置 JSON：",
+      "import": "导入 JSON",
+      "importTitle": "粘贴偏好设置 JSON（会覆盖当前设置）",
+      "importPrompt": "粘贴设置 JSON：",
+      "invalidJson": "无效的 JSON"
+    },
+    "statusbar": {
+      "source": "来源",
+      "sourceHint": "切换 本地 / 服务器 / SFTP / 队列 / 笔记",
+      "newTab": "+ 标签",
+      "newTabHint": "新建工作区",
+      "persist": "持久化",
+      "persistHint": "每个标签的状态保存在本地"
+    }
+  },
+  "commandPalette": {
+    "aria": "命令面板",
+    "searchPlaceholder": "输入命令…",
+    "searchAria": "搜索命令",
+    "kbd": {
+      "navigate": "导航",
+      "run": "运行",
+      "close": "关闭"
+    },
+    "listAria": "命令",
+    "noMatches": "没有匹配项。"
+  },
+  "command": {
+    "prefs": {
+      "title": "偏好设置",
+      "hint": "打开偏好设置"
+    },
+    "newTab": {
+      "title": "新建工作区标签"
+    },
+    "theme": {
+      "toggleToLight": "切换到浅色主题",
+      "toggleToDark": "切换到深色主题",
+      "hint": "当前：{{mode}}"
+    },
+    "view": {
+      "device": "视图：服务器设备",
+      "local": "视图：本地",
+      "sftp": "视图：SFTP",
+      "queue": "视图：传输队列",
+      "notes": "视图：笔记"
+    },
+    "queue": {
+      "runQueued": "队列：运行排队任务",
+      "retryFailed": "队列：重试失败任务",
+      "runAll": "队列：运行所有待处理任务",
+      "cancelRunning": "队列：取消运行中的任务",
+      "clearDone": "队列：清除已完成任务",
+      "runSelected": "队列：运行选中任务",
+      "cancelSelected": "队列：取消选中任务",
+      "removeSelected": "队列：移除选中任务",
+      "selectFailed": "队列：选择失败任务",
+      "selectQueued": "队列：选择排队任务",
+      "clearSelection": "队列：清除选择"
+    },
+    "device": {
+      "refresh": "设备：刷新快照",
+      "upload": "设备：上传文件",
+      "toggleHistory": "设备：切换历史列表",
+      "viewAll": "设备：查看全部文件",
+      "viewHistory": "设备：查看历史快照",
+      "up": "设备：上一级",
+      "restore": "设备：恢复快照",
+      "cancelRestore": "设备：取消恢复",
+      "queueSelected": "设备：加入选中文件到队列",
+      "selectAll": "设备：全选",
+      "clearSelection": "设备：清除选择"
+    },
+    "local": {
+      "choose": "本地：选择文件夹",
+      "up": "本地：上一级",
+      "refresh": "本地：刷新"
+    },
+    "sftp": {
+      "refresh": "SFTP：刷新",
+      "up": "SFTP：上一级",
+      "mkdir": "SFTP：新建文件夹",
+      "upload": "SFTP：上传文件"
+    },
+    "workspace": {
+      "switchTo": "切换到 {{name}} {{index}}",
+      "hint": "工作区 {{index}}",
+      "next": "下一个工作区标签",
+      "prev": "上一个工作区标签",
+      "closeActive": "关闭当前工作区标签",
+      "closeHint": "关闭 {{name}}"
+    },
+    "keywords": {
+      "viewDevice": "view device server 设备 服务器 查看",
+      "viewLocal": "view local 本地",
+      "viewSftp": "view sftp vps SFTP",
+      "viewQueue": "view queue transfers 传输 队列",
+      "viewNotes": "view notes 笔记",
+      "queueRunQueued": "queue run queued 排队 运行",
+      "queueRetryFailed": "queue retry failed 失败 重试",
+      "queueRunAll": "queue run all pending 全部 运行",
+      "queueCancelRunning": "queue cancel running 取消 运行中",
+      "queueClearDone": "queue clear done 清除 完成",
+      "deviceRefresh": "device refresh snapshots 刷新 快照",
+      "deviceUpload": "device upload 上传",
+      "deviceToggleHistory": "device history toggle 历史 切换",
+      "deviceViewAll": "device all files 全部 文件",
+      "deviceViewHistory": "device history snapshot 历史 快照",
+      "deviceUp": "device up parent 上级",
+      "deviceRestore": "device restore snapshot 恢复",
+      "deviceCancelRestore": "device cancel restore 取消 恢复",
+      "deviceQueueSelected": "device queue selected 选中 入队",
+      "deviceSelectAll": "device select all 全选",
+      "deviceClearSelection": "device clear selection 清除 选择",
+      "localChoose": "local choose folder 本地 选择 文件夹",
+      "localUp": "local up parent 上级",
+      "localRefresh": "local refresh 刷新",
+      "sftpRefresh": "sftp refresh 刷新",
+      "sftpUp": "sftp up parent 上级",
+      "sftpMkdir": "sftp mkdir 新建 文件夹",
+      "sftpUpload": "sftp upload 上传",
+      "queueRunSelected": "queue run selected 选中 运行",
+      "queueCancelSelected": "queue cancel selected 选中 取消",
+      "queueRemoveSelected": "queue remove selected 选中 移除",
+      "queueSelectFailed": "queue select failed 选择 失败",
+      "queueSelectQueued": "queue select queued 选择 排队",
+      "queueClearSelection": "queue clear selection 清除 选择",
+      "workspaceNext": "workspace next tab 下一个",
+      "workspacePrev": "workspace previous tab 上一个"
+    }
+  },
+  "workspace": {
+    "source": {
+      "label": "来源",
+      "aria": "来源",
+      "local": "本地",
+      "sftp": "SFTP",
+      "queue": "传输队列",
+      "notes": "笔记",
+      "serverDevice": "服务器设备...",
+      "serverDevicesGroup": "服务器设备"
+    },
+    "actions": {
+      "refreshDevices": "刷新设备",
+      "refreshDevicesTitle": "刷新服务器设备"
+    }
+  },
+  "pane": {
+    "dragHandleTitle": "拖拽以停靠/分割",
+    "tabsAria": "面板标签",
+    "tabCloseTitle": "关闭标签",
+    "tabNewTitle": "新建标签",
+    "typeAria": "面板类型",
+    "dropZonesAria": "拖拽区域",
+    "types": {
+      "device": "设备浏览器（服务器）",
+      "local": "本地",
+      "sftp": "SFTP（VPS）",
+      "queue": "传输队列",
+      "notes": "笔记"
+    },
+    "splitVertical": "垂直分割",
+    "splitHorizontal": "水平分割",
+    "closePaneTitle": "关闭面板"
+  },
+  "notes": {
+    "hint": "此面板用于临时记录。（后续：设备/快照详情、过滤器、设置）",
+    "placeholder": "在此记录..."
+  },
+  "local": {
+    "title": "本地",
+    "pathNone": "未选择文件夹",
+    "actions": {
+      "choose": "选择",
+      "chooseTitle": "选择文件夹",
+      "up": "上级",
+      "upTitle": "上级",
+      "refresh": "刷新",
+      "refreshTitle": "刷新"
+    },
+    "status": {
+      "items": "项目数：{{count}}"
+    },
+    "empty": {
+      "choose": "请选择一个文件夹以浏览本地文件。",
+      "noFiles": "此文件夹没有文件。"
+    },
+    "entry": {
+      "folder": "文件夹"
+    },
+    "dialog": {
+      "chooseTitle": "选择本地文件夹"
+    }
+  },
+  "sftp": {
+    "error": {
+      "pluginNonJson": "插件返回了非 JSON：{{output}}",
+      "plugin": "插件错误",
+      "invalidName": "无效名称：不能包含 '/'",
+      "prefix": "错误：{{message}}"
+    },
+    "prompt": {
+      "newFolder": "新建文件夹名称？",
+      "rename": "重命名为？",
+      "move": "移动到（绝对 POSIX 路径）？",
+      "uploadRemote": "上传到远程路径（绝对 POSIX 路径）？"
+    },
+    "confirm": {
+      "delete": "删除 {{kind}} {{path}}？（已禁用递归删除）"
+    },
+    "labels": {
+      "host": "主机",
+      "port": "端口",
+      "user": "用户",
+      "password": "密码",
+      "key": "密钥",
+      "agent": "Agent",
+      "knownHosts": "known_hosts",
+      "knownHostsPath": "known_hosts 路径",
+      "base": "Base",
+      "path": "路径",
+      "filedock": "filedock",
+      "pluginDirs": "插件目录"
+    },
+    "titles": {
+      "host": "主机（IP 或域名）",
+      "port": "端口",
+      "user": "用户名",
+      "password": "密码认证（可选）",
+      "key": "私钥路径（可选）",
+      "agent": "使用 SSH Agent",
+      "knownHostsPolicy": "主机密钥校验策略",
+      "knownHostsPath": "known_hosts 路径（可选）",
+      "basePath": "基础路径（可选）",
+      "currentPath": "当前路径",
+      "filedock": "filedock 二进制路径（可选，用于打包应用）",
+      "pluginDirs": "插件目录（冒号分隔，可选）"
+    },
+    "placeholders": {
+      "host": "example.com",
+      "user": "root",
+      "optional": "（可选）",
+      "keyPath": "~/.ssh/id_ed25519",
+      "knownHostsPath": "~/.ssh/known_hosts",
+      "basePath": "（可选）",
+      "path": "/",
+      "filedock": "filedock",
+      "pluginDirs": "./plugins/bin"
+    },
+    "actions": {
+      "refresh": "刷新",
+      "up": "上级",
+      "mkdir": "新建文件夹",
+      "upload": "上传",
+      "download": "下载",
+      "rename": "重命名",
+      "move": "移动",
+      "delete": "删除"
+    },
+    "table": {
+      "name": "名称",
+      "type": "类型",
+      "size": "大小",
+      "actions": "操作"
+    },
+    "drag": {
+      "downloadHint": "拖到传输队列以下载"
+    },
+    "kind": {
+      "file": "文件",
+      "dir": "文件夹",
+      "other": "其他"
+    },
+    "knownHosts": {
+      "strict": "严格 (strict)",
+      "acceptNew": "接受新 (accept-new)",
+      "insecure": "不安全 (insecure)"
+    }
+  },
+  "device": {
+    "prompt": {
+      "deviceName": "设备名称？",
+      "os": "系统？",
+      "importPath": "导入到快照路径（相对 POSIX 路径）？"
+    },
+    "status": {
+      "devices": "设备：{{count}}",
+      "backups": "备份：{{count}}",
+      "tree": "目录：{{count}}",
+      "files": "文件：{{count}}",
+      "registered": "已注册 {{name}}（id={{id}}）",
+      "noSelection": "未选择",
+      "noFilesQueued": "没有文件加入队列",
+      "queuedFiles": "已加入 {{count}} 个文件{{suffix}}",
+      "queuedFiles_plural": "已加入 {{count}} 个文件{{suffix}}",
+      "skippedSuffix": "（跳过 {{count}} 个）",
+      "selectDeviceFirst": "请先选择设备",
+      "hashing": "正在哈希 {{name}}...",
+      "hashingPct": "正在哈希 {{name}}... {{pct}}%",
+      "uploadingPct": "正在上传 {{name}}... {{pct}}%",
+      "uploaded": "已上传 {{name}} -> /{{path}}",
+      "restoring": "正在恢复 {{snapshotId}} -> {{dest}}",
+      "restoreProgress": "恢复 {{pct}}%  [{{done}}/{{total}}]  {{path}}",
+      "restored": "已恢复 {{count}} 个文件 -> {{dest}}",
+      "cancelRequested": "已请求取消（{{snapshotId}}）",
+      "noRunningRestore": "没有正在恢复的任务",
+      "queuedSftpImport": "已加入 SFTP 导入：{{src}} -> {{dst}}",
+      "queuedCopySummary": "已加入复制：{{files}} 个文件，{{dirs}} 个文件夹",
+      "queuedCopyDir": "已加入复制目录：{{src}} -> {{dst}}",
+      "queuedCopy": "已加入复制：{{src}} -> {{dst}}",
+      "queuedPath": "已加入 {{path}}",
+      "downloaded": "已下载 {{path}}"
+    },
+    "history": {
+      "title": "历史",
+      "empty": "暂无历史"
+    },
+    "files": {
+      "title": "文件"
+    },
+    "meta": {
+      "device": "设备：{{name}}",
+      "noDevice": "未选择设备",
+      "allFilesWithDate": "全部文件 · {{date}}",
+      "allFiles": "全部文件",
+      "historyWithDate": "历史 · {{date}}",
+      "history": "历史"
+    },
+    "actions": {
+      "refresh": "刷新",
+      "refreshTitle": "刷新快照",
+      "register": "注册",
+      "registerTitle": "注册设备",
+      "upload": "上传",
+      "uploadTitle": "将本地文件上传到最新备份",
+      "uploadTitleNoDevice": "请先选择设备",
+      "toggleHistoryTitle": "切换历史列表",
+      "historyHide": "隐藏",
+      "historyShow": "历史",
+      "up": "上级",
+      "upTitle": "上级",
+      "restoreTitle": "将所选备份恢复到本地文件夹",
+      "restoreLabel": "恢复",
+      "cancel": "取消",
+      "cancelTitle": "取消恢复（停止新文件排队，已在下载的会完成）",
+      "queue": "入队",
+      "queueTitle": "加入传输队列",
+      "download": "下载",
+      "downloadTitle": "下载"
+    },
+    "restore": {
+      "concurrencyTitle": "恢复并发数（同时处理文件数）"
+    },
+    "dialog": {
+      "restoreTitle": "恢复备份到文件夹"
+    },
+    "empty": {
+      "selectDevice": "请选择服务器设备以浏览快照和文件。",
+      "noBackups": "暂无备份。上传文件以开始。",
+      "noFiles": "此文件夹没有文件。",
+      "emptyDir": "空目录"
+    },
+    "selection": {
+      "selectTitle": "选择",
+      "deselectTitle": "取消选择"
+    }
+  },
+  "queue": {
+    "empty": "暂无传输任务。从设备浏览器（服务器）中加入文件（+Q）。",
+    "title": "队列",
+    "counts": {
+      "queued": "{{count}} 排队",
+      "running": "{{count}} 运行中",
+      "failed": "{{count}} 失败",
+      "done": "{{count}} 完成"
+    },
+    "labels": {
+      "concurrency": "并发",
+      "mbps": "MB/s",
+      "copyFolder": "复制文件夹"
+    },
+    "titles": {
+      "maxJobs": "最大并发任务数",
+      "bandwidth": "带宽限制（0=不限），由桌面客户端限制",
+      "copyFolder": "复制文件夹任务内最大并发文件数"
+    },
+    "actions": {
+      "pause": "暂停",
+      "resume": "继续",
+      "autoOn": "自动：开",
+      "autoOff": "自动：关",
+      "runQueued": "运行排队",
+      "retryFailed": "重试失败",
+      "runAll": "运行全部",
+      "clearDone": "清除完成",
+      "run": "运行",
+      "cancel": "取消",
+      "remove": "移除"
+    },
+    "actionTitles": {
+      "pause": "暂停调度（运行中的任务会完成）",
+      "resume": "继续调度",
+      "autoOn": "关闭自动运行",
+      "autoOff": "自动运行排队任务",
+      "runQueued": "运行排队任务",
+      "retryFailed": "重试失败任务",
+      "runAll": "运行全部待处理任务",
+      "clearDone": "清除已完成",
+      "run": "运行任务",
+      "cancel": "取消",
+      "remove": "移除"
+    },
+    "selection": {
+      "select": "选择",
+      "deselect": "取消选择"
+    },
+    "item": {
+      "download": "下载 {{snapshotId}}:{{path}}",
+      "copy": "复制 {{srcBase}} {{srcSnapshot}}:{{srcPath}} → {{dstBase}} {{dstPath}}",
+      "snapshotToSftp": "快照→SFTP {{srcBase}} {{snapshotId}}:{{snapshotPath}} → {{user}}@{{host}}:{{remotePath}}",
+      "sftpToSnapshot": "SFTP→快照 {{user}}@{{host}}:{{remotePath}} → {{dstBase}} {{dstPath}}",
+      "sftpDownload": "SFTP-下 {{user}}@{{host}}:{{remotePath}} → {{localPath}}",
+      "sftpUpload": "SFTP-上 {{localPath}} → {{user}}@{{host}}:{{remotePath}}",
+      "copyFolder": "复制目录 {{srcBase}} {{srcSnapshot}}:{{srcDir}} → {{dstBase}} {{dstDir}}"
+    },
+    "status": {
+      "queued": "排队",
+      "running": "运行中",
+      "failed": "失败",
+      "done": "完成"
+    },
+    "conflict": {
+      "title": "目标已存在同路径时的策略",
+      "overwrite": "覆盖",
+      "skip": "跳过",
+      "rename": "重命名"
+    },
+    "progressAria": "进度",
+    "hint": "下一步：在面板之间拖拽文件以创建跨设备传输。"
+  },
+  "tab": {
+    "device": "设备",
+    "vps": "VPS",
+    "local": "本地",
+    "transfers": "传输",
+    "notes": "笔记",
+    "workspace": "工作区"
+  }
+}

@@ -1,3 +1,5 @@
+import { i18next } from "../i18n";
+
 export type SplitDir = "row" | "col";
 
 export type PaneKind = "deviceBrowser" | "sftpBrowser" | "localBrowser" | "transferQueue" | "notes";
@@ -146,29 +148,30 @@ export function activeTab(leaf: LeafNode): PaneTab {
 
 export function displayTabTitle(tab: PaneTab): string {
   if (tab.title && tab.title.trim()) return tab.title.trim();
+  const t = i18next.t.bind(i18next);
 
   if (tab.pane === "deviceBrowser") {
-    const dev = tab.state.deviceName || "Device";
+    const dev = tab.state.deviceName || t("tab.device");
     const snap = tab.state.snapshotId ? ` ${tab.state.snapshotId}` : "";
     const p = tab.state.path ? ` /${tab.state.path}` : " /";
     return `${dev}${snap}${p}`;
   }
 
   if (tab.pane === "sftpBrowser") {
-    const host = tab.state.host || "VPS";
+    const host = tab.state.host || t("tab.vps");
     const user = tab.state.user ? `${tab.state.user}@` : "";
     const p = tab.state.path ? ` ${tab.state.path}` : " /";
     return `${user}${host}${p}`;
   }
 
   if (tab.pane === "localBrowser") {
-    const base = tab.state.basePath || "Local";
+    const base = tab.state.basePath || t("tab.local");
     const p = tab.state.path ? ` /${tab.state.path}` : "";
     return `${base}${p}`;
   }
 
-  if (tab.pane === "transferQueue") return "Transfers";
-  return "Notes";
+  if (tab.pane === "transferQueue") return t("tab.transfers");
+  return t("tab.notes");
 }
 
 export function mapNode(node: LayoutNode, f: (n: LayoutNode) => LayoutNode): LayoutNode {

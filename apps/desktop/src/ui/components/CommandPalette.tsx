@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 export type CommandItem = {
   id: string;
@@ -15,6 +16,7 @@ export default function CommandPalette(props: {
   commands: CommandItem[];
 }) {
   const { open, onClose, commands } = props;
+  const { t } = useTranslation();
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -134,8 +136,8 @@ export default function CommandPalette(props: {
   if (!open) return null;
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Command palette">
-      <button className="modal-backdrop" aria-label="Close" onClick={onClose} />
+    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label={t("commandPalette.aria")}>
+      <button className="modal-backdrop" aria-label={t("common.actions.close")} onClick={onClose} />
 
       <div className="cmd-panel">
         <div className="cmd-header">
@@ -144,17 +146,18 @@ export default function CommandPalette(props: {
             className="cmd-input"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Type a command…"
-            aria-label="Search commands"
+            placeholder={t("commandPalette.searchPlaceholder")}
+            aria-label={t("commandPalette.searchAria")}
           />
           <div className="cmd-kbd">
-            <span className="kbd">↑/↓</span> navigate <span className="kbd">Enter</span> run{" "}
-            <span className="kbd">Esc</span> close
+            <span className="kbd">↑/↓</span> {t("commandPalette.kbd.navigate")}{" "}
+            <span className="kbd">Enter</span> {t("commandPalette.kbd.run")}{" "}
+            <span className="kbd">Esc</span> {t("commandPalette.kbd.close")}
           </div>
         </div>
 
-        <div className="cmd-list" role="listbox" aria-label="Commands">
-          {filtered.length === 0 ? <div className="cmd-empty">No matches.</div> : null}
+        <div className="cmd-list" role="listbox" aria-label={t("commandPalette.listAria")}>
+          {filtered.length === 0 ? <div className="cmd-empty">{t("commandPalette.noMatches")}</div> : null}
           {filtered.map((c, idx) => (
             <button
               key={c.id}
