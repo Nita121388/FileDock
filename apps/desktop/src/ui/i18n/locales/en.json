@@ -37,7 +37,7 @@
   "app": {
     "brand": {
       "title": "FileDock",
-      "meta": "desktop UI shell"
+      "meta": ""
     },
     "conn": {
       "serverBaseUrl": {

@@ -2143,12 +2143,14 @@ export default function App() {
     if (job.kind === "sftp_to_snapshot") return sftpToSnapshotNow(id);
   };
 
+  const brandMeta = t("app.brand.meta");
+
   return (
     <div className="app">
       <div className="topbar">
         <div className="brand">
           <h1>{t("app.brand.title")}</h1>
-          <div className="meta">{t("app.brand.meta")}</div>
+          {brandMeta ? <div className="meta">{brandMeta}</div> : null}
         </div>
 
         <div className="conn">
