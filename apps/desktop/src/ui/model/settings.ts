@@ -25,8 +25,8 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: {
     mode: "dark",
     builtinType: "filedock-flat",
-    radiusPx: 6,
-    fontSizePx: 14
+    radiusPx: 4,
+    fontSizePx: 13
   }
 };
 

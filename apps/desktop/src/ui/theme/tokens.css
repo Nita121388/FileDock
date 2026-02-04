@@ -1,5 +1,5 @@
 :root {
-  --font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  --font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 
   /* vben-style semantic tokens (HSL components), mapped to actual colors via hsl(var(--token)). */
   --background: 0 0% 100%;
@@ -28,7 +28,7 @@
 
   /* Flat + compact defaults */
   --radius: 0.25rem;
-  --font-size-base: 14px;
+  --font-size-base: 13px;
 
   /* Typography scale */
   --line-height: 1.45;
@@ -47,11 +47,11 @@
   --space-5: 20px;
 
   /* Control sizing */
-  --control-h: 32px;
-  --control-h-lg: 36px;
+  --control-h: 28px;
+  --control-h-lg: 32px;
 
-  --pane-header-h: 40px;
-  --row-h: 32px;
+  --pane-header-h: 34px;
+  --row-h: 28px;
   --gutter: var(--space-2);
 
   color-scheme: light;
