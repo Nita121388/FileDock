@@ -221,7 +221,7 @@ export default function LeafPane(props: {
       }}
     >
       {canDrop && isDragOver ? (
-        <div className={`pane-drop-preview drop-${dropZone}`}>
+        <div className={`pane-drop-preview preview-${dropZone}`}>
           <div className="drop-half top" />
           <div className="drop-half bottom" />
         </div>

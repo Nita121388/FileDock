@@ -1013,15 +1013,15 @@ a {
   background: var(--preview-weak);
 }
 
-.pane-drop-preview.drop-top .drop-half.top {
+.pane-drop-preview.preview-top .drop-half.top {
   background: var(--preview-strong);
 }
 
-.pane-drop-preview.drop-bottom .drop-half.bottom {
+.pane-drop-preview.preview-bottom .drop-half.bottom {
   background: var(--preview-strong);
 }
 
-.pane-drop-preview.drop-center .drop-half {
+.pane-drop-preview.preview-center .drop-half {
   background: var(--preview-strong);
 }
 
