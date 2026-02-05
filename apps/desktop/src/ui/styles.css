@@ -996,28 +996,46 @@ a {
 .pane-drop-preview {
   position: absolute;
   inset: 0;
-  background: hsl(130 95% 55% / 0.18);
+  background: hsl(130 95% 55% / 0.08);
   border: 0;
-  border-radius: 0;
+  border-radius: inherit;
   pointer-events: none;
   box-shadow: none;
   z-index: 3;
 }
 
+.pane-drop-preview::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--preview-top, 0%);
+  bottom: var(--preview-bottom, 0%);
+  background: hsl(130 95% 55% / 0.22);
+  border-radius: 0;
+}
+
 .pane-drop-preview.drop-top {
-  bottom: 70%;
-  border-radius: var(--radius) var(--radius) 0 0;
+  --preview-top: 0%;
+  --preview-bottom: 70%;
 }
 
 .pane-drop-preview.drop-bottom {
-  top: 70%;
-  border-radius: 0 0 var(--radius) var(--radius);
+  --preview-top: 70%;
+  --preview-bottom: 0%;
 }
 
 .pane-drop-preview.drop-center {
-  top: 30%;
-  bottom: 30%;
-  border-radius: 0;
+  --preview-top: 30%;
+  --preview-bottom: 30%;
+}
+
+.pane-drop-preview.drop-top::after {
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.pane-drop-preview.drop-bottom::after {
+  border-radius: 0 0 var(--radius) var(--radius);
 }
 
 .pane.can-drop .drop-zone {
