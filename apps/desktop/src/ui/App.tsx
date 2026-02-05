@@ -335,6 +335,24 @@ export default function App() {
     return acc;
   };
 
+  const collectLeavesByRow = (node: LayoutNode): LeafNode[] => {
+    const leaves: LeafNode[] = [];
+    const visit = (n: LayoutNode) => {
+      if (n.kind === "leaf") {
+        leaves.push(n);
+        return;
+      }
+      if (n.dir === "row") {
+        visit(n.a);
+        visit(n.b);
+        return;
+      }
+      collectLeaves(n, leaves);
+    };
+    visit(node);
+    return leaves;
+  };
+
   const buildRowLayout = (columns: LayoutNode[]): LayoutNode => {
     if (columns.length === 1) return columns[0]!;
     const [first, ...rest] = columns;
@@ -384,7 +402,7 @@ export default function App() {
 
   const addView = () => {
     const newLeaf = leafFromPane("localBrowser");
-    updateActiveRoot((root) => buildAddViewLayout([...collectLeaves(root), newLeaf]));
+    updateActiveRoot((root) => buildAddViewLayout([...collectLeavesByRow(root), newLeaf]));
     setActiveLeaf(activeTab.id, newLeaf.id);
   };
 
