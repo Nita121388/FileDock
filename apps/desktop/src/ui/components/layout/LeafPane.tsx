@@ -135,7 +135,7 @@ export default function LeafPane(props: {
         e.preventDefault();
         const rect = e.currentTarget.getBoundingClientRect();
         const y = (e.clientY - rect.top) / Math.max(rect.height, 1);
-        const zone = y < 0.25 ? "top" : y > 0.75 ? "bottom" : "center";
+        const zone = y < 0.3 ? "top" : y > 0.7 ? "bottom" : "center";
         setDropZone(zone);
         setIsDragOver(true);
       }}
@@ -145,7 +145,7 @@ export default function LeafPane(props: {
         e.dataTransfer.dropEffect = "move";
         const rect = e.currentTarget.getBoundingClientRect();
         const y = (e.clientY - rect.top) / Math.max(rect.height, 1);
-        const zone = y < 0.25 ? "top" : y > 0.75 ? "bottom" : "center";
+        const zone = y < 0.3 ? "top" : y > 0.7 ? "bottom" : "center";
         if (zone !== dropZone) setDropZone(zone);
       }}
       onDragLeave={(e) => {
