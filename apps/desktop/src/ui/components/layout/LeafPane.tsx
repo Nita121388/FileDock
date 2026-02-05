@@ -117,6 +117,30 @@ export default function LeafPane(props: {
   const tab = activeTab(node);
   const [isDragOver, setIsDragOver] = useState(false);
   const [dropZone, setDropZone] = useState<DropZone>("center");
+  const logDragPreview = (
+    label: string,
+    target: EventTarget & Element,
+    zone: DropZone,
+    clientX: number,
+    clientY: number
+  ) => {
+    if (!import.meta.env.DEV) return;
+    requestAnimationFrame(() => {
+      const pane = target as HTMLElement;
+      const preview = pane.querySelector(".pane-drop-preview") as HTMLElement | null;
+      const titlebar = pane.querySelector(".pane-titlebar") as HTMLElement | null;
+      const body = pane.querySelector(".pane-body") as HTMLElement | null;
+      console.debug("[drag-preview]", {
+        label,
+        zone,
+        client: { x: Math.round(clientX), y: Math.round(clientY) },
+        pane: pane.getBoundingClientRect(),
+        titlebar: titlebar?.getBoundingClientRect(),
+        body: body?.getBoundingClientRect(),
+        preview: preview?.getBoundingClientRect()
+      });
+    });
+  };
   const className = [
     "pane",
     active ? "active" : "",
@@ -138,6 +162,7 @@ export default function LeafPane(props: {
         const zone = y < 0.3 ? "top" : y > 0.7 ? "bottom" : "center";
         setDropZone(zone);
         setIsDragOver(true);
+        logDragPreview("enter", e.currentTarget, zone, e.clientX, e.clientY);
       }}
       onDragOver={(e) => {
         if (!canDrop) return;
@@ -146,7 +171,10 @@ export default function LeafPane(props: {
         const rect = e.currentTarget.getBoundingClientRect();
         const y = (e.clientY - rect.top) / Math.max(rect.height, 1);
         const zone = y < 0.3 ? "top" : y > 0.7 ? "bottom" : "center";
-        if (zone !== dropZone) setDropZone(zone);
+        if (zone !== dropZone) {
+          setDropZone(zone);
+          logDragPreview("over", e.currentTarget, zone, e.clientX, e.clientY);
+        }
       }}
       onDragLeave={(e) => {
         if (!canDrop) return;
