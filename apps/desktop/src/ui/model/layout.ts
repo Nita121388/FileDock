@@ -333,6 +333,19 @@ export function splitLeaf(
   });
 }
 
+export function splitRoot(node: LayoutNode, dir: SplitDir, newPane: PaneKind = "notes"): LayoutNode {
+  const left = node;
+  const right: LeafNode = leafFromPane(newPane);
+  return {
+    kind: "split",
+    id: uid("split"),
+    dir,
+    ratio: 0.5,
+    a: left,
+    b: right
+  };
+}
+
 export function setLeafPane(node: LayoutNode, leafId: string, pane: PaneKind): LayoutNode {
   return mapNode(node, (n) => {
     if (n.kind !== "leaf") return n;
