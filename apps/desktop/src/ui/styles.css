@@ -758,6 +758,75 @@ a {
   padding: 0 6px;
 }
 
+.pane-btn.icon-only {
+  width: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  position: relative;
+}
+
+.icon-split-vertical::before,
+.icon-split-horizontal::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  opacity: 0.7;
+}
+
+.icon-split-vertical::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 50%;
+  width: 1px;
+  background: currentColor;
+  transform: translateX(-0.5px);
+  opacity: 0.85;
+}
+
+.icon-split-horizontal::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 50%;
+  height: 1px;
+  background: currentColor;
+  transform: translateY(-0.5px);
+  opacity: 0.85;
+}
+
+.icon-close::before,
+.icon-close::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 50%;
+  height: 1px;
+  background: currentColor;
+  transform-origin: center;
+}
+
+.icon-close::before {
+  transform: translateY(-0.5px) rotate(45deg);
+}
+
+.icon-close::after {
+  transform: translateY(-0.5px) rotate(-45deg);
+}
+
 .pane-btn:hover {
   color: var(--fg0);
 }

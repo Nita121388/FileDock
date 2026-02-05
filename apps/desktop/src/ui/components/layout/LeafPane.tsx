@@ -174,15 +174,30 @@ export default function LeafPane(props: {
           <option value="notes">{t("pane.types.notes")}</option>
         </select>
 
-        <button className="pane-btn" onClick={() => onSplit("row")} title={t("pane.splitVertical")}>
-          {t("pane.splitVertical")}
+        <button
+          className="pane-btn icon-only"
+          onClick={() => onSplit("row")}
+          title={t("pane.splitVertical")}
+          aria-label={t("pane.splitVertical")}
+        >
+          <span className="icon icon-split-vertical" aria-hidden="true" />
         </button>
-        <button className="pane-btn" onClick={() => onSplit("col")} title={t("pane.splitHorizontal")}>
-          {t("pane.splitHorizontal")}
+        <button
+          className="pane-btn icon-only"
+          onClick={() => onSplit("col")}
+          title={t("pane.splitHorizontal")}
+          aria-label={t("pane.splitHorizontal")}
+        >
+          <span className="icon icon-split-horizontal" aria-hidden="true" />
         </button>
 
-        <button className="pane-btn danger" onClick={onClose} title={t("pane.closePaneTitle")}>
-          {t("common.actions.close")}
+        <button
+          className="pane-btn danger icon-only"
+          onClick={onClose}
+          title={t("pane.closePaneTitle")}
+          aria-label={t("pane.closePaneTitle")}
+        >
+          <span className="icon icon-close" aria-hidden="true" />
         </button>
       </div>
 
