@@ -325,15 +325,20 @@ export default function App() {
     updateActiveRoot((root) => setLeafPane(root, leafId, pane));
   };
 
+  const normalizeThreeColumns = (node: LayoutNode): LayoutNode => {
+    if (node.kind !== "split" || node.dir !== "row") return node;
+    if (node.a.kind === "split" && node.a.dir === "row" && node.b.kind === "leaf") {
+      return { ...node, ratio: 2 / 3, a: { ...node.a, ratio: 0.5 } };
+    }
+    if (node.b.kind === "split" && node.b.dir === "row" && node.a.kind === "leaf") {
+      return { ...node, ratio: 1 / 3, b: { ...node.b, ratio: 0.5 } };
+    }
+    return node;
+  };
+
   const addView = () => {
     const newLeaf = leafFromPane("localBrowser");
-    updateActiveRoot((root) => {
-      if (root.kind === "split" && root.dir === "row" && root.a.kind === "leaf" && root.b.kind === "leaf") {
-        const balancedLeft = { ...root, ratio: 0.5 };
-        return splitRootWithLeaf(balancedLeft, "row", newLeaf, 2 / 3);
-      }
-      return splitRootWithLeaf(root, "row", newLeaf, 0.7);
-    });
+    updateActiveRoot((root) => normalizeThreeColumns(splitRootWithLeaf(root, "row", newLeaf, 0.7)));
     setActiveLeaf(activeTab.id, newLeaf.id);
   };
 
