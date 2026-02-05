@@ -993,19 +993,14 @@ a {
   transition: opacity 120ms ease;
 }
 
-.drop-preview {
+.pane-drop-preview {
   position: absolute;
+  inset: 6px;
   border: 1px solid hsl(var(--primary) / 0.75);
-  background: hsl(var(--primary) / 0.22);
+  background: hsl(var(--primary) / 0.18);
   border-radius: var(--radius);
   pointer-events: none;
-  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.25), 0 0 18px hsl(var(--primary) / 0.25);
-}
-
-.drop-preview.drop-center {
-  border-color: hsl(var(--warning) / 0.7);
-  background: hsl(var(--warning) / 0.2);
-  box-shadow: 0 0 0 1px hsl(var(--warning) / 0.25), 0 0 18px hsl(var(--warning) / 0.25);
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.25), 0 0 18px hsl(var(--primary) / 0.2);
 }
 
 .pane.can-drop .drop-zone {

@@ -115,11 +115,10 @@ export default function LeafPane(props: {
   const isDraggingSelf = draggingLeafId === node.id;
   const canDrop = dragging && !isDraggingSelf;
   const tab = activeTab(node);
-  const [hoverZone, setHoverZone] = useState<DropZone | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const className = [
     "pane",
     active ? "active" : "",
-    canDrop ? "can-drop" : "",
     isDraggingSelf ? "dragging" : ""
   ]
     .filter(Boolean)
@@ -130,7 +129,29 @@ export default function LeafPane(props: {
       className={className}
       onMouseDown={() => onActivate?.(node.id)}
       onFocusCapture={() => onActivate?.(node.id)}
+      onDragEnter={(e) => {
+        if (!canDrop) return;
+        e.preventDefault();
+        setIsDragOver(true);
+      }}
+      onDragOver={(e) => {
+        if (!canDrop) return;
+        e.preventDefault();
+      }}
+      onDragLeave={(e) => {
+        if (!canDrop) return;
+        const next = e.relatedTarget as Node | null;
+        if (!next || !e.currentTarget.contains(next)) setIsDragOver(false);
+      }}
+      onDrop={(e) => {
+        if (!canDrop) return;
+        e.preventDefault();
+        const sourceId = e.dataTransfer.getData("text/plain");
+        setIsDragOver(false);
+        if (sourceId) onDrop(sourceId, node.id, "center");
+      }}
     >
+      {canDrop && isDragOver ? <div className="pane-drop-preview" /> : null}
       <div className="pane-titlebar">
         <span
           className="drag-handle"
@@ -187,36 +208,7 @@ export default function LeafPane(props: {
         </button>
       </div>
 
-      {canDrop ? (
-        <div className="drop-overlay" aria-label={t("pane.dropZonesAria")}>
-          {hoverZone ? <div className={`drop-preview drop-${hoverZone}`} /> : null}
-          <DropZoneBox
-            zone="left"
-            onDrop={(sourceId) => onDrop(sourceId, node.id, "left")}
-            onHover={setHoverZone}
-          />
-          <DropZoneBox
-            zone="right"
-            onDrop={(sourceId) => onDrop(sourceId, node.id, "right")}
-            onHover={setHoverZone}
-          />
-          <DropZoneBox
-            zone="top"
-            onDrop={(sourceId) => onDrop(sourceId, node.id, "top")}
-            onHover={setHoverZone}
-          />
-          <DropZoneBox
-            zone="bottom"
-            onDrop={(sourceId) => onDrop(sourceId, node.id, "bottom")}
-            onHover={setHoverZone}
-          />
-          <DropZoneBox
-            zone="center"
-            onDrop={(sourceId) => onDrop(sourceId, node.id, "center")}
-            onHover={setHoverZone}
-          />
-        </div>
-      ) : null}
+      {canDrop ? null : null}
 
       <div className="pane-body">
         <PaneView
@@ -239,31 +231,5 @@ export default function LeafPane(props: {
         />
       </div>
     </div>
-  );
-}
-
-function DropZoneBox(props: {
-  zone: DropZone;
-  onDrop: (sourceLeafId: string) => void;
-  onHover: (zone: DropZone | null) => void;
-}) {
-  const { zone, onDrop, onHover } = props;
-  return (
-    <div
-      className={`drop-zone drop-${zone}`}
-      onDragOver={(e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        onHover(zone);
-      }}
-      onDragEnter={() => onHover(zone)}
-      onDragLeave={() => onHover(null)}
-      onDrop={(e) => {
-        e.preventDefault();
-        const sourceId = e.dataTransfer.getData("text/plain");
-        onHover(null);
-        if (sourceId) onDrop(sourceId);
-      }}
-    />
   );
 }

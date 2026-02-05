@@ -499,11 +499,32 @@ export function closeLeaf(node: LayoutNode, leafId: string): LayoutNode {
 
 export function moveLeaf(root: LayoutNode, sourceLeafId: string, targetLeafId: string, zone: DropZone): LayoutNode {
   if (sourceLeafId === targetLeafId) return root;
-  if (zone === "center") return mergeLeafTabs(root, sourceLeafId, targetLeafId);
+  if (zone === "center") return swapLeaves(root, sourceLeafId, targetLeafId);
 
   const extracted = extractLeaf(root, sourceLeafId);
   if (!extracted.leaf) return root;
   return insertLeaf(extracted.root, targetLeafId, zone, extracted.leaf);
+}
+
+function swapLeaves(root: LayoutNode, aId: string, bId: string): LayoutNode {
+  let aLeaf: LeafNode | null = null;
+  let bLeaf: LeafNode | null = null;
+
+  mapNode(root, (n) => {
+    if (n.kind !== "leaf") return n;
+    if (n.id === aId) aLeaf = n;
+    if (n.id === bId) bLeaf = n;
+    return n;
+  });
+
+  if (!aLeaf || !bLeaf) return root;
+
+  return mapNode(root, (n) => {
+    if (n.kind !== "leaf") return n;
+    if (n.id === aId) return bLeaf;
+    if (n.id === bId) return aLeaf;
+    return n;
+  });
 }
 
 function mergeLeafTabs(root: LayoutNode, sourceLeafId: string, targetLeafId: string): LayoutNode {
