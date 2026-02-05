@@ -335,22 +335,46 @@ export default function App() {
     return acc;
   };
 
-  const collectLeavesByRow = (node: LayoutNode): LeafNode[] => {
-    const leaves: LeafNode[] = [];
-    const visit = (n: LayoutNode) => {
-      if (n.kind === "leaf") {
-        leaves.push(n);
-        return;
+  const firstLeaf = (node: LayoutNode): LeafNode => {
+    if (node.kind === "leaf") return node;
+    return firstLeaf(node.a);
+  };
+
+  const gatherColumns = (node: LayoutNode): LayoutNode[] => {
+    if (node.kind === "split" && node.dir === "row") {
+      return [...gatherColumns(node.a), ...gatherColumns(node.b)];
+    }
+    return [node];
+  };
+
+  const extractColumnLeaves = (node: LayoutNode): { top: LeafNode; middle?: LeafNode; bottom?: LeafNode } => {
+    if (node.kind === "leaf") return { top: node };
+    if (node.kind === "split" && node.dir === "col") {
+      const top = firstLeaf(node.a);
+      if (node.b.kind === "split" && node.b.dir === "col") {
+        const middle = firstLeaf(node.b.a);
+        const bottom = firstLeaf(node.b.b);
+        return { top, middle, bottom };
       }
-      if (n.dir === "row") {
-        visit(n.a);
-        visit(n.b);
-        return;
-      }
-      collectLeaves(n, leaves);
-    };
-    visit(node);
-    return leaves;
+      const middle = firstLeaf(node.b);
+      return { top, middle };
+    }
+    return { top: firstLeaf(node) };
+  };
+
+  const collectLeavesForAddView = (root: LayoutNode): LeafNode[] => {
+    const columns = gatherColumns(root);
+    const colLeaves = columns.map((col) => extractColumnLeaves(col));
+    const topRow = colLeaves.map((col) => col.top);
+    const midRow = [...colLeaves]
+      .reverse()
+      .map((col) => col.middle)
+      .filter((leaf): leaf is LeafNode => !!leaf);
+    const botRow = [...colLeaves]
+      .reverse()
+      .map((col) => col.bottom)
+      .filter((leaf): leaf is LeafNode => !!leaf);
+    return [...topRow, ...midRow, ...botRow];
   };
 
   const buildRowLayout = (columns: LayoutNode[]): LayoutNode => {
@@ -414,6 +438,61 @@ export default function App() {
       return buildRowLayout(columns);
     }
 
+    if (total <= 15) {
+      const columns: LayoutNode[] = [];
+      for (let i = 0; i < 5; i += 1) {
+        const top = leaves[i]!;
+        const middleIndex = 5 + (4 - i);
+        const bottomIndex = 10 + (4 - i);
+        const middle = middleIndex < total ? leaves[middleIndex]! : null;
+        const bottom = bottomIndex < total ? leaves[bottomIndex]! : null;
+        if (bottom) {
+          columns.push({
+            kind: "split",
+            id: layoutUid("split"),
+            dir: "col",
+            ratio: 1 / 3,
+            a: top,
+            b: {
+              kind: "split",
+              id: layoutUid("split"),
+              dir: "col",
+              ratio: 0.5,
+              a: middle ?? top,
+              b: bottom
+            }
+          });
+        } else if (middle) {
+          columns.push({
+            kind: "split",
+            id: layoutUid("split"),
+            dir: "col",
+            ratio: 0.5,
+            a: top,
+            b: middle
+          });
+        } else {
+          columns.push(top);
+        }
+      }
+      console.info("[layout:add-view] row+col3", {
+        total,
+        columns: columns.map((col, idx) => ({
+          idx,
+          kind: col.kind,
+          top: col.kind === "split" ? (col.a as LeafNode).id : col.id,
+          middle:
+            col.kind === "split" && col.b.kind === "split"
+              ? (col.b.a as LeafNode).id
+              : col.kind === "split"
+                ? (col.b as LeafNode).id
+                : null,
+          bottom: col.kind === "split" && col.b.kind === "split" ? (col.b.b as LeafNode).id : null
+        }))
+      });
+      return buildRowLayout(columns);
+    }
+
     console.info("[layout:add-view] fallback-row", { total });
     return buildRowLayout(leaves);
   };
@@ -421,7 +500,7 @@ export default function App() {
   const addView = () => {
     const newLeaf = leafFromPane("localBrowser");
     updateActiveRoot((root) => {
-      const leaves = collectLeavesByRow(root);
+      const leaves = collectLeavesForAddView(root);
       const next = buildAddViewLayout([...leaves, newLeaf]);
       console.info("[layout:add-view] built", {
         before: leaves.length,
