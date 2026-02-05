@@ -335,11 +335,6 @@ export default function App() {
     return acc;
   };
 
-  const firstLeaf = (node: LayoutNode): LeafNode => {
-    if (node.kind === "leaf") return node;
-    return firstLeaf(node.a);
-  };
-
   const gatherColumns = (node: LayoutNode): LayoutNode[] => {
     if (node.kind === "split" && node.dir === "row") {
       return [...gatherColumns(node.a), ...gatherColumns(node.b)];
@@ -347,34 +342,27 @@ export default function App() {
     return [node];
   };
 
-  const extractColumnLeaves = (node: LayoutNode): { top: LeafNode; middle?: LeafNode; bottom?: LeafNode } => {
-    if (node.kind === "leaf") return { top: node };
-    if (node.kind === "split" && node.dir === "col") {
-      const top = firstLeaf(node.a);
-      if (node.b.kind === "split" && node.b.dir === "col") {
-        const middle = firstLeaf(node.b.a);
-        const bottom = firstLeaf(node.b.b);
-        return { top, middle, bottom };
-      }
-      const middle = firstLeaf(node.b);
-      return { top, middle };
-    }
-    return { top: firstLeaf(node) };
+  const collectColumnLeaves = (node: LayoutNode): LeafNode[] => {
+    if (node.kind === "leaf") return [node];
+    if (node.dir === "col") return [...collectColumnLeaves(node.a), ...collectColumnLeaves(node.b)];
+    return collectLeaves(node, []);
   };
 
   const collectLeavesForAddView = (root: LayoutNode): LeafNode[] => {
     const columns = gatherColumns(root);
-    const colLeaves = columns.map((col) => extractColumnLeaves(col));
-    const topRow = colLeaves.map((col) => col.top);
-    const midRow = [...colLeaves]
-      .reverse()
-      .map((col) => col.middle)
-      .filter((leaf): leaf is LeafNode => !!leaf);
-    const botRow = [...colLeaves]
-      .reverse()
-      .map((col) => col.bottom)
-      .filter((leaf): leaf is LeafNode => !!leaf);
-    return [...topRow, ...midRow, ...botRow];
+    const colLeaves = columns.map((col) => collectColumnLeaves(col));
+    const maxRows = colLeaves.reduce((m, col) => Math.max(m, col.length), 0);
+    const order: LeafNode[] = [];
+    for (let c = 0; c < colLeaves.length; c += 1) {
+      if (colLeaves[c]?.[0]) order.push(colLeaves[c]![0]!);
+    }
+    for (let r = 1; r < maxRows; r += 1) {
+      for (let c = colLeaves.length - 1; c >= 0; c -= 1) {
+        const leaf = colLeaves[c]?.[r];
+        if (leaf) order.push(leaf);
+      }
+    }
+    return order;
   };
 
   const buildRowLayout = (columns: LayoutNode[]): LayoutNode => {
@@ -398,103 +386,55 @@ export default function App() {
     return `${tag}(${ratio})[${describeLayout(node.a)}|${describeLayout(node.b)}]`;
   };
 
+  const buildColLayout = (colLeaves: LeafNode[]): LayoutNode => {
+    if (colLeaves.length === 1) return colLeaves[0]!;
+    const [first, ...rest] = colLeaves;
+    return {
+      kind: "split",
+      id: layoutUid("split"),
+      dir: "col",
+      ratio: 1 / colLeaves.length,
+      a: first,
+      b: buildColLayout(rest)
+    };
+  };
+
   const buildAddViewLayout = (leaves: LeafNode[]): LayoutNode => {
     const total = leaves.length;
     if (total <= 1) return leaves[0]!;
-
     if (total <= 5) {
       console.info("[layout:add-view] row-equal", { total });
       return buildRowLayout(leaves);
     }
 
-    if (total <= 10) {
-      const columns: LayoutNode[] = [];
-      for (let i = 0; i < 5; i += 1) {
-        const top = leaves[i]!;
-        const bottomIndex = 5 + (4 - i);
-        const bottom = bottomIndex < total ? leaves[bottomIndex]! : null;
-        if (bottom) {
-          columns.push({
-            kind: "split",
-            id: layoutUid("split"),
-            dir: "col",
-            ratio: 0.5,
-            a: top,
-            b: bottom
-          });
-        } else {
-          columns.push(top);
-        }
+    const cols = 5;
+    const rows = Math.ceil(total / cols);
+    const grid: Array<Array<LeafNode | null>> = Array.from({ length: rows }, () =>
+      Array.from({ length: cols }, () => null)
+    );
+
+    let idx = 0;
+    for (let c = 0; c < cols && idx < total; c += 1) {
+      grid[0]![c] = leaves[idx++]!;
+    }
+    for (let r = 1; r < rows && idx < total; r += 1) {
+      for (let c = cols - 1; c >= 0 && idx < total; c -= 1) {
+        grid[r]![c] = leaves[idx++]!;
       }
-      console.info("[layout:add-view] row+col", {
-        total,
-        columns: columns.map((col, idx) => ({
-          idx,
-          kind: col.kind,
-          top: col.kind === "split" ? col.a.id : col.id,
-          bottom: col.kind === "split" ? col.b.id : null
-        }))
-      });
-      return buildRowLayout(columns);
     }
 
-    if (total <= 15) {
-      const columns: LayoutNode[] = [];
-      for (let i = 0; i < 5; i += 1) {
-        const top = leaves[i]!;
-        const middleIndex = 5 + (4 - i);
-        const bottomIndex = 10 + (4 - i);
-        const middle = middleIndex < total ? leaves[middleIndex]! : null;
-        const bottom = bottomIndex < total ? leaves[bottomIndex]! : null;
-        if (bottom) {
-          columns.push({
-            kind: "split",
-            id: layoutUid("split"),
-            dir: "col",
-            ratio: 1 / 3,
-            a: top,
-            b: {
-              kind: "split",
-              id: layoutUid("split"),
-              dir: "col",
-              ratio: 0.5,
-              a: middle ?? top,
-              b: bottom
-            }
-          });
-        } else if (middle) {
-          columns.push({
-            kind: "split",
-            id: layoutUid("split"),
-            dir: "col",
-            ratio: 0.5,
-            a: top,
-            b: middle
-          });
-        } else {
-          columns.push(top);
-        }
+    const columns: LayoutNode[] = [];
+    for (let c = 0; c < cols; c += 1) {
+      const colLeaves: LeafNode[] = [];
+      for (let r = 0; r < rows; r += 1) {
+        const leaf = grid[r]![c];
+        if (leaf) colLeaves.push(leaf);
       }
-      console.info("[layout:add-view] row+col3", {
-        total,
-        columns: columns.map((col, idx) => ({
-          idx,
-          kind: col.kind,
-          top: col.kind === "split" ? (col.a as LeafNode).id : col.id,
-          middle:
-            col.kind === "split" && col.b.kind === "split"
-              ? (col.b.a as LeafNode).id
-              : col.kind === "split"
-                ? (col.b as LeafNode).id
-                : null,
-          bottom: col.kind === "split" && col.b.kind === "split" ? (col.b.b as LeafNode).id : null
-        }))
-      });
-      return buildRowLayout(columns);
+      columns.push(buildColLayout(colLeaves));
     }
 
-    console.info("[layout:add-view] fallback-row", { total });
-    return buildRowLayout(leaves);
+    console.info("[layout:add-view] grid", { total, rows, cols });
+    return buildRowLayout(columns);
   };
 
   const addView = () => {
