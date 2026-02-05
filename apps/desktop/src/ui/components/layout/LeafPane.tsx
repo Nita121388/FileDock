@@ -130,14 +130,45 @@ export default function LeafPane(props: {
       const preview = pane.querySelector(".pane-drop-preview") as HTMLElement | null;
       const titlebar = pane.querySelector(".pane-titlebar") as HTMLElement | null;
       const body = pane.querySelector(".pane-body") as HTMLElement | null;
+      const paneStyle = getComputedStyle(pane);
+      const previewStyle = preview ? getComputedStyle(preview) : null;
       console.debug("[drag-preview]", {
         label,
         zone,
         client: { x: Math.round(clientX), y: Math.round(clientY) },
         pane: pane.getBoundingClientRect(),
+        paneStyle: {
+          position: paneStyle.position,
+          padding: paneStyle.padding,
+          transform: paneStyle.transform
+        },
         titlebar: titlebar?.getBoundingClientRect(),
         body: body?.getBoundingClientRect(),
-        preview: preview?.getBoundingClientRect()
+        preview: preview?.getBoundingClientRect(),
+        previewStyle: previewStyle
+          ? {
+              position: previewStyle.position,
+              inset: previewStyle.inset,
+              top: previewStyle.top,
+              right: previewStyle.right,
+              bottom: previewStyle.bottom,
+              left: previewStyle.left,
+              width: previewStyle.width,
+              height: previewStyle.height,
+              transform: previewStyle.transform,
+              transformOrigin: previewStyle.transformOrigin
+            }
+          : null,
+        previewOffset: preview
+          ? {
+              offsetWidth: preview.offsetWidth,
+              offsetHeight: preview.offsetHeight,
+              offsetTop: preview.offsetTop,
+              offsetLeft: preview.offsetLeft,
+              offsetParent:
+                (preview.offsetParent as HTMLElement | null)?.className || null
+            }
+          : null
       });
     });
   };
