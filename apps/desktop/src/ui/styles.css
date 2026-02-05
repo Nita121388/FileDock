@@ -1196,7 +1196,7 @@ a {
 }
 
 .local-browser .db-item {
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-1) var(--space-2);
 }
 
 .local-browser .db-title {
@@ -1223,7 +1223,7 @@ a {
 }
 
 .local-browser .db-sub {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .db-tree {
