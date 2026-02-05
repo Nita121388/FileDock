@@ -907,6 +907,13 @@ a {
   /* Use the standard field recipe. */
 }
 
+.sftp-pane .pane-toolbar input,
+.sftp-pane .pane-toolbar select,
+.sftp-pane .pane-toolbar .pane-btn {
+  border: 0;
+  box-shadow: none;
+}
+
 .pane-error {
   border: 1px solid hsl(var(--destructive) / 0.5);
   background: hsl(var(--destructive) / 0.12);
