@@ -554,12 +554,14 @@ a {
   height: 100%;
   display: flex;
   min-height: 0;
+  min-width: 0;
 }
 
 .workspace-inner {
   height: 100%;
   min-height: 0;
   flex: 1;
+  min-width: 0;
 }
 
 .workspace-tools {
@@ -571,6 +573,9 @@ a {
   align-items: center;
   gap: 6px;
   padding: 6px 4px;
+  flex: 0 0 38px;
+  position: relative;
+  z-index: 2;
 }
 
 .tool-btn {
@@ -653,6 +658,19 @@ a {
   margin: var(--space-1);
   background: linear-gradient(180deg, hsl(var(--background) / 0.22), hsl(var(--background) / 0.08)), var(--bg1);
   overflow: hidden;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.pane.active {
+  border-color: hsl(130 95% 55% / 0.95);
+  box-shadow:
+    0 0 0 1px hsl(130 95% 55% / 0.6),
+    0 0 12px hsl(130 95% 60% / 0.35),
+    0 0 24px hsl(130 95% 60% / 0.25);
+}
+
+.pane.active .pane-titlebar {
+  border-bottom-color: hsl(130 95% 55% / 0.7);
 }
 
 .pane-titlebar {

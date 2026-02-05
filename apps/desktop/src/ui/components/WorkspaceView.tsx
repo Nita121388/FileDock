@@ -20,6 +20,7 @@ import SplitNodeView from "./layout/SplitNodeView";
 
 export function WorkspaceView(props: {
   tab: TabState;
+  activeLeafId: string | null;
   settings: Settings;
   transfers: TransferJob[];
   onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../model/transfers").Conn) => void;
@@ -88,6 +89,7 @@ export function WorkspaceView(props: {
 }) {
   const {
     tab,
+    activeLeafId,
     settings,
     transfers,
     onEnqueueDownload,
@@ -128,9 +130,11 @@ export function WorkspaceView(props: {
       }
 
       const paneTab = activeTab(node);
+      const isActive = activeLeafId === node.id;
       return (
         <LeafPane
           node={node}
+          active={isActive}
           settings={settings}
           transfers={transfers}
           onActivate={(leafId) => onActivateLeaf?.(leafId)}

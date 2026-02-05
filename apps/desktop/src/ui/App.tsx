@@ -289,13 +289,18 @@ export default function App() {
     return t ?? state.tabs[0];
   }, [state]);
 
+  const activeLeafId = useMemo(() => {
+    const preferred = activeLeafByTab[activeTab.id];
+    if (preferred && findLeaf(activeTab.root, preferred)) return preferred;
+    return getActiveLeafId(activeTab);
+  }, [activeLeafByTab, activeTab]);
+
   const activePane = useMemo(() => {
-    const leafId = activeLeafByTab[activeTab.id] ?? getActiveLeafId(activeTab);
-    if (!leafId) return null;
-    const leaf = findLeaf(activeTab.root, leafId);
+    if (!activeLeafId) return null;
+    const leaf = findLeaf(activeTab.root, activeLeafId);
     if (!leaf) return null;
     return activeLeafTab(leaf);
-  }, [activeLeafByTab, activeTab]);
+  }, [activeLeafId, activeTab]);
 
   const setActiveTab = (tabId: string) => {
     setState((s) => ({ ...s, activeTabId: tabId }));
@@ -2416,6 +2421,7 @@ export default function App() {
         <div className="workspace-shell">
           <WorkspaceView
             tab={activeTab}
+            activeLeafId={activeLeafId}
             settings={settings}
             transfers={transfers}
             onEnqueueDownload={enqueueDownload}

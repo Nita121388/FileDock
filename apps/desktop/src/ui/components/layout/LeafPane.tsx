@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 
 export default function LeafPane(props: {
   node: LeafNode;
+  active?: boolean;
   settings: Settings;
   transfers: TransferJob[];
   onActivate?: (leafId: string) => void;
@@ -84,6 +85,7 @@ export default function LeafPane(props: {
   const { t } = useTranslation();
   const {
     node,
+    active,
     settings,
     transfers,
     onActivate,
@@ -116,7 +118,7 @@ export default function LeafPane(props: {
 
   return (
     <div
-      className="pane"
+      className={active ? "pane active" : "pane"}
       onMouseDown={() => onActivate?.(node.id)}
       onFocusCapture={() => onActivate?.(node.id)}
     >
