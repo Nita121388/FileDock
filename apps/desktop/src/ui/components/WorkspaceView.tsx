@@ -9,7 +9,7 @@ import {
   moveLeaf,
   setLeafActiveTab,
   setLeafPane,
-  splitRoot,
+  splitLeaf,
   updateLeafTabState,
   updateSplitRatio
 } from "../model/layout";
@@ -156,7 +156,7 @@ export function WorkspaceView(props: {
             updateRoot((root) => moveLeaf(root, sourceLeafId, targetLeafId, zone))
           }
           onSplit={(dir: SplitDir) =>
-            updateRoot((root) => splitRoot(root, dir, paneTab.pane))
+            updateRoot((root) => splitLeaf(root, node.id, dir, paneTab.pane))
           }
           onClose={() => updateRoot((root) => closeLeaf(root, node.id))}
           onSetPane={(pane: PaneKind) => updateRoot((root) => setLeafPane(root, node.id, pane))}

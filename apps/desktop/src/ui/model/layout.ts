@@ -202,11 +202,20 @@ export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
   };
 
   if (node.kind === "split") {
+    const normA = normalizeLayoutNode(node.a);
+    const normB = normalizeLayoutNode(node.b);
+    if (normA.kind === "leaf" && normB.kind === "leaf") {
+      const keep = toSingleLeaf(normA);
+      const move = toSingleLeaf(normB);
+      keep.tabs = [...keep.tabs, ...move.tabs];
+      if (move.activeTabId) keep.activeTabId = move.activeTabId;
+      return keep;
+    }
     return {
       ...node,
       ratio: clampRatio(node.ratio),
-      a: normalizeLayoutNode(node.a),
-      b: normalizeLayoutNode(node.b)
+      a: normA,
+      b: normB
     };
   }
 
