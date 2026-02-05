@@ -1224,6 +1224,8 @@ a {
 
 .local-browser .db-sub {
   margin-top: 0;
+  text-align: right;
+  width: 100%;
 }
 
 .db-tree {
