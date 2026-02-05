@@ -995,12 +995,28 @@ a {
 
 .pane-drop-preview {
   position: absolute;
-  inset: 6px;
+  left: 8px;
+  right: 8px;
+  top: calc(var(--pane-header-h) + 6px);
+  bottom: 8px;
   border: 1px solid hsl(var(--primary) / 0.75);
   background: hsl(var(--primary) / 0.18);
   border-radius: var(--radius);
   pointer-events: none;
   box-shadow: 0 0 0 1px hsl(var(--primary) / 0.25), 0 0 18px hsl(var(--primary) / 0.2);
+}
+
+.pane-drop-preview.drop-top {
+  bottom: 50%;
+}
+
+.pane-drop-preview.drop-bottom {
+  top: 50%;
+}
+
+.pane-drop-preview.drop-center {
+  top: calc(var(--pane-header-h) + 6px);
+  bottom: 8px;
 }
 
 .pane.can-drop .drop-zone {

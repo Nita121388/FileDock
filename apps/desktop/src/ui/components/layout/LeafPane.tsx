@@ -116,6 +116,7 @@ export default function LeafPane(props: {
   const canDrop = dragging && !isDraggingSelf;
   const tab = activeTab(node);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [dropZone, setDropZone] = useState<DropZone>("center");
   const className = [
     "pane",
     active ? "active" : "",
@@ -132,11 +133,20 @@ export default function LeafPane(props: {
       onDragEnter={(e) => {
         if (!canDrop) return;
         e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        const y = (e.clientY - rect.top) / Math.max(rect.height, 1);
+        const zone = y < 0.25 ? "top" : y > 0.75 ? "bottom" : "center";
+        setDropZone(zone);
         setIsDragOver(true);
       }}
       onDragOver={(e) => {
         if (!canDrop) return;
         e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        const rect = e.currentTarget.getBoundingClientRect();
+        const y = (e.clientY - rect.top) / Math.max(rect.height, 1);
+        const zone = y < 0.25 ? "top" : y > 0.75 ? "bottom" : "center";
+        if (zone !== dropZone) setDropZone(zone);
       }}
       onDragLeave={(e) => {
         if (!canDrop) return;
@@ -148,10 +158,10 @@ export default function LeafPane(props: {
         e.preventDefault();
         const sourceId = e.dataTransfer.getData("text/plain");
         setIsDragOver(false);
-        if (sourceId) onDrop(sourceId, node.id, "center");
+        if (sourceId) onDrop(sourceId, node.id, dropZone);
       }}
     >
-      {canDrop && isDragOver ? <div className="pane-drop-preview" /> : null}
+      {canDrop && isDragOver ? <div className={`pane-drop-preview drop-${dropZone}`} /> : null}
       <div className="pane-titlebar">
         <span
           className="drag-handle"
