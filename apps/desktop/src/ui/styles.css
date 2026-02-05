@@ -996,33 +996,32 @@ a {
 .pane-drop-preview {
   position: absolute;
   inset: 0;
-  --preview-strong: hsl(130 95% 55% / 0.24);
-  --preview-weak: hsl(130 95% 55% / 0.10);
-  background: linear-gradient(
-    to bottom,
-    var(--preview-top, var(--preview-weak)) 0%,
-    var(--preview-top, var(--preview-weak)) 50%,
-    var(--preview-bottom, var(--preview-weak)) 50%,
-    var(--preview-bottom, var(--preview-weak)) 100%
-  );
+  --preview-strong: hsl(130 95% 55% / 0.30);
+  --preview-weak: hsl(130 95% 55% / 0.16);
   border: 0;
   border-radius: inherit;
+  overflow: hidden;
   pointer-events: none;
   box-shadow: none;
-  z-index: 3;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
 }
 
-.pane-drop-preview.drop-top {
-  --preview-top: var(--preview-strong);
-  --preview-bottom: var(--preview-weak);
+.pane-drop-preview .drop-half {
+  flex: 1;
+  background: var(--preview-weak);
 }
 
-.pane-drop-preview.drop-bottom {
-  --preview-top: var(--preview-weak);
-  --preview-bottom: var(--preview-strong);
+.pane-drop-preview.drop-top .drop-half.top {
+  background: var(--preview-strong);
 }
 
-.pane-drop-preview.drop-center {
+.pane-drop-preview.drop-bottom .drop-half.bottom {
+  background: var(--preview-strong);
+}
+
+.pane-drop-preview.drop-center .drop-half {
   background: var(--preview-strong);
 }
 
