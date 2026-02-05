@@ -13,10 +13,10 @@ import {
   findLeaf,
   leafFromPane,
   setLeafPane,
-  splitRoot,
-  splitRootWithLeaf,
   type LayoutNode,
-  type PaneKind
+  type LeafNode,
+  type PaneKind,
+  uid as layoutUid
 } from "./model/layout";
 import { loadState, saveState } from "./model/storage";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type LocaleSetting, type Settings } from "./model/settings";
@@ -325,20 +325,66 @@ export default function App() {
     updateActiveRoot((root) => setLeafPane(root, leafId, pane));
   };
 
-  const normalizeThreeColumns = (node: LayoutNode): LayoutNode => {
-    if (node.kind !== "split" || node.dir !== "row") return node;
-    if (node.a.kind === "split" && node.a.dir === "row" && node.b.kind === "leaf") {
-      return { ...node, ratio: 2 / 3, a: { ...node.a, ratio: 0.5 } };
+  const collectLeaves = (node: LayoutNode, acc: LeafNode[] = []): LeafNode[] => {
+    if (node.kind === "leaf") {
+      acc.push(node);
+      return acc;
     }
-    if (node.b.kind === "split" && node.b.dir === "row" && node.a.kind === "leaf") {
-      return { ...node, ratio: 1 / 3, b: { ...node.b, ratio: 0.5 } };
+    collectLeaves(node.a, acc);
+    collectLeaves(node.b, acc);
+    return acc;
+  };
+
+  const buildRowLayout = (columns: LayoutNode[]): LayoutNode => {
+    if (columns.length === 1) return columns[0]!;
+    const [first, ...rest] = columns;
+    const ratio = 1 / columns.length;
+    return {
+      kind: "split",
+      id: layoutUid("split"),
+      dir: "row",
+      ratio,
+      a: first,
+      b: buildRowLayout(rest)
+    };
+  };
+
+  const buildAddViewLayout = (leaves: LeafNode[]): LayoutNode => {
+    const total = leaves.length;
+    if (total <= 1) return leaves[0]!;
+
+    if (total <= 5) {
+      return buildRowLayout(leaves);
     }
-    return node;
+
+    if (total <= 10) {
+      const columns: LayoutNode[] = [];
+      for (let i = 0; i < 5; i += 1) {
+        const top = leaves[i]!;
+        const bottomIndex = 5 + (4 - i);
+        const bottom = bottomIndex < total ? leaves[bottomIndex]! : null;
+        if (bottom) {
+          columns.push({
+            kind: "split",
+            id: layoutUid("split"),
+            dir: "col",
+            ratio: 0.5,
+            a: top,
+            b: bottom
+          });
+        } else {
+          columns.push(top);
+        }
+      }
+      return buildRowLayout(columns);
+    }
+
+    return buildRowLayout(leaves);
   };
 
   const addView = () => {
     const newLeaf = leafFromPane("localBrowser");
-    updateActiveRoot((root) => normalizeThreeColumns(splitRootWithLeaf(root, "row", newLeaf, 0.7)));
+    updateActiveRoot((root) => buildAddViewLayout([...collectLeaves(root), newLeaf]));
     setActiveLeaf(activeTab.id, newLeaf.id);
   };
 
