@@ -4,7 +4,6 @@ import type { TabState } from "../model/state";
 import type { LayoutNode, PaneKind, PaneTab, SplitDir } from "../model/layout";
 import {
   activeTab,
-  addLeafTab,
   closeLeaf,
   closeLeafTab,
   moveLeaf,
@@ -157,7 +156,6 @@ export function WorkspaceView(props: {
           }
           onClose={() => updateRoot((root) => closeLeaf(root, node.id))}
           onSetPane={(pane: PaneKind) => updateRoot((root) => setLeafPane(root, node.id, pane))}
-          onAddTab={(pane: PaneKind) => updateRoot((root) => addLeafTab(root, node.id, pane))}
           onSetActiveTab={(tabId: string) => updateRoot((root) => setLeafActiveTab(root, node.id, tabId))}
           onCloseTab={(tabId: string) => updateRoot((root) => closeLeafTab(root, node.id, tabId))}
           onUpdateActiveTab={(updater: (tab: PaneTab) => PaneTab) =>

@@ -77,7 +77,6 @@ export default function LeafPane(props: {
   onSplit: (dir: SplitDir) => void;
   onClose: () => void;
   onSetPane: (pane: PaneKind) => void;
-  onAddTab: (pane: PaneKind) => void;
   onSetActiveTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onUpdateActiveTab: (updater: (tab: PaneTab) => PaneTab) => void;
@@ -106,7 +105,6 @@ export default function LeafPane(props: {
     onSplit,
     onClose,
     onSetPane,
-    onAddTab,
     onSetActiveTab,
     onCloseTab,
     onUpdateActiveTab
@@ -159,9 +157,6 @@ export default function LeafPane(props: {
               ) : null}
             </button>
           ))}
-          <button className="pane-tab ui-item add" onClick={() => onAddTab(tab.pane)} title={t("pane.tabNewTitle")}>
-            +
-          </button>
         </div>
 
         <div className="pane-spacer" />
