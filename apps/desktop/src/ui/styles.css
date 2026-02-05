@@ -997,7 +997,6 @@ a {
   position: absolute;
   inset: 0;
   --preview-strong: hsl(130 95% 55% / 0.30);
-  --preview-weak: hsl(130 95% 55% / 0.16);
   border: 0;
   border-radius: inherit;
   overflow: hidden;
@@ -1010,7 +1009,7 @@ a {
 
 .pane-drop-preview .drop-half {
   flex: 1;
-  background: var(--preview-weak);
+  background: transparent;
 }
 
 .pane-drop-preview.preview-top .drop-half.top {
