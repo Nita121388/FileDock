@@ -5,6 +5,7 @@ import type { PaneTab } from "../../../model/layout";
 import { listLocalDir, type LocalDirEntry } from "../../../api/tauri";
 import { onPaneCommand } from "../../../commandBus";
 import { useTranslation } from "react-i18next";
+import { homeDir } from "@tauri-apps/api/path";
 
 const FORMAT_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 
@@ -57,7 +58,7 @@ export default function LocalBrowserPane(props: {
         return a.name.localeCompare(b.name);
       });
       setEntries(sorted);
-      setStatus(t("local.status.items", { count: sorted.length }));
+      setStatus("");
     } catch (e: any) {
       setEntries([]);
       setStatus(String(e?.message ?? e));
@@ -69,6 +70,24 @@ export default function LocalBrowserPane(props: {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (basePath || !isTauri()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const home = await homeDir();
+        if (!cancelled && home) {
+          onTabChange({ ...tab, state: { ...tab.state, basePath: home, path: "" } });
+        }
+      } catch {
+        // Ignore; user can still choose manually.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [basePath, onTabChange, tab]);
 
   const pickFolder = useCallback(async () => {
     if (!isTauri()) {
