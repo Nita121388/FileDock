@@ -111,12 +111,21 @@ export default function LeafPane(props: {
   } = props;
 
   const dragging = draggingLeafId !== null;
-  const canDrop = dragging && draggingLeafId !== node.id;
+  const isDraggingSelf = draggingLeafId === node.id;
+  const canDrop = dragging && !isDraggingSelf;
   const tab = activeTab(node);
+  const className = [
+    "pane",
+    active ? "active" : "",
+    canDrop ? "can-drop" : "",
+    isDraggingSelf ? "dragging" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div
-      className={active ? "pane active" : "pane"}
+      className={className}
       onMouseDown={() => onActivate?.(node.id)}
       onFocusCapture={() => onActivate?.(node.id)}
     >

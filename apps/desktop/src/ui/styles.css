@@ -993,13 +993,23 @@ a {
   transition: opacity 120ms ease;
 }
 
-.pane:hover .drop-zone {
-  opacity: 0.55;
+.pane.can-drop .drop-zone {
+  opacity: 0.3;
+}
+
+.pane.can-drop:hover .drop-zone {
+  opacity: 0.65;
 }
 
 .drop-zone:hover {
   opacity: 0.95;
   background: hsl(var(--primary) / 0.16);
+}
+
+.pane.dragging {
+  opacity: 0.75;
+  border-color: hsl(var(--accent) / 0.65);
+  box-shadow: 0 0 0 1px hsl(var(--accent) / 0.35);
 }
 
 .drop-left {
