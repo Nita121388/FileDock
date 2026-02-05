@@ -189,7 +189,8 @@ export function WorkspaceView(props: {
     ]
   );
 
+  const single = tab.root.kind === "leaf";
   return (
-    <div className="workspace-inner">{renderNode(tab.root)}</div>
+    <div className={single ? "workspace-inner single" : "workspace-inner"}>{renderNode(tab.root)}</div>
   );
 }
