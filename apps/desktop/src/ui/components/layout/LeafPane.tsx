@@ -1,5 +1,5 @@
 import type { DropZone, LeafNode, PaneKind, SplitDir, PaneTab } from "../../model/layout";
-import { activeTab, displayTabTitle } from "../../model/layout";
+import { activeTab } from "../../model/layout";
 import type { Settings } from "../../model/settings";
 import type { TransferJob } from "../../model/transfers";
 import { PaneView } from "../panes/PaneView";
@@ -107,8 +107,6 @@ export default function LeafPane(props: {
     onSplit,
     onClose,
     onSetPane,
-    onSetActiveTab,
-    onCloseTab,
     onUpdateActiveTab
   } = props;
 
@@ -136,33 +134,6 @@ export default function LeafPane(props: {
         >
           ::
         </span>
-        <div className="pane-tabs" role="tablist" aria-label={t("pane.tabsAria")}>
-          {node.tabs.map((paneTab) => (
-            <button
-              key={paneTab.id}
-              className={paneTab.id === node.activeTabId ? "pane-tab ui-item active" : "pane-tab ui-item"}
-              onClick={() => onSetActiveTab(paneTab.id)}
-              title={displayTabTitle(paneTab as any)}
-            >
-              <span className="pane-tab-label">{displayTabTitle(paneTab as any)}</span>
-              {node.tabs.length > 1 ? (
-                <span
-                  className="pane-tab-close"
-                  title={t("pane.tabCloseTitle")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCloseTab(paneTab.id);
-                  }}
-                >
-                  x
-                </span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-
-        <div className="pane-spacer" />
-
         <select
           className="pane-select"
           value={tab.pane}
@@ -175,6 +146,8 @@ export default function LeafPane(props: {
           <option value="transferQueue">{t("pane.types.queue")}</option>
           <option value="notes">{t("pane.types.notes")}</option>
         </select>
+
+        <div className="pane-spacer" />
 
         <button
           className="pane-btn icon-only"
