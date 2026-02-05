@@ -327,7 +327,13 @@ export default function App() {
 
   const addView = () => {
     const newLeaf = leafFromPane("localBrowser");
-    updateActiveRoot((root) => splitRootWithLeaf(root, "row", newLeaf, 0.7));
+    updateActiveRoot((root) => {
+      if (root.kind === "split" && root.dir === "row" && root.a.kind === "leaf" && root.b.kind === "leaf") {
+        const balancedLeft = { ...root, ratio: 0.5 };
+        return splitRootWithLeaf(balancedLeft, "row", newLeaf, 2 / 3);
+      }
+      return splitRootWithLeaf(root, "row", newLeaf, 0.7);
+    });
     setActiveLeaf(activeTab.id, newLeaf.id);
   };
 
