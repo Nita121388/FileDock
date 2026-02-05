@@ -65,6 +65,7 @@ export default function SftpBrowserPane(props: {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const conn = useMemo(() => {
     return {
@@ -394,41 +395,6 @@ export default function SftpBrowserPane(props: {
         </div>
 
         <div className="toolbar-row">
-          <label title={t("sftp.titles.knownHostsPolicy")}>
-            {t("sftp.labels.knownHosts")}{" "}
-            <select
-              value={st.knownHostsPolicy}
-              onChange={(e) =>
-                props.onTabChange({
-                  ...props.tab,
-                  state: { ...st, knownHostsPolicy: e.target.value as any }
-                })
-              }
-            >
-              <option value="strict">{t("sftp.knownHosts.strict")}</option>
-              <option value="accept-new">{t("sftp.knownHosts.acceptNew")}</option>
-              <option value="insecure">{t("sftp.knownHosts.insecure")}</option>
-            </select>
-          </label>
-          <label title={t("sftp.titles.knownHostsPath")}>
-            {t("sftp.labels.knownHostsPath")}{" "}
-            <input
-              value={st.knownHostsPath}
-              onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, knownHostsPath: e.target.value } })}
-              placeholder={t("sftp.placeholders.knownHostsPath")}
-            />
-          </label>
-        </div>
-
-        <div className="toolbar-row">
-          <label title={t("sftp.titles.basePath")}>
-            {t("sftp.labels.base")}{" "}
-            <input
-              value={st.basePath}
-              onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, basePath: e.target.value } })}
-              placeholder={t("sftp.placeholders.basePath")}
-            />
-          </label>
           <label title={t("sftp.titles.currentPath")}>
             {t("sftp.labels.path")}{" "}
             <input
@@ -449,26 +415,77 @@ export default function SftpBrowserPane(props: {
           <button className="pane-btn" onClick={() => onUploadFile()} disabled={loading}>
             {t("sftp.actions.upload")}
           </button>
+          <button
+            className="pane-btn"
+            onClick={() => setShowAdvanced((v) => !v)}
+            aria-expanded={showAdvanced}
+          >
+            {showAdvanced ? t("sftp.actions.advancedHide") : t("sftp.actions.advancedShow")}
+          </button>
         </div>
 
-        <div className="toolbar-row">
-          <label title={t("sftp.titles.filedock")}>
-            {t("sftp.labels.filedock")}{" "}
-            <input
-              value={st.filedockPath}
-              onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, filedockPath: e.target.value } })}
-              placeholder={t("sftp.placeholders.filedock")}
-            />
-          </label>
-          <label title={t("sftp.titles.pluginDirs")}>
-            {t("sftp.labels.pluginDirs")}{" "}
-            <input
-              value={st.pluginDirs}
-              onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, pluginDirs: e.target.value } })}
-              placeholder={t("sftp.placeholders.pluginDirs")}
-            />
-          </label>
-        </div>
+        {showAdvanced ? (
+          <div className="sftp-advanced">
+            <div className="toolbar-row">
+              <label title={t("sftp.titles.knownHostsPolicy")}>
+                {t("sftp.labels.knownHosts")}{" "}
+                <select
+                  value={st.knownHostsPolicy}
+                  onChange={(e) =>
+                    props.onTabChange({
+                      ...props.tab,
+                      state: { ...st, knownHostsPolicy: e.target.value as any }
+                    })
+                  }
+                >
+                  <option value="strict">{t("sftp.knownHosts.strict")}</option>
+                  <option value="accept-new">{t("sftp.knownHosts.acceptNew")}</option>
+                  <option value="insecure">{t("sftp.knownHosts.insecure")}</option>
+                </select>
+              </label>
+              <label title={t("sftp.titles.knownHostsPath")}>
+                {t("sftp.labels.knownHostsPath")}{" "}
+                <input
+                  value={st.knownHostsPath}
+                  onChange={(e) =>
+                    props.onTabChange({ ...props.tab, state: { ...st, knownHostsPath: e.target.value } })
+                  }
+                  placeholder={t("sftp.placeholders.knownHostsPath")}
+                />
+              </label>
+            </div>
+
+            <div className="toolbar-row">
+              <label title={t("sftp.titles.basePath")}>
+                {t("sftp.labels.base")}{" "}
+                <input
+                  value={st.basePath}
+                  onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, basePath: e.target.value } })}
+                  placeholder={t("sftp.placeholders.basePath")}
+                />
+              </label>
+            </div>
+
+            <div className="toolbar-row">
+              <label title={t("sftp.titles.filedock")}>
+                {t("sftp.labels.filedock")}{" "}
+                <input
+                  value={st.filedockPath}
+                  onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, filedockPath: e.target.value } })}
+                  placeholder={t("sftp.placeholders.filedock")}
+                />
+              </label>
+              <label title={t("sftp.titles.pluginDirs")}>
+                {t("sftp.labels.pluginDirs")}{" "}
+                <input
+                  value={st.pluginDirs}
+                  onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, pluginDirs: e.target.value } })}
+                  placeholder={t("sftp.placeholders.pluginDirs")}
+                />
+              </label>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {err ? <div className="pane-error">{t("sftp.error.prefix", { message: err })}</div> : null}

@@ -889,6 +889,11 @@ a {
   align-items: center;
 }
 
+.sftp-advanced {
+  padding-top: var(--space-2);
+  border-top: 1px dashed hsl(var(--border) / 0.5);
+}
+
 .pane-toolbar label {
   display: inline-flex;
   align-items: center;

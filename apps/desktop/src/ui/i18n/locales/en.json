@@ -361,6 +361,8 @@
       "up": "Up",
       "mkdir": "Mkdir",
       "upload": "Upload",
+      "advancedShow": "Advanced",
+      "advancedHide": "Hide advanced",
       "download": "Download",
       "rename": "Rename",
       "move": "Move",
