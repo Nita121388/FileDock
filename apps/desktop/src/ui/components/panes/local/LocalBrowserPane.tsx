@@ -6,6 +6,7 @@ import { listLocalDir, type LocalDirEntry } from "../../../api/tauri";
 import { onPaneCommand } from "../../../commandBus";
 import { useTranslation } from "react-i18next";
 import { homeDir } from "@tauri-apps/api/path";
+import type { NoticeLevel } from "../../NoticeCenter";
 
 const FORMAT_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 
@@ -32,10 +33,11 @@ type LocalTab = Extract<PaneTab, { pane: "localBrowser" }>;
 export default function LocalBrowserPane(props: {
   paneId: string;
   tab: LocalTab;
+  onNotify: (level: NoticeLevel, message: string, title?: string, autoCloseMs?: number) => void;
   onTabChange: (tab: LocalTab) => void;
 }) {
   const { t } = useTranslation();
-  const { paneId, tab, onTabChange } = props;
+  const { paneId, tab, onTabChange, onNotify } = props;
   const [entries, setEntries] = useState<LocalDirEntry[]>([]);
   const [status, setStatus] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -60,12 +62,14 @@ export default function LocalBrowserPane(props: {
       setEntries(sorted);
       setStatus("");
     } catch (e: any) {
+      const msg = String(e?.message ?? e);
       setEntries([]);
-      setStatus(String(e?.message ?? e));
+      setStatus(msg);
+      onNotify("error", msg);
     } finally {
       setLoading(false);
     }
-  }, [basePath, fullPath]);
+  }, [basePath, fullPath, onNotify]);
 
   useEffect(() => {
     refresh();
@@ -91,17 +95,30 @@ export default function LocalBrowserPane(props: {
 
   const pickFolder = useCallback(async () => {
     if (!isTauri()) {
-      setStatus(t("local.status.desktopOnly"));
+      const msg = t("local.status.desktopOnly");
+      setStatus(msg);
+      onNotify("warning", msg);
       return;
     }
-    const picked = await openDialog({
-      directory: true,
-      multiple: false,
-      title: t("local.dialog.chooseTitle")
-    });
-    if (!picked || Array.isArray(picked)) return;
-    onTabChange({ ...tab, state: { ...tab.state, basePath: picked, path: "" } });
-  }, [onTabChange, tab]);
+    setLoading(true);
+    try {
+      const picked = await openDialog({
+        directory: true,
+        multiple: false,
+        title: t("local.dialog.chooseTitle")
+      });
+      if (!picked || Array.isArray(picked)) return;
+      setStatus("");
+      onNotify("info", t("local.notice.selected", { path: picked }));
+      onTabChange({ ...tab, state: { ...tab.state, basePath: picked, path: "" } });
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      setStatus(msg);
+      onNotify("error", msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [onNotify, onTabChange, t, tab]);
 
   const goUp = useCallback(() => {
     if (!relPath) return;
@@ -168,7 +185,12 @@ export default function LocalBrowserPane(props: {
               }}
               title={entry.path}
             >
-              <div className="db-title">{entry.name}</div>
+              <div className="db-title">
+                <span className="db-emoji" aria-hidden="true">
+                  {entry.kind === "dir" ? "📁" : "📄"}
+                </span>
+                <span className="db-name">{entry.name}</span>
+              </div>
               <div className="db-sub">
                 {entry.kind === "dir" ? t("local.entry.folder") : formatBytes(entry.size)}
               </div>

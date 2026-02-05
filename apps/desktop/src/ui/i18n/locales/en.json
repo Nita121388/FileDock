@@ -275,6 +275,11 @@
     "hint": "This pane is a scratchpad. (Later: device/snapshot details, filters, settings.)",
     "placeholder": "Write notes here..."
   },
+  "notice": {
+    "info": "Info",
+    "warning": "Warning",
+    "error": "Error"
+  },
   "local": {
     "title": "Local",
     "pathNone": "No folder selected",
@@ -289,6 +294,9 @@
     "status": {
       "desktopOnly": "Local file picker is available only in the desktop app.",
       "items": "items: {{count}}"
+    },
+    "notice": {
+      "selected": "Selected folder: {{path}}"
     },
     "empty": {
       "choose": "Choose a folder to browse local files.",

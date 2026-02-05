@@ -6,10 +6,12 @@ import LocalBrowserPane from "./local/LocalBrowserPane";
 import NotesPane from "./notes/NotesPane";
 import SftpBrowserPane from "./sftp/SftpBrowserPane";
 import TransferQueuePane from "./transfer/TransferQueuePane";
+import type { NoticeLevel } from "../NoticeCenter";
 
 export function PaneView(props: {
   tab: PaneTab;
   settings: Settings;
+  onNotify: (level: NoticeLevel, message: string, title?: string, autoCloseMs?: number) => void;
   onUpdateTab: (updater: (tab: PaneTab) => PaneTab) => void;
   transfers: TransferJob[];
   onUpdateTransfer: (id: string, updates: Partial<TransferJob>) => void;
@@ -93,6 +95,7 @@ export function PaneView(props: {
         <LocalBrowserPane
           paneId={props.tab.id}
           tab={props.tab}
+          onNotify={props.onNotify}
           onTabChange={(next) => props.onUpdateTab(() => next)}
         />
       );

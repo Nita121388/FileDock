@@ -5,12 +5,14 @@ import type { TransferJob } from "../../model/transfers";
 import { PaneView } from "../panes/PaneView";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { NoticeLevel } from "../NoticeCenter";
 
 export default function LeafPane(props: {
   node: LeafNode;
   active?: boolean;
   settings: Settings;
   transfers: TransferJob[];
+  onNotify: (level: NoticeLevel, message: string, title?: string, autoCloseMs?: number) => void;
   onActivate?: (leafId: string) => void;
   onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../../model/transfers").Conn) => void;
   onEnqueueSftpDownload: (job: {
@@ -89,6 +91,7 @@ export default function LeafPane(props: {
     active,
     settings,
     transfers,
+    onNotify,
     onActivate,
     onEnqueueDownload,
     onEnqueueSftpDownload,
@@ -290,6 +293,7 @@ export default function LeafPane(props: {
           settings={settings}
           onUpdateTab={onUpdateActiveTab}
           transfers={transfers}
+          onNotify={onNotify}
           onEnqueueDownload={onEnqueueDownload}
           onEnqueueSftpDownload={onEnqueueSftpDownload}
           onEnqueueSftpUpload={onEnqueueSftpUpload}

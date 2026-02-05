@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { WorkspaceView } from "./components/WorkspaceView";
+import NoticeCenter, { type NoticeLevel, type NoticeItem } from "./components/NoticeCenter";
 import {
   DEFAULT_APP_STATE,
   type AppState,
@@ -67,6 +68,7 @@ export default function App() {
   const [showCommand, setShowCommand] = useState(false);
   const [showConnHelp, setShowConnHelp] = useState(false);
   const [activeLeafByTab, setActiveLeafByTab] = useState<Record<string, string>>({});
+  const [notices, setNotices] = useState<NoticeItem[]>([]);
   const webPreview = !isTauri();
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
   const runAllBusyRef = useRef(false);
@@ -182,6 +184,26 @@ export default function App() {
   const getActiveLeafId = (tab: TabState): string | null => {
     return findFirstLeaf(tab.root);
   };
+
+  const dismissNotice = useCallback((id: string) => {
+    setNotices((items) => items.filter((n) => n.id !== id));
+  }, []);
+
+  const notify = useCallback(
+    (level: NoticeLevel, message: string, title?: string, autoCloseMs?: number) => {
+      const id = uid("notice");
+      const noticeTitle = title ?? t(`notice.${level}` as any);
+      const entry: NoticeItem = { id, level, title: noticeTitle, message };
+      setNotices((items) => [...items, entry]);
+      const ttl =
+        autoCloseMs ??
+        (level === "error" ? 9000 : level === "warning" ? 6500 : 4500);
+      if (ttl > 0) {
+        window.setTimeout(() => dismissNotice(id), ttl);
+      }
+    },
+    [dismissNotice, t]
+  );
 
   const ensureMissingOnDestShared = async (dst: Conn, hashes: string[], signal: AbortSignal) => {
     const ent = getPresenceCache(dst);
@@ -2531,6 +2553,7 @@ export default function App() {
             activeLeafId={activeLeafId}
             settings={settings}
             transfers={transfers}
+            onNotify={notify}
             onEnqueueDownload={enqueueDownload}
             onEnqueueSftpDownload={enqueueSftpDownload}
             onEnqueueSftpUpload={enqueueSftpUpload}
@@ -2565,6 +2588,8 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      <NoticeCenter notices={notices} onDismiss={dismissNotice} />
 
       <div className="statusbar">
         <span className="kbd">{t("app.statusbar.source")}</span> {t("app.statusbar.sourceHint")}

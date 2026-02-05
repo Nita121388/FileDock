@@ -17,12 +17,14 @@ import type { Settings } from "../model/settings";
 import type { TransferJob } from "../model/transfers";
 import LeafPane from "./layout/LeafPane";
 import SplitNodeView from "./layout/SplitNodeView";
+import type { NoticeLevel } from "./NoticeCenter";
 
 export function WorkspaceView(props: {
   tab: TabState;
   activeLeafId: string | null;
   settings: Settings;
   transfers: TransferJob[];
+  onNotify: (level: NoticeLevel, message: string, title?: string, autoCloseMs?: number) => void;
   onEnqueueDownload: (snapshotId: string, path: string, conn?: import("../model/transfers").Conn) => void;
   onEnqueueSftpDownload: (job: {
     runner?: import("../model/transfers").PluginRunConfig;
@@ -92,6 +94,7 @@ export function WorkspaceView(props: {
     activeLeafId,
     settings,
     transfers,
+    onNotify,
     onEnqueueDownload,
     onEnqueueSftpDownload,
     onEnqueueSftpUpload,
@@ -150,6 +153,7 @@ export function WorkspaceView(props: {
           onCancelTransfer={onCancelTransfer}
           onUpdateTransfer={onUpdateTransfer}
           onSetDeviceAuth={onSetDeviceAuth}
+          onNotify={onNotify}
           draggingLeafId={draggingLeafId}
           setDraggingLeafId={setDraggingLeafId}
           onDrop={(sourceLeafId, targetLeafId, zone) =>
@@ -183,6 +187,7 @@ export function WorkspaceView(props: {
       onRunTransfer,
       onSetDeviceAuth,
       onUpdateTransfer,
+      onNotify,
       settings,
       transfers,
       updateRoot

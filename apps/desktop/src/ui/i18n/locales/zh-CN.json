@@ -275,6 +275,11 @@
     "hint": "此面板用于临时记录。（后续：设备/快照详情、过滤器、设置）",
     "placeholder": "在此记录..."
   },
+  "notice": {
+    "info": "信息",
+    "warning": "警告",
+    "error": "错误"
+  },
   "local": {
     "title": "本地",
     "pathNone": "未选择文件夹",
@@ -289,6 +294,9 @@
     "status": {
       "desktopOnly": "本地文件选择仅在桌面端可用。",
       "items": "项目数：{{count}}"
+    },
+    "notice": {
+      "selected": "已选择文件夹：{{path}}"
     },
     "empty": {
       "choose": "请选择一个文件夹以浏览本地文件。",
