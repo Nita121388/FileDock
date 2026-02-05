@@ -998,22 +998,26 @@ a {
   inset: 0;
   background: hsl(130 95% 55% / 0.18);
   border: 0;
-  border-radius: inherit;
+  border-radius: 0;
   pointer-events: none;
   box-shadow: none;
+  z-index: 3;
 }
 
 .pane-drop-preview.drop-top {
   bottom: 70%;
+  border-radius: var(--radius) var(--radius) 0 0;
 }
 
 .pane-drop-preview.drop-bottom {
   top: 70%;
+  border-radius: 0 0 var(--radius) var(--radius);
 }
 
 .pane-drop-preview.drop-center {
   top: 30%;
   bottom: 30%;
+  border-radius: 0;
 }
 
 .pane.can-drop .drop-zone {
