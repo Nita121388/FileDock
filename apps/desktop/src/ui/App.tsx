@@ -2218,27 +2218,27 @@ export default function App() {
           >
             {t("app.workspaces.label")}
           </div>
-          {state.tabs.map((t) => (
+          {state.tabs.map((tab) => (
             <div
-              key={t.id}
-              className={t.id === activeTab.id ? "tab ui-item active" : "tab ui-item"}
+              key={tab.id}
+              className={tab.id === activeTab.id ? "tab ui-item active" : "tab ui-item"}
               role="tab"
-              aria-selected={t.id === activeTab.id}
+              aria-selected={tab.id === activeTab.id}
               tabIndex={0}
-              onClick={() => setActiveTab(t.id)}
+              onClick={() => setActiveTab(tab.id)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") setActiveTab(t.id);
+                if (e.key === "Enter" || e.key === " ") setActiveTab(tab.id);
               }}
             >
               <span className="dot" />
-              <span>{t.name}</span>
+              <span>{tab.name}</span>
               {state.tabs.length > 1 ? (
                 <button
                   className="tab-close"
                   title={t("app.workspaces.closeTab")}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onCloseTab(t.id);
+                    onCloseTab(tab.id);
                   }}
                 >
                   x
