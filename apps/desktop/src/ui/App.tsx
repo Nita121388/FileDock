@@ -327,7 +327,7 @@ export default function App() {
 
   const addView = () => {
     const newLeaf = leafFromPane("localBrowser");
-    updateActiveRoot((root) => splitRootWithLeaf(root, "row", newLeaf));
+    updateActiveRoot((root) => splitRootWithLeaf(root, "row", newLeaf, 0.7));
     setActiveLeaf(activeTab.id, newLeaf.id);
   };
 

@@ -346,13 +346,18 @@ export function splitRoot(node: LayoutNode, dir: SplitDir, newPane: PaneKind = "
   };
 }
 
-export function splitRootWithLeaf(node: LayoutNode, dir: SplitDir, right: LeafNode): LayoutNode {
+export function splitRootWithLeaf(
+  node: LayoutNode,
+  dir: SplitDir,
+  right: LeafNode,
+  ratio: number = 0.5
+): LayoutNode {
   const left = node;
   return {
     kind: "split",
     id: uid("split"),
     dir,
-    ratio: 0.5,
+    ratio: clampRatio(ratio),
     a: left,
     b: right
   };
