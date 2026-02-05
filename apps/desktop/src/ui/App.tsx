@@ -367,11 +367,19 @@ export default function App() {
     };
   };
 
+  const describeLayout = (node: LayoutNode): string => {
+    if (node.kind === "leaf") return `leaf(${node.id})`;
+    const tag = node.dir === "row" ? "row" : "col";
+    const ratio = Number.isFinite(node.ratio) ? node.ratio.toFixed(3) : "nan";
+    return `${tag}(${ratio})[${describeLayout(node.a)}|${describeLayout(node.b)}]`;
+  };
+
   const buildAddViewLayout = (leaves: LeafNode[]): LayoutNode => {
     const total = leaves.length;
     if (total <= 1) return leaves[0]!;
 
     if (total <= 5) {
+      console.info("[layout:add-view] row-equal", { total });
       return buildRowLayout(leaves);
     }
 
@@ -394,15 +402,34 @@ export default function App() {
           columns.push(top);
         }
       }
+      console.info("[layout:add-view] row+col", {
+        total,
+        columns: columns.map((col, idx) => ({
+          idx,
+          kind: col.kind,
+          top: col.kind === "split" ? col.a.id : col.id,
+          bottom: col.kind === "split" ? col.b.id : null
+        }))
+      });
       return buildRowLayout(columns);
     }
 
+    console.info("[layout:add-view] fallback-row", { total });
     return buildRowLayout(leaves);
   };
 
   const addView = () => {
     const newLeaf = leafFromPane("localBrowser");
-    updateActiveRoot((root) => buildAddViewLayout([...collectLeavesByRow(root), newLeaf]));
+    updateActiveRoot((root) => {
+      const leaves = collectLeavesByRow(root);
+      const next = buildAddViewLayout([...leaves, newLeaf]);
+      console.info("[layout:add-view] built", {
+        before: leaves.length,
+        after: leaves.length + 1,
+        layout: describeLayout(next)
+      });
+      return next;
+    });
     setActiveLeaf(activeTab.id, newLeaf.id);
   };
 

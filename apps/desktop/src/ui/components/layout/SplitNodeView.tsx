@@ -84,16 +84,21 @@ export default function SplitNodeView(props: {
       <div className="split-child" style={{ flexBasis: `${node.ratio * 100}%` }}>
         {render(node.a)}
       </div>
+      <div className="split-child" style={{ flexBasis: `${(1 - node.ratio) * 100}%` }}>
+        {render(node.b)}
+      </div>
       <div
         className={isRow ? "gutter gutter-row" : "gutter gutter-col"}
         data-split-gutter={node.id}
         role="separator"
         aria-orientation={isRow ? "vertical" : "horizontal"}
         tabIndex={-1}
+        style={
+          isRow
+            ? { left: `calc(${node.ratio * 100}% - 4px)`, top: 0, bottom: 0, width: 8 }
+            : { top: `calc(${node.ratio * 100}% - 4px)`, left: 0, right: 0, height: 8 }
+        }
       />
-      <div className="split-child" style={{ flexBasis: `${(1 - node.ratio) * 100}%` }}>
-        {render(node.b)}
-      </div>
     </div>
   );
 }

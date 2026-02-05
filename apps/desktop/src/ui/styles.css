@@ -611,6 +611,8 @@ a {
   display: flex;
   min-height: 0;
   min-width: 0;
+  position: relative;
+  flex: 1;
 }
 
 .split-child {
@@ -621,8 +623,8 @@ a {
 
 .gutter {
   background: hsl(var(--foreground) / 0.08);
-  position: relative;
-  flex: 0 0 auto;
+  position: absolute;
+  z-index: 3;
 }
 
 .gutter-row {
