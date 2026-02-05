@@ -137,21 +137,21 @@ export default function LeafPane(props: {
           ::
         </span>
         <div className="pane-tabs" role="tablist" aria-label={t("pane.tabsAria")}>
-          {node.tabs.map((t) => (
+          {node.tabs.map((paneTab) => (
             <button
-              key={t.id}
-              className={t.id === node.activeTabId ? "pane-tab ui-item active" : "pane-tab ui-item"}
-              onClick={() => onSetActiveTab(t.id)}
-              title={displayTabTitle(t as any)}
+              key={paneTab.id}
+              className={paneTab.id === node.activeTabId ? "pane-tab ui-item active" : "pane-tab ui-item"}
+              onClick={() => onSetActiveTab(paneTab.id)}
+              title={displayTabTitle(paneTab as any)}
             >
-              <span className="pane-tab-label">{displayTabTitle(t as any)}</span>
+              <span className="pane-tab-label">{displayTabTitle(paneTab as any)}</span>
               {node.tabs.length > 1 ? (
                 <span
                   className="pane-tab-close"
                   title={t("pane.tabCloseTitle")}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onCloseTab(t.id);
+                    onCloseTab(paneTab.id);
                   }}
                 >
                   x
