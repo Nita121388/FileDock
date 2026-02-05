@@ -11,8 +11,10 @@ import {
 import {
   activeTab as activeLeafTab,
   findLeaf,
+  leafFromPane,
   setLeafPane,
   splitRoot,
+  splitRootWithLeaf,
   type LayoutNode,
   type PaneKind
 } from "./model/layout";
@@ -324,7 +326,9 @@ export default function App() {
   };
 
   const addView = () => {
-    updateActiveRoot((root) => splitRoot(root, "row", "localBrowser"));
+    const newLeaf = leafFromPane("localBrowser");
+    updateActiveRoot((root) => splitRootWithLeaf(root, "row", newLeaf));
+    setActiveLeaf(activeTab.id, newLeaf.id);
   };
 
   const goToNextWorkspace = (dir: 1 | -1) => {
