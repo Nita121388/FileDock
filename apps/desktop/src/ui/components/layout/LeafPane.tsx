@@ -3,6 +3,7 @@ import { activeTab } from "../../model/layout";
 import type { Settings } from "../../model/settings";
 import type { TransferJob } from "../../model/transfers";
 import { PaneView } from "../panes/PaneView";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 export default function LeafPane(props: {
@@ -114,6 +115,7 @@ export default function LeafPane(props: {
   const isDraggingSelf = draggingLeafId === node.id;
   const canDrop = dragging && !isDraggingSelf;
   const tab = activeTab(node);
+  const [hoverZone, setHoverZone] = useState<DropZone | null>(null);
   const className = [
     "pane",
     active ? "active" : "",
@@ -187,25 +189,31 @@ export default function LeafPane(props: {
 
       {canDrop ? (
         <div className="drop-overlay" aria-label={t("pane.dropZonesAria")}>
+          {hoverZone ? <div className={`drop-preview drop-${hoverZone}`} /> : null}
           <DropZoneBox
             zone="left"
             onDrop={(sourceId) => onDrop(sourceId, node.id, "left")}
+            onHover={setHoverZone}
           />
           <DropZoneBox
             zone="right"
             onDrop={(sourceId) => onDrop(sourceId, node.id, "right")}
+            onHover={setHoverZone}
           />
           <DropZoneBox
             zone="top"
             onDrop={(sourceId) => onDrop(sourceId, node.id, "top")}
+            onHover={setHoverZone}
           />
           <DropZoneBox
             zone="bottom"
             onDrop={(sourceId) => onDrop(sourceId, node.id, "bottom")}
+            onHover={setHoverZone}
           />
           <DropZoneBox
             zone="center"
             onDrop={(sourceId) => onDrop(sourceId, node.id, "center")}
+            onHover={setHoverZone}
           />
         </div>
       ) : null}
@@ -234,18 +242,26 @@ export default function LeafPane(props: {
   );
 }
 
-function DropZoneBox(props: { zone: DropZone; onDrop: (sourceLeafId: string) => void }) {
-  const { zone, onDrop } = props;
+function DropZoneBox(props: {
+  zone: DropZone;
+  onDrop: (sourceLeafId: string) => void;
+  onHover: (zone: DropZone | null) => void;
+}) {
+  const { zone, onDrop, onHover } = props;
   return (
     <div
       className={`drop-zone drop-${zone}`}
       onDragOver={(e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
+        onHover(zone);
       }}
+      onDragEnter={() => onHover(zone)}
+      onDragLeave={() => onHover(null)}
       onDrop={(e) => {
         e.preventDefault();
         const sourceId = e.dataTransfer.getData("text/plain");
+        onHover(null);
         if (sourceId) onDrop(sourceId);
       }}
     />
