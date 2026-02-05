@@ -191,9 +191,9 @@ export default function LocalBrowserPane(props: {
                 </span>
                 <span className="db-name">{entry.name}</span>
               </div>
-              <div className="db-sub">
-                {entry.kind === "dir" ? t("local.entry.folder") : formatBytes(entry.size)}
-              </div>
+              {entry.kind === "dir" ? null : (
+                <div className="db-sub">{formatBytes(entry.size)}</div>
+              )}
             </button>
           ))
         )}
