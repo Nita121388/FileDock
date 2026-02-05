@@ -2194,20 +2194,6 @@ export default function App() {
             placeholder={t("app.conn.token.placeholder")}
             title={t("app.conn.token.title")}
           />
-          <input
-            className="conn-input"
-            value={settings.deviceId}
-            onChange={(e) => setSettings((s) => ({ ...s, deviceId: e.target.value }))}
-            placeholder={t("app.conn.deviceId.placeholder")}
-            title={t("app.conn.deviceId.title")}
-          />
-          <input
-            className="conn-input"
-            value={settings.deviceToken}
-            onChange={(e) => setSettings((s) => ({ ...s, deviceToken: e.target.value }))}
-            placeholder={t("app.conn.deviceToken.placeholder")}
-            title={t("app.conn.deviceToken.title")}
-          />
           <button
             className="btn"
             title={t("app.conn.helpTitle")}
@@ -2279,8 +2265,6 @@ export default function App() {
           <ul>
             <li>{t("app.conn.helpText.serverBaseUrl")}</li>
             <li>{t("app.conn.helpText.token")}</li>
-            <li>{t("app.conn.helpText.deviceId")}</li>
-            <li>{t("app.conn.helpText.deviceToken")}</li>
           </ul>
         </div>
       ) : null}
