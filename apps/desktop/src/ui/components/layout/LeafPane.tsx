@@ -120,61 +120,6 @@ export default function LeafPane(props: {
   const tab = activeTab(node);
   const [isDragOver, setIsDragOver] = useState(false);
   const [dropZone, setDropZone] = useState<DropZone>("center");
-  const logDragPreview = (
-    label: string,
-    target: EventTarget & Element,
-    zone: DropZone,
-    clientX: number,
-    clientY: number
-  ) => {
-    if (!import.meta.env.DEV) return;
-    requestAnimationFrame(() => {
-      const pane = target as HTMLElement;
-      const preview = pane.querySelector(".pane-drop-preview") as HTMLElement | null;
-      const titlebar = pane.querySelector(".pane-titlebar") as HTMLElement | null;
-      const body = pane.querySelector(".pane-body") as HTMLElement | null;
-      const paneStyle = getComputedStyle(pane);
-      const previewStyle = preview ? getComputedStyle(preview) : null;
-      console.debug("[drag-preview]", {
-        label,
-        zone,
-        client: { x: Math.round(clientX), y: Math.round(clientY) },
-        pane: pane.getBoundingClientRect(),
-        paneStyle: {
-          position: paneStyle.position,
-          padding: paneStyle.padding,
-          transform: paneStyle.transform
-        },
-        titlebar: titlebar?.getBoundingClientRect(),
-        body: body?.getBoundingClientRect(),
-        preview: preview?.getBoundingClientRect(),
-        previewStyle: previewStyle
-          ? {
-              position: previewStyle.position,
-              inset: previewStyle.inset,
-              top: previewStyle.top,
-              right: previewStyle.right,
-              bottom: previewStyle.bottom,
-              left: previewStyle.left,
-              width: previewStyle.width,
-              height: previewStyle.height,
-              transform: previewStyle.transform,
-              transformOrigin: previewStyle.transformOrigin
-            }
-          : null,
-        previewOffset: preview
-          ? {
-              offsetWidth: preview.offsetWidth,
-              offsetHeight: preview.offsetHeight,
-              offsetTop: preview.offsetTop,
-              offsetLeft: preview.offsetLeft,
-              offsetParent:
-                (preview.offsetParent as HTMLElement | null)?.className || null
-            }
-          : null
-      });
-    });
-  };
   const className = [
     "pane",
     active ? "active" : "",
@@ -196,7 +141,6 @@ export default function LeafPane(props: {
         const zone = y < 0.3 ? "top" : y > 0.7 ? "bottom" : "center";
         setDropZone(zone);
         setIsDragOver(true);
-        logDragPreview("enter", e.currentTarget, zone, e.clientX, e.clientY);
       }}
       onDragOver={(e) => {
         if (!canDrop) return;
@@ -207,7 +151,6 @@ export default function LeafPane(props: {
         const zone = y < 0.3 ? "top" : y > 0.7 ? "bottom" : "center";
         if (zone !== dropZone) {
           setDropZone(zone);
-          logDragPreview("over", e.currentTarget, zone, e.clientX, e.clientY);
         }
       }}
       onDragLeave={(e) => {
