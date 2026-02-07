@@ -11,9 +11,18 @@ need() {
 }
 
 need curl
-need sha256sum
 need mktemp
 need python3
+
+HASH_CMD=()
+if command -v sha256sum >/dev/null 2>&1; then
+  HASH_CMD=(sha256sum)
+elif command -v shasum >/dev/null 2>&1; then
+  HASH_CMD=(shasum -a 256)
+else
+  echo "[smoke] missing dependency: sha256sum or shasum" >&2
+  exit 1
+fi
 
 PORT="${FILEDOCK_SMOKE_PORT:-8787}"
 ADDR="127.0.0.1:${PORT}"
@@ -99,8 +108,8 @@ echo "[smoke] restoring folder..."
 run_cli pull-folder --server "$BASE" --snapshot "$SNAPSHOT_ID" --out "$OUT" --concurrency 4 >/dev/null
 
 echo "[smoke] comparing hashes..."
-(cd "$SRC" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$TMP/src.sha256"
-(cd "$OUT" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$TMP/out.sha256"
+(cd "$SRC" && find . -type f -print0 | sort -z | xargs -0 "${HASH_CMD[@]}") > "$TMP/src.sha256"
+(cd "$OUT" && find . -type f -print0 | sort -z | xargs -0 "${HASH_CMD[@]}") > "$TMP/out.sha256"
 
 diff -u "$TMP/src.sha256" "$TMP/out.sha256" >/dev/null
 
