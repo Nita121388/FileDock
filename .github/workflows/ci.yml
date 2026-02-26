@@ -19,15 +19,22 @@ jobs:
             libgtk-3-dev \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            ripgrep
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
 
       - name: cargo fmt
         run: cargo fmt --all -- --check
+
+      - name: build desktop sidecars
+        run: ./scripts/build-desktop-sidecars.sh
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
