@@ -385,7 +385,7 @@ fn cancel_restore_snapshot(
     if id.is_empty() {
         return Err("snapshot_id required".to_string());
     }
-    let mut m = state
+    let m = state
         .cancel
         .lock()
         .map_err(|_| "restore manager lock poisoned".to_string())?;
@@ -633,7 +633,7 @@ fn cancel_filedock_plugin_run(
         return Err("runId required".to_string());
     }
 
-    let mut m = state
+    let m = state
         .cancel
         .lock()
         .map_err(|_| "plugin run manager lock poisoned".to_string())?;
@@ -833,7 +833,7 @@ async fn copy_snapshot_file_to_sftp(
     }
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn filedock: {e}"))?;
-    let mut stderr_pipe = child.stderr.take();
+    let stderr_pipe = child.stderr.take();
     let status = tokio::select! {
         res = child.wait() => res.map_err(|e| format!("wait filedock: {e}"))?,
         _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
@@ -964,7 +964,7 @@ async fn import_sftp_file_to_snapshot(
     }
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn filedock: {e}"))?;
-    let mut stderr_pipe = child.stderr.take();
+    let stderr_pipe = child.stderr.take();
     let status = tokio::select! {
         res = child.wait() => res.map_err(|e| format!("wait filedock: {e}"))?,
         _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
@@ -1354,8 +1354,8 @@ async fn run_filedock_plugin(
     }
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn filedock: {e}"))?;
-    let mut stdout_pipe = child.stdout.take();
-    let mut stderr_pipe = child.stderr.take();
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
     let status = tokio::select! {
         res = child.wait() => res.map_err(|e| format!("wait filedock: {e}"))?,
         _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
