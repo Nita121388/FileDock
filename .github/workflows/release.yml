@@ -1,0 +1,161 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag name to release (e.g. v0.1.0)"
+        required: true
+        type: string
+      publish_docker:
+        description: "Publish Docker image to GHCR"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install Linux deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            ripgrep
+
+      - name: Install ripgrep (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install ripgrep
+
+      - name: Install ripgrep (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install ripgrep -y
+
+      - name: Build rust release
+        run: cargo build --release -p filedock-server -p filedock -p filedock-tui
+
+      - name: Build desktop sidecars
+        run: ./scripts/build-desktop-sidecars.sh
+
+      - name: Build desktop (tauri)
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run tauri build
+
+      - name: Prepare dist
+        id: dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+          echo "host=$HOST_TRIPLE" >> "$GITHUB_OUTPUT"
+          mkdir -p dist
+          EXT=""
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            EXT=".exe"
+          fi
+          cp "target/release/filedock-server${EXT}" dist/
+          cp "target/release/filedock${EXT}" dist/
+          cp "target/release/filedock-tui${EXT}" dist/
+          if [[ -d "apps/desktop/src-tauri/target/release/bundle" ]]; then
+            mkdir -p dist/desktop-bundle
+            cp -R "apps/desktop/src-tauri/target/release/bundle/." dist/desktop-bundle/
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ steps.dist.outputs.host }}
+          path: dist
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zip
+          mkdir -p release
+          for dir in artifacts/*; do
+            name="$(basename "$dir")"
+            base="${name#dist-}"
+            if [[ "$base" == *windows* ]]; then
+              (cd "$dir" && zip -r "../../release/filedock-${base}.zip" .)
+            else
+              tar -czf "release/filedock-${base}.tar.gz" -C "$dir" .
+            fi
+          done
+          (cd release && sha256sum * > SHA256SUMS)
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            release/*
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' || inputs.publish_docker == true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/filedock:${{ env.RELEASE_TAG }}
+            ghcr.io/${{ github.repository_owner }}/filedock:latest

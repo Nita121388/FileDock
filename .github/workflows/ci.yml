@@ -14,6 +14,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
 
       - name: cargo fmt
         run: cargo fmt --all -- --check
@@ -29,6 +30,21 @@ jobs:
 
       - name: smoke (auth mode)
         run: FILEDOCK_SMOKE_PORT=18788 FILEDOCK_TOKEN="ci-token" ./scripts/smoke.sh
+
+  build-matrix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo build (release)
+        shell: bash
+        run: cargo build --release -p filedock-server -p filedock -p filedock-tui
 
   desktop:
     runs-on: ubuntu-latest
