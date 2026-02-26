@@ -71,6 +71,7 @@ jobs:
         run: cargo build --release -p filedock-server -p filedock -p filedock-tui
 
       - name: Build desktop sidecars
+        shell: bash
         run: ./scripts/build-desktop-sidecars.sh
 
       - name: Build desktop (tauri)
