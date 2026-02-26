@@ -125,19 +125,34 @@ struct ImportSftpProgress {
 fn build_client(req: &RestoreSnapshotRequest) -> Result<reqwest::Client, String> {
     let mut headers = reqwest::header::HeaderMap::new();
 
-    if let Some(tok) = req.token.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(tok) = req
+        .token
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         let name = reqwest::header::HeaderName::from_static(TOKEN_HEADER);
         let value = reqwest::header::HeaderValue::from_str(tok)
             .map_err(|e| format!("invalid token: {e}"))?;
         headers.insert(name, value);
     }
-    if let Some(id) = req.device_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(id) = req
+        .device_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         let name = reqwest::header::HeaderName::from_static(DEVICE_ID_HEADER);
         let value = reqwest::header::HeaderValue::from_str(id)
             .map_err(|e| format!("invalid device_id: {e}"))?;
         headers.insert(name, value);
     }
-    if let Some(tok) = req.device_token.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(tok) = req
+        .device_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         let name = reqwest::header::HeaderName::from_static(DEVICE_TOKEN_HEADER);
         let value = reqwest::header::HeaderValue::from_str(tok)
             .map_err(|e| format!("invalid device_token: {e}"))?;
@@ -161,11 +176,7 @@ fn rel_posix_to_platform_path(root: &Path, rel: &str) -> Result<PathBuf, String>
     Ok(out)
 }
 
-async fn download_to_file(
-    client: &reqwest::Client,
-    url: &str,
-    dest: &Path,
-) -> Result<u64, String> {
+async fn download_to_file(client: &reqwest::Client, url: &str, dest: &Path) -> Result<u64, String> {
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -345,10 +356,7 @@ fn list_local_dir(path: String) -> Result<Vec<LocalDirEntry>, String> {
     for item in rd {
         let entry = item.map_err(|e| format!("read_dir item: {e}"))?;
         let path = entry.path();
-        let name = entry
-            .file_name()
-            .to_string_lossy()
-            .to_string();
+        let name = entry.file_name().to_string_lossy().to_string();
         let meta = entry.metadata().map_err(|e| format!("metadata: {e}"))?;
         let kind = if meta.is_dir() { "dir" } else { "file" };
         let mtime_unix = meta
@@ -459,7 +467,8 @@ async fn restore_snapshot_to_folder(
 
     let files = Arc::new(manifest.files);
     let next = Arc::new(AtomicUsize::new(0));
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<(String, u64), String>>(req.concurrency.max(1) * 2);
+    let (tx, mut rx) =
+        tokio::sync::mpsc::channel::<Result<(String, u64), String>>(req.concurrency.max(1) * 2);
     let mut handles = Vec::new();
 
     for _ in 0..req.concurrency.max(1) {
@@ -812,7 +821,12 @@ async fn copy_snapshot_file_to_sftp(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped());
 
-    if let Some(dirs) = runner.plugin_dirs.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(dirs) = runner
+        .plugin_dirs
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         cmd.env("FILEDOCK_PLUGIN_DIRS", dirs);
     } else if let Some(dir) = filedock_dir {
         cmd.env("FILEDOCK_PLUGIN_DIRS", dir.to_string_lossy().to_string());
@@ -938,7 +952,12 @@ async fn import_sftp_file_to_snapshot(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped());
 
-    if let Some(dirs) = runner.plugin_dirs.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(dirs) = runner
+        .plugin_dirs
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         cmd.env("FILEDOCK_PLUGIN_DIRS", dirs);
     } else if let Some(dir) = filedock_dir {
         cmd.env("FILEDOCK_PLUGIN_DIRS", dir.to_string_lossy().to_string());
@@ -990,9 +1009,23 @@ async fn import_sftp_file_to_snapshot(
         .map_err(|e| format!("stat temp file: {e}"))?
         .len();
 
-    emit_import(&app, &run_id, "hashing", Some(0), Some(total_bytes), Some(0));
+    emit_import(
+        &app,
+        &run_id,
+        "hashing",
+        Some(0),
+        Some(total_bytes),
+        Some(0),
+    );
     let chunks = chunk_file(&tmp).await?;
-    emit_import(&app, &run_id, "hashing done", Some(total_bytes), Some(total_bytes), Some(100));
+    emit_import(
+        &app,
+        &run_id,
+        "hashing done",
+        Some(total_bytes),
+        Some(total_bytes),
+        Some(100),
+    );
     let hashes = chunks.iter().map(|c| c.hash.clone()).collect::<Vec<_>>();
     emit_import(&app, &run_id, "checking chunks", None, None, None);
     let missing = presence_missing(&client, &base, &hashes).await?;
@@ -1007,7 +1040,8 @@ async fn import_sftp_file_to_snapshot(
             .filter(|c| missing.contains(&c.hash))
             .map(|c| c.size)
             .sum::<u64>();
-        let missing_total_chunks = chunks.iter().filter(|c| missing.contains(&c.hash)).count() as u64;
+        let missing_total_chunks =
+            chunks.iter().filter(|c| missing.contains(&c.hash)).count() as u64;
         let mut missing_done_bytes = 0u64;
         let mut missing_done_chunks = 0u64;
         emit_import(
@@ -1050,7 +1084,10 @@ async fn import_sftp_file_to_snapshot(
                 emit_import(
                     &app,
                     &run_id,
-                    &format!("uploading chunks ({}/{})", missing_done_chunks, missing_total_chunks),
+                    &format!(
+                        "uploading chunks ({}/{})",
+                        missing_done_chunks, missing_total_chunks
+                    ),
                     Some(missing_done_bytes),
                     Some(missing_total_bytes),
                     pct,
@@ -1201,7 +1238,10 @@ fn resolve_filedock_path(explicit: Option<&str>) -> (String, Option<PathBuf>) {
     // For packaged apps, prefer a sidecar binary next to the main executable.
     // Fall back to "filedock" on PATH.
     let exe = tauri::process::current_binary(&tauri::Env::default()).ok();
-    let exe_dir = exe.as_deref().and_then(|p| p.parent()).map(Path::to_path_buf);
+    let exe_dir = exe
+        .as_deref()
+        .and_then(|p| p.parent())
+        .map(Path::to_path_buf);
     if let Some(dir) = exe_dir {
         let mut candidates = vec![dir.join("filedock")];
         if cfg!(windows) {
@@ -1221,7 +1261,10 @@ fn resolve_filedock_path(explicit: Option<&str>) -> (String, Option<PathBuf>) {
 
         for c in candidates {
             if c.is_file() {
-                return (c.to_string_lossy().to_string(), c.parent().map(Path::to_path_buf));
+                return (
+                    c.to_string_lossy().to_string(),
+                    c.parent().map(Path::to_path_buf),
+                );
             }
         }
     }

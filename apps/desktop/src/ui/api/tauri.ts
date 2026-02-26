@@ -1,6 +1,6 @@
 import { isTauri } from "../util/tauriEnv";
 
-type UnlistenFn = () => Promise<void>;
+type UnlistenFn = () => void | Promise<void>;
 
 function assertTauri() {
   if (!isTauri()) {

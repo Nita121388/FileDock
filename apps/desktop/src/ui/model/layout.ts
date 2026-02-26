@@ -518,11 +518,13 @@ function swapLeaves(root: LayoutNode, aId: string, bId: string): LayoutNode {
   });
 
   if (!aLeaf || !bLeaf) return root;
+  const a = aLeaf;
+  const b = bLeaf;
 
   return mapNode(root, (n) => {
     if (n.kind !== "leaf") return n;
-    if (n.id === aId) return bLeaf;
-    if (n.id === bId) return aLeaf;
+    if (n.id === aId) return b;
+    if (n.id === bId) return a;
     return n;
   });
 }
