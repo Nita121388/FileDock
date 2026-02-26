@@ -42,6 +42,9 @@ jobs:
       - name: cargo test
         run: cargo test --workspace
 
+      - name: build server for smoke
+        run: cargo build -p filedock-server
+
       - name: smoke (open mode)
         run: FILEDOCK_SMOKE_PORT=18787 ./scripts/smoke.sh
 
