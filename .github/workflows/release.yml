@@ -151,6 +151,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Normalize image owner
+        run: echo "IMAGE_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -158,5 +160,5 @@ jobs:
           file: deploy/Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/filedock:${{ env.RELEASE_TAG }}
-            ghcr.io/${{ github.repository_owner }}/filedock:latest
+            ghcr.io/${{ env.IMAGE_OWNER_LC }}/filedock:${{ env.RELEASE_TAG }}
+            ghcr.io/${{ env.IMAGE_OWNER_LC }}/filedock:latest
