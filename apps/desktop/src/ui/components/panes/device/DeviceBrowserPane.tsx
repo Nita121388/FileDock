@@ -112,6 +112,9 @@ export default function DeviceBrowserPane(props: {
     dstPath: string;
     dstBaseSnapshotId?: string;
     conflictPolicy?: "overwrite" | "skip" | "rename";
+    dstRootPath?: string;
+    note?: string;
+    deleteSource?: boolean;
   }) => void;
 }) {
   const { t } = useTranslation();
@@ -795,6 +798,7 @@ export default function DeviceBrowserPane(props: {
                 <div className="db-sub">
                   {s.root_path} · {s.snapshot_id}
                 </div>
+                {s.note ? <div className="db-sub">{t("device.meta.note", { note: s.note })}</div> : null}
               </button>
             ))}
             {filtered.length === 0 ? <div className="db-empty">{t("device.history.empty")}</div> : null}

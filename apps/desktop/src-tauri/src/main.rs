@@ -64,8 +64,14 @@ struct ImportSftpFileToSnapshotRequest {
     dst_device_name: String,
     dst_device_id: Option<String>,
     dst_base_snapshot_id: Option<String>,
+    #[serde(default)]
+    dst_root_path: Option<String>,
     dst_path: String,
     conflict_policy: Option<String>, // "overwrite" | "skip" | "rename"
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    delete_remote: bool,
 
     sftp_conn: serde_json::Value,
     remote_path: String,
@@ -73,10 +79,69 @@ struct ImportSftpFileToSnapshotRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct PushFolderSnapshotRequest {
+    server_base_url: String,
+    token: Option<String>,
+    device_id: Option<String>,
+    device_token: Option<String>,
+    device_name: String,
+    folder: String,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    concurrency: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PushFolderSnapshotResponse {
+    snapshot_id: Option<String>,
+    stdout: String,
+    stderr: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct RunnerConfig {
     filedock_path: Option<String>,
     plugin_dirs: Option<String>,
     timeout_secs: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SftpPluginError {
+    message: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SftpPluginResponse {
+    ok: bool,
+    data: Option<serde_json::Value>,
+    error: Option<SftpPluginError>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+struct SftpStatResponse {
+    kind: String,
+    #[serde(default)]
+    size: Option<u64>,
+    #[serde(default)]
+    mtime_unix: Option<i64>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+struct SftpListEntry {
+    name: String,
+    kind: String, // file | dir | other
+    #[serde(default)]
+    size: Option<u64>,
+    #[serde(default)]
+    mtime_unix: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SftpListResponse {
+    entries: Vec<SftpListEntry>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -328,6 +393,36 @@ fn unique_path(existing: &std::collections::HashSet<String>, desired: &str) -> S
         }
     }
     desired.to_string()
+}
+
+fn join_posix(a: &str, b: &str) -> String {
+    let aa = a.trim_end_matches('/');
+    let bb = b.trim_start_matches('/');
+    if aa.is_empty() {
+        if bb.is_empty() {
+            return "/".to_string();
+        }
+        return format!("/{bb}");
+    }
+    if bb.is_empty() {
+        return aa.to_string();
+    }
+    format!("{aa}/{bb}")
+}
+
+fn rel_from_root(root: &str, full: &str) -> Option<String> {
+    let r = if root == "/" { "" } else { root.trim_end_matches('/') };
+    let f = if full == "/" { "" } else { full.trim_end_matches('/') };
+    if r.is_empty() {
+        return Some(f.trim_start_matches('/').to_string());
+    }
+    if f == r {
+        return Some(String::new());
+    }
+    if !f.starts_with(r) {
+        return None;
+    }
+    Some(f[r.len()..].trim_start_matches('/').to_string())
 }
 
 #[derive(Debug, Serialize)]
@@ -601,7 +696,8 @@ fn main() {
             run_filedock_plugin,
             cancel_filedock_plugin_run,
             copy_snapshot_file_to_sftp,
-            import_sftp_file_to_snapshot
+            import_sftp_file_to_snapshot,
+            push_folder_snapshot
         ])
         .run(tauri::generate_context!())
         .expect("error while running filedock desktop");
@@ -683,6 +779,242 @@ async fn wait_cancel(flag: Arc<AtomicBool>) {
         }
         tokio::time::sleep(std::time::Duration::from_millis(120)).await;
     }
+}
+
+#[cfg(windows)]
+fn apply_no_window(cmd: &mut tokio::process::Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn apply_no_window(_cmd: &mut tokio::process::Command) {}
+
+#[derive(Debug, Clone)]
+struct SftpFileRef {
+    remote_path: String,
+    rel_path: String,
+}
+
+#[derive(Debug, Clone)]
+struct SftpTree {
+    files: Vec<SftpFileRef>,
+    dirs: Vec<String>,
+}
+
+async fn run_sftp_plugin(
+    filedock: &str,
+    filedock_dir: Option<&PathBuf>,
+    runner: &RunnerConfig,
+    timeout_secs: u64,
+    cancel_flag: &Arc<AtomicBool>,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let json = serde_json::to_string(&payload).map_err(|e| format!("encode plugin json: {e}"))?;
+    let mut cmd = tokio::process::Command::new(filedock);
+    apply_no_window(&mut cmd);
+    cmd.arg("plugin")
+        .arg("run")
+        .arg("--name")
+        .arg("sftp")
+        .arg("--json")
+        .arg(&json)
+        .arg("--raw")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    if let Some(dirs) = runner
+        .plugin_dirs
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        cmd.env("FILEDOCK_PLUGIN_DIRS", dirs);
+    } else if let Some(dir) = filedock_dir {
+        cmd.env("FILEDOCK_PLUGIN_DIRS", dir.to_string_lossy().to_string());
+    }
+
+    let mut child = cmd.spawn().map_err(|e| format!("spawn filedock: {e}"))?;
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+    let status = tokio::select! {
+        res = child.wait() => res.map_err(|e| format!("wait filedock: {e}"))?,
+        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
+            let _ = child.kill().await;
+            return Err(format!("plugin timed out after {timeout_secs}s"));
+        }
+        _ = wait_cancel(cancel_flag.clone()) => {
+            let _ = child.kill().await;
+            return Err("canceled".to_string());
+        }
+    };
+    let mut stdout_buf = Vec::new();
+    if let Some(mut s) = stdout_pipe {
+        tokio::io::AsyncReadExt::read_to_end(&mut s, &mut stdout_buf)
+            .await
+            .map_err(|e| format!("read filedock stdout: {e}"))?;
+    }
+    let mut stderr_buf = Vec::new();
+    if let Some(mut s) = stderr_pipe {
+        tokio::io::AsyncReadExt::read_to_end(&mut s, &mut stderr_buf)
+            .await
+            .map_err(|e| format!("read filedock stderr: {e}"))?;
+    }
+    let stdout = String::from_utf8_lossy(&stdout_buf).to_string();
+    let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
+    if !status.success() {
+        return Err(format!("plugin failed: {} {}", status, stderr.trim()));
+    }
+    let parsed: SftpPluginResponse =
+        serde_json::from_str(stdout.trim()).map_err(|e| format!("decode plugin output: {e}"))?;
+    if !parsed.ok {
+        let msg = parsed
+            .error
+            .as_ref()
+            .map(|e| e.message.clone())
+            .unwrap_or_else(|| "plugin error".to_string());
+        return Err(msg);
+    }
+    Ok(parsed.data.unwrap_or(serde_json::Value::Null))
+}
+
+async fn sftp_stat(
+    filedock: &str,
+    filedock_dir: Option<&PathBuf>,
+    runner: &RunnerConfig,
+    timeout_secs: u64,
+    cancel_flag: &Arc<AtomicBool>,
+    conn: &serde_json::Value,
+    path: &str,
+) -> Result<SftpStatResponse, String> {
+    let payload = serde_json::json!({
+        "op": "stat",
+        "conn": conn,
+        "args": { "path": path }
+    });
+    let data = run_sftp_plugin(
+        filedock,
+        filedock_dir,
+        runner,
+        timeout_secs,
+        cancel_flag,
+        payload,
+    )
+    .await?;
+    serde_json::from_value(data).map_err(|e| format!("decode sftp stat: {e}"))
+}
+
+async fn sftp_list(
+    filedock: &str,
+    filedock_dir: Option<&PathBuf>,
+    runner: &RunnerConfig,
+    timeout_secs: u64,
+    cancel_flag: &Arc<AtomicBool>,
+    conn: &serde_json::Value,
+    path: &str,
+) -> Result<Vec<SftpListEntry>, String> {
+    let payload = serde_json::json!({
+        "op": "list",
+        "conn": conn,
+        "args": { "path": path }
+    });
+    let data = run_sftp_plugin(
+        filedock,
+        filedock_dir,
+        runner,
+        timeout_secs,
+        cancel_flag,
+        payload,
+    )
+    .await?;
+    let resp: SftpListResponse =
+        serde_json::from_value(data).map_err(|e| format!("decode sftp list: {e}"))?;
+    Ok(resp.entries)
+}
+
+async fn collect_sftp_tree(
+    filedock: &str,
+    filedock_dir: Option<&PathBuf>,
+    runner: &RunnerConfig,
+    timeout_secs: u64,
+    cancel_flag: &Arc<AtomicBool>,
+    conn: &serde_json::Value,
+    root: &str,
+) -> Result<SftpTree, String> {
+    let mut files: Vec<SftpFileRef> = Vec::new();
+    let mut dirs: Vec<String> = Vec::new();
+    let mut stack: Vec<String> = Vec::new();
+
+    let root_norm = if root == "/" { "/".to_string() } else { root.trim_end_matches('/').to_string() };
+    stack.push(root_norm.clone());
+    dirs.push(root_norm.clone());
+
+    while let Some(dir) = stack.pop() {
+        if cancel_flag.load(Ordering::Relaxed) {
+            return Err("canceled".to_string());
+        }
+        let entries = sftp_list(
+            filedock,
+            filedock_dir,
+            runner,
+            timeout_secs,
+            cancel_flag,
+            conn,
+            &dir,
+        )
+        .await?;
+
+        for ent in entries {
+            if ent.name == "." || ent.name == ".." {
+                continue;
+            }
+            let child = join_posix(&dir, &ent.name);
+            if ent.kind == "dir" {
+                dirs.push(child.clone());
+                stack.push(child);
+            } else {
+                let rel = rel_from_root(&root_norm, &child)
+                    .ok_or_else(|| format!("failed to resolve relative path: {child}"))?;
+                if rel.is_empty() {
+                    continue;
+                }
+                files.push(SftpFileRef {
+                    remote_path: child,
+                    rel_path: rel,
+                });
+            }
+        }
+    }
+
+    Ok(SftpTree { files, dirs })
+}
+
+async fn sftp_rm(
+    filedock: &str,
+    filedock_dir: Option<&PathBuf>,
+    runner: &RunnerConfig,
+    timeout_secs: u64,
+    cancel_flag: &Arc<AtomicBool>,
+    conn: &serde_json::Value,
+    path: &str,
+) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "op": "rm",
+        "conn": conn,
+        "args": { "path": path, "recursive": false }
+    });
+    let _ = run_sftp_plugin(
+        filedock,
+        filedock_dir,
+        runner,
+        timeout_secs,
+        cancel_flag,
+        payload,
+    )
+    .await?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -810,6 +1142,7 @@ async fn copy_snapshot_file_to_sftp(
     let timeout_secs = runner.timeout_secs.unwrap_or(600).max(1);
 
     let mut cmd = tokio::process::Command::new(filedock);
+    apply_no_window(&mut cmd);
     cmd.arg("plugin")
         .arg("run")
         .arg("--name")
@@ -828,7 +1161,7 @@ async fn copy_snapshot_file_to_sftp(
         .filter(|s| !s.is_empty())
     {
         cmd.env("FILEDOCK_PLUGIN_DIRS", dirs);
-    } else if let Some(dir) = filedock_dir {
+    } else if let Some(dir) = filedock_dir.as_ref() {
         cmd.env("FILEDOCK_PLUGIN_DIRS", dir.to_string_lossy().to_string());
     }
 
@@ -885,9 +1218,15 @@ async fn import_sftp_file_to_snapshot(
     if !is_valid_rel_path(&dst_path) {
         return Err("dst_path must be a relative POSIX path (no leading slash, no ..)".to_string());
     }
-    if req.remote_path.trim().is_empty() {
+    let remote_raw = req.remote_path.trim();
+    if remote_raw.is_empty() {
         return Err("remote_path required".to_string());
     }
+    let mut remote_path = remote_raw.to_string();
+    if remote_path.len() > 1 {
+        remote_path = remote_path.trim_end_matches('/').to_string();
+    }
+    let sftp_conn = req.sftp_conn.clone();
 
     let cancel_flag = {
         let flag = Arc::new(AtomicBool::new(false));
@@ -915,13 +1254,6 @@ async fn import_sftp_file_to_snapshot(
         run_id: run_id.clone(),
     };
 
-    // Download remote SFTP file to a temp file (so we can chunk+upload it).
-    emit_import(&app, &run_id, "sftp download", None, None, None);
-    let mut tmp = std::env::temp_dir();
-    let suffix = rand::random::<u64>();
-    tmp.push(format!("filedock_sftp_import_{run_id}_{suffix}.tmp"));
-    let tmp_str = tmp.to_string_lossy().to_string();
-
     let runner = req.runner.clone().unwrap_or(RunnerConfig {
         filedock_path: None,
         plugin_dirs: None,
@@ -930,71 +1262,38 @@ async fn import_sftp_file_to_snapshot(
     let (filedock, filedock_dir) = resolve_filedock_path(runner.filedock_path.as_deref());
     let timeout_secs = runner.timeout_secs.unwrap_or(900).max(1);
 
-    let payload = serde_json::json!({
-        "op": "download",
-        "conn": req.sftp_conn,
-        "args": {
-            "remote_path": req.remote_path,
-            "local_path": tmp_str,
-        }
-    });
-    let json = serde_json::to_string(&payload).map_err(|e| format!("encode plugin json: {e}"))?;
-
-    let mut cmd = tokio::process::Command::new(filedock);
-    cmd.arg("plugin")
-        .arg("run")
-        .arg("--name")
-        .arg("sftp")
-        .arg("--json")
-        .arg(&json)
-        .arg("--raw")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped());
-
-    if let Some(dirs) = runner
-        .plugin_dirs
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        cmd.env("FILEDOCK_PLUGIN_DIRS", dirs);
-    } else if let Some(dir) = filedock_dir {
-        cmd.env("FILEDOCK_PLUGIN_DIRS", dir.to_string_lossy().to_string());
-    }
-
-    let mut child = cmd.spawn().map_err(|e| format!("spawn filedock: {e}"))?;
-    let stderr_pipe = child.stderr.take();
-    let status = tokio::select! {
-        res = child.wait() => res.map_err(|e| format!("wait filedock: {e}"))?,
-        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
-            let _ = child.kill().await;
-            let _ = tokio::fs::remove_file(&tmp).await;
-            return Err(format!("plugin timed out after {timeout_secs}s"));
-        }
-        _ = wait_cancel(cancel_flag.clone()) => {
-            let _ = child.kill().await;
-            let _ = tokio::fs::remove_file(&tmp).await;
-            return Err("canceled".to_string());
+    let stat = sftp_stat(
+        &filedock,
+        filedock_dir.as_ref(),
+        &runner,
+        timeout_secs,
+        &cancel_flag,
+        &sftp_conn,
+        &remote_path,
+    )
+    .await?;
+    let is_dir = stat.kind == "dir";
+    let tree = if is_dir {
+        emit_import(&app, &run_id, "sftp list", None, None, None);
+        collect_sftp_tree(
+            &filedock,
+            filedock_dir.as_ref(),
+            &runner,
+            timeout_secs,
+            &cancel_flag,
+            &sftp_conn,
+            &remote_path,
+        )
+        .await?
+    } else {
+        SftpTree {
+            files: vec![SftpFileRef {
+                remote_path: remote_path.clone(),
+                rel_path: String::new(),
+            }],
+            dirs: Vec::new(),
         }
     };
-    let mut stderr_buf = Vec::new();
-    if let Some(mut s) = stderr_pipe {
-        tokio::io::AsyncReadExt::read_to_end(&mut s, &mut stderr_buf)
-            .await
-            .map_err(|e| format!("read filedock stderr: {e}"))?;
-    }
-    let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
-    if !status.success() {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(format!("plugin failed: {} {}", status, stderr.trim()));
-    }
-
-    if cancel_flag.load(Ordering::Relaxed) {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Err("canceled".to_string());
-    }
-    emit_import(&app, &run_id, "sftp download done", None, None, None);
 
     // Chunk+upload to the destination server.
     let client = build_http_client(
@@ -1003,98 +1302,6 @@ async fn import_sftp_file_to_snapshot(
         req.device_token.as_deref(),
     )?;
     let base = req.server_base_url.trim_end_matches('/').to_string();
-
-    let total_bytes = tokio::fs::metadata(&tmp)
-        .await
-        .map_err(|e| format!("stat temp file: {e}"))?
-        .len();
-
-    emit_import(
-        &app,
-        &run_id,
-        "hashing",
-        Some(0),
-        Some(total_bytes),
-        Some(0),
-    );
-    let chunks = chunk_file(&tmp).await?;
-    emit_import(
-        &app,
-        &run_id,
-        "hashing done",
-        Some(total_bytes),
-        Some(total_bytes),
-        Some(100),
-    );
-    let hashes = chunks.iter().map(|c| c.hash.clone()).collect::<Vec<_>>();
-    emit_import(&app, &run_id, "checking chunks", None, None, None);
-    let missing = presence_missing(&client, &base, &hashes).await?;
-
-    if !missing.is_empty() {
-        let mut f = tokio::fs::File::open(&tmp)
-            .await
-            .map_err(|e| format!("open temp file: {e}"))?;
-
-        let missing_total_bytes = chunks
-            .iter()
-            .filter(|c| missing.contains(&c.hash))
-            .map(|c| c.size)
-            .sum::<u64>();
-        let missing_total_chunks =
-            chunks.iter().filter(|c| missing.contains(&c.hash)).count() as u64;
-        let mut missing_done_bytes = 0u64;
-        let mut missing_done_chunks = 0u64;
-        emit_import(
-            &app,
-            &run_id,
-            &format!("uploading chunks (0/{})", missing_total_chunks),
-            Some(0),
-            Some(missing_total_bytes),
-            Some(0),
-        );
-
-        for c in &chunks {
-            if cancel_flag.load(Ordering::Relaxed) {
-                let _ = tokio::fs::remove_file(&tmp).await;
-                return Err("canceled".to_string());
-            }
-            let mut buf = vec![0u8; c.size as usize];
-            tokio::io::AsyncReadExt::read_exact(&mut f, &mut buf)
-                .await
-                .map_err(|e| format!("read temp file: {e}"))?;
-
-            if missing.contains(&c.hash) {
-                let url = format!("{}/v1/chunks/{}", base, encode(&c.hash));
-                client
-                    .put(url)
-                    .body(buf)
-                    .send()
-                    .await
-                    .map_err(|e| format!("upload chunk request: {e}"))?
-                    .error_for_status()
-                    .map_err(|e| format!("upload chunk response: {e}"))?;
-
-                missing_done_bytes = missing_done_bytes.saturating_add(c.size);
-                missing_done_chunks = missing_done_chunks.saturating_add(1);
-                let pct = if missing_total_bytes > 0 {
-                    Some(((missing_done_bytes.saturating_mul(100)) / missing_total_bytes) as u32)
-                } else {
-                    Some(100)
-                };
-                emit_import(
-                    &app,
-                    &run_id,
-                    &format!(
-                        "uploading chunks ({}/{})",
-                        missing_done_chunks, missing_total_chunks
-                    ),
-                    Some(missing_done_bytes),
-                    Some(missing_total_bytes),
-                    pct,
-                );
-            }
-        }
-    }
 
     // Base manifest (optional).
     let mut file_map = std::collections::HashMap::<String, ManifestFileEntry>::new();
@@ -1145,26 +1352,220 @@ async fn import_sftp_file_to_snapshot(
         existing.insert(k.to_string());
     }
 
-    let final_path = if existing.contains(&dst_path) {
-        match policy {
-            "skip" => {
-                let _ = tokio::fs::remove_file(&tmp).await;
-                return Ok(());
-            }
-            "rename" => unique_path(&existing, &dst_path),
-            _ => dst_path.clone(), // overwrite
-        }
-    } else {
-        dst_path.clone()
-    };
-
-    // Create destination snapshot and write manifest.
-    emit_import(&app, &run_id, "finalizing snapshot", None, None, None);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| format!("time: {e}"))?
         .as_secs() as i64;
+
+    let total_files = tree.files.len().max(1);
+    let mut added = 0usize;
+    let mut root_hint = dst_path.clone();
+
+    for (idx, f) in tree.files.iter().enumerate() {
+        if cancel_flag.load(Ordering::Relaxed) {
+            return Err("canceled".to_string());
+        }
+
+        let desired_path = if f.rel_path.is_empty() {
+            dst_path.clone()
+        } else {
+            join_posix(&dst_path, &f.rel_path)
+        };
+        let mut final_path = desired_path.clone();
+        if existing.contains(&final_path) {
+            match policy {
+                "skip" => {
+                    continue;
+                }
+                "rename" => final_path = unique_path(&existing, &final_path),
+                _ => {}
+            }
+        }
+
+        let phase_prefix = format!("{}/{}", idx + 1, total_files);
+        emit_import(
+            &app,
+            &run_id,
+            &format!("sftp download {phase_prefix}"),
+            None,
+            None,
+            None,
+        );
+
+        let mut tmp = std::env::temp_dir();
+        let suffix = rand::random::<u64>();
+        tmp.push(format!("filedock_sftp_import_{run_id}_{suffix}.tmp"));
+        let tmp_str = tmp.to_string_lossy().to_string();
+
+        let payload = serde_json::json!({
+            "op": "download",
+            "conn": sftp_conn.clone(),
+            "args": {
+                "remote_path": f.remote_path.clone(),
+                "local_path": tmp_str,
+            }
+        });
+        let _ = run_sftp_plugin(
+            &filedock,
+            filedock_dir.as_ref(),
+            &runner,
+            timeout_secs,
+            &cancel_flag,
+            payload,
+        )
+        .await?;
+
+        if cancel_flag.load(Ordering::Relaxed) {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err("canceled".to_string());
+        }
+        emit_import(
+            &app,
+            &run_id,
+            &format!("sftp download done {phase_prefix}"),
+            None,
+            None,
+            None,
+        );
+
+        let total_bytes = tokio::fs::metadata(&tmp)
+            .await
+            .map_err(|e| format!("stat temp file: {e}"))?
+            .len();
+
+        emit_import(
+            &app,
+            &run_id,
+            &format!("hashing {phase_prefix}"),
+            Some(0),
+            Some(total_bytes),
+            Some(0),
+        );
+        let chunks = chunk_file(&tmp).await?;
+        emit_import(
+            &app,
+            &run_id,
+            &format!("hashing done {phase_prefix}"),
+            Some(total_bytes),
+            Some(total_bytes),
+            Some(100),
+        );
+        let hashes = chunks.iter().map(|c| c.hash.clone()).collect::<Vec<_>>();
+        emit_import(
+            &app,
+            &run_id,
+            &format!("checking chunks {phase_prefix}"),
+            None,
+            None,
+            None,
+        );
+        let missing = presence_missing(&client, &base, &hashes).await?;
+
+        if !missing.is_empty() {
+            let mut ftmp = tokio::fs::File::open(&tmp)
+                .await
+                .map_err(|e| format!("open temp file: {e}"))?;
+
+            let missing_total_bytes = chunks
+                .iter()
+                .filter(|c| missing.contains(&c.hash))
+                .map(|c| c.size)
+                .sum::<u64>();
+            let missing_total_chunks =
+                chunks.iter().filter(|c| missing.contains(&c.hash)).count() as u64;
+            let mut missing_done_bytes = 0u64;
+            let mut missing_done_chunks = 0u64;
+            emit_import(
+                &app,
+                &run_id,
+                &format!("uploading chunks {phase_prefix} (0/{})", missing_total_chunks),
+                Some(0),
+                Some(missing_total_bytes),
+                Some(0),
+            );
+
+            for c in &chunks {
+                if cancel_flag.load(Ordering::Relaxed) {
+                    let _ = tokio::fs::remove_file(&tmp).await;
+                    return Err("canceled".to_string());
+                }
+                let mut buf = vec![0u8; c.size as usize];
+                tokio::io::AsyncReadExt::read_exact(&mut ftmp, &mut buf)
+                    .await
+                    .map_err(|e| format!("read temp file: {e}"))?;
+
+                if missing.contains(&c.hash) {
+                    let url = format!("{}/v1/chunks/{}", base, encode(&c.hash));
+                    client
+                        .put(url)
+                        .body(buf)
+                        .send()
+                        .await
+                        .map_err(|e| format!("upload chunk request: {e}"))?
+                        .error_for_status()
+                        .map_err(|e| format!("upload chunk response: {e}"))?;
+
+                    missing_done_bytes = missing_done_bytes.saturating_add(c.size);
+                    missing_done_chunks = missing_done_chunks.saturating_add(1);
+                    let pct = if missing_total_bytes > 0 {
+                        Some(((missing_done_bytes.saturating_mul(100)) / missing_total_bytes) as u32)
+                    } else {
+                        Some(100)
+                    };
+                    emit_import(
+                        &app,
+                        &run_id,
+                        &format!(
+                            "uploading chunks {phase_prefix} ({}/{})",
+                            missing_done_chunks, missing_total_chunks
+                        ),
+                        Some(missing_done_bytes),
+                        Some(missing_total_bytes),
+                        pct,
+                    );
+                }
+            }
+        }
+
+        file_map.insert(
+            final_path.clone(),
+            ManifestFileEntry {
+                path: final_path.clone(),
+                size: total_bytes,
+                mtime_unix: now,
+                chunk_hash: None,
+                chunks: Some(chunks),
+            },
+        );
+        existing.insert(final_path.clone());
+        added += 1;
+        if !is_dir {
+            root_hint = final_path;
+        }
+
+        let _ = tokio::fs::remove_file(&tmp).await;
+    }
+
+    if added == 0 && !tree.files.is_empty() {
+        return Ok(());
+    }
+
+    // Create destination snapshot and write manifest.
+    emit_import(&app, &run_id, "finalizing snapshot", None, None, None);
     let create_url = format!("{}/v1/snapshots", base);
+    let root_path = req
+        .dst_root_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("(sftp import: {})", root_hint));
+    let note = req
+        .note
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     let create_req = SnapshotCreateRequest {
         device_name: req.dst_device_name.trim().to_string(),
         device_id: req
@@ -1173,7 +1574,8 @@ async fn import_sftp_file_to_snapshot(
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string()),
-        root_path: format!("(sftp import: {})", final_path),
+        root_path,
+        note,
     };
     let create_resp: SnapshotCreateResponse = client
         .post(create_url)
@@ -1186,20 +1588,6 @@ async fn import_sftp_file_to_snapshot(
         .json()
         .await
         .map_err(|e| format!("create snapshot decode: {e}"))?;
-
-    file_map.insert(
-        final_path.clone(),
-        ManifestFileEntry {
-            path: final_path,
-            size: tokio::fs::metadata(&tmp)
-                .await
-                .map_err(|e| format!("stat temp file: {e}"))?
-                .len(),
-            mtime_unix: now,
-            chunk_hash: None,
-            chunks: Some(chunks),
-        },
-    );
 
     let mut files = file_map.into_values().collect::<Vec<_>>();
     files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -1224,9 +1612,121 @@ async fn import_sftp_file_to_snapshot(
         .error_for_status()
         .map_err(|e| format!("manifest response: {e}"))?;
 
+    if req.delete_remote {
+        emit_import(&app, &run_id, "deleting remote", None, None, None);
+        if is_dir {
+            for f in &tree.files {
+                if cancel_flag.load(Ordering::Relaxed) {
+                    return Err("canceled".to_string());
+                }
+                sftp_rm(
+                    &filedock,
+                    filedock_dir.as_ref(),
+                    &runner,
+                    timeout_secs,
+                    &cancel_flag,
+                    &sftp_conn,
+                    &f.remote_path,
+                )
+                .await?;
+            }
+            let mut dirs = tree.dirs.clone();
+            dirs.sort_by(|a, b| b.len().cmp(&a.len()));
+            for d in dirs {
+                if cancel_flag.load(Ordering::Relaxed) {
+                    return Err("canceled".to_string());
+                }
+                sftp_rm(
+                    &filedock,
+                    filedock_dir.as_ref(),
+                    &runner,
+                    timeout_secs,
+                    &cancel_flag,
+                    &sftp_conn,
+                    &d,
+                )
+                .await?;
+            }
+        } else {
+            sftp_rm(
+                &filedock,
+                filedock_dir.as_ref(),
+                &runner,
+                timeout_secs,
+                &cancel_flag,
+                &sftp_conn,
+                &remote_path,
+            )
+            .await?;
+        }
+    }
+
     emit_import(&app, &run_id, "done", None, None, Some(100));
-    let _ = tokio::fs::remove_file(&tmp).await;
     Ok(())
+}
+
+#[tauri::command]
+async fn push_folder_snapshot(req: PushFolderSnapshotRequest) -> Result<PushFolderSnapshotResponse, String> {
+    let server = req.server_base_url.trim();
+    if server.is_empty() {
+        return Err("server_base_url required".to_string());
+    }
+    let device = req.device_name.trim();
+    if device.is_empty() {
+        return Err("device_name required".to_string());
+    }
+    let folder = req.folder.trim();
+    if folder.is_empty() {
+        return Err("folder required".to_string());
+    }
+
+    let (filedock, _) = resolve_filedock_path(None);
+    let mut cmd = tokio::process::Command::new(filedock);
+    apply_no_window(&mut cmd);
+    cmd.arg("push-folder")
+        .arg("--server")
+        .arg(server)
+        .arg("--device")
+        .arg(device)
+        .arg("--folder")
+        .arg(folder)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    if let Some(note) = req.note.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        cmd.arg("--note").arg(note);
+    }
+    if let Some(c) = req.concurrency.filter(|c| *c > 0) {
+        cmd.arg("--concurrency").arg(c.to_string());
+    }
+
+    if let Some(tok) = req.token.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        cmd.env("FILEDOCK_TOKEN", tok);
+    }
+    if let Some(id) = req.device_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        cmd.env("FILEDOCK_DEVICE_ID", id);
+    }
+    if let Some(tok) = req.device_token.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        cmd.env("FILEDOCK_DEVICE_TOKEN", tok);
+    }
+
+    let output = cmd.output().await.map_err(|e| format!("run filedock: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() {
+        return Err(format!("push-folder failed: {} {}", output.status, stderr.trim()));
+    }
+
+    let snapshot_id = stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("snapshot: ").map(|s| s.trim().to_string()));
+
+    Ok(PushFolderSnapshotResponse {
+        snapshot_id,
+        stdout,
+        stderr,
+    })
 }
 
 fn resolve_filedock_path(explicit: Option<&str>) -> (String, Option<PathBuf>) {
@@ -1327,6 +1827,7 @@ async fn run_filedock_plugin(
     };
 
     let mut cmd = tokio::process::Command::new(filedock);
+    apply_no_window(&mut cmd);
     cmd.arg("plugin")
         .arg("run")
         .arg("--name")

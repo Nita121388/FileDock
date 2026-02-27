@@ -47,7 +47,10 @@ export function PaneView(props: {
     dstDeviceId?: string;
     dstPath: string;
     dstBaseSnapshotId?: string;
+    dstRootPath?: string;
     conflictPolicy?: "overwrite" | "skip" | "rename";
+    note?: string;
+    deleteSource?: boolean;
   }) => void;
   onEnqueueCopy: (job: {
     src: import("../../model/transfers").Conn;
@@ -95,6 +98,7 @@ export function PaneView(props: {
         <LocalBrowserPane
           paneId={props.tab.id}
           tab={props.tab}
+          settings={props.settings}
           onNotify={props.onNotify}
           onTabChange={(next) => props.onUpdateTab(() => next)}
         />
@@ -104,9 +108,11 @@ export function PaneView(props: {
         <SftpBrowserPane
           paneId={props.tab.id}
           tab={props.tab}
+          settings={props.settings}
           onTabChange={(next) => props.onUpdateTab(() => next)}
           onEnqueueSftpDownload={props.onEnqueueSftpDownload}
           onEnqueueSftpUpload={props.onEnqueueSftpUpload}
+          onEnqueueSftpToSnapshot={props.onEnqueueSftpToSnapshot}
           onEnqueueSnapshotToSftp={props.onEnqueueSnapshotToSftp}
         />
       );

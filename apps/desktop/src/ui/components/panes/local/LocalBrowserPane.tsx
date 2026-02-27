@@ -2,13 +2,32 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { openDialog } from "../../../api/dialog";
 import { isTauri } from "../../../util/tauriEnv";
 import type { PaneTab } from "../../../model/layout";
-import { listLocalDir, type LocalDirEntry } from "../../../api/tauri";
+import { listLocalDir, pushFolderSnapshot, type LocalDirEntry } from "../../../api/tauri";
 import { onPaneCommand } from "../../../commandBus";
 import { useTranslation } from "react-i18next";
 import { homeDir } from "@tauri-apps/api/path";
 import type { NoticeLevel } from "../../NoticeCenter";
+import type { Settings } from "../../../model/settings";
 
 const FORMAT_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
+const BACKUP_DEVICE_KEY = "filedock.desktop.backup.device.v1";
+
+function loadBackupDeviceName(): string {
+  try {
+    const raw = localStorage.getItem(BACKUP_DEVICE_KEY);
+    return raw ? String(raw) : "";
+  } catch {
+    return "";
+  }
+}
+
+function saveBackupDeviceName(name: string) {
+  try {
+    localStorage.setItem(BACKUP_DEVICE_KEY, name);
+  } catch {
+    // ignore
+  }
+}
 
 function formatBytes(size?: number | null): string {
   if (!size || size <= 0) return "0 B";
@@ -33,11 +52,12 @@ type LocalTab = Extract<PaneTab, { pane: "localBrowser" }>;
 export default function LocalBrowserPane(props: {
   paneId: string;
   tab: LocalTab;
+  settings: Settings;
   onNotify: (level: NoticeLevel, message: string, title?: string, autoCloseMs?: number) => void;
   onTabChange: (tab: LocalTab) => void;
 }) {
   const { t } = useTranslation();
-  const { paneId, tab, onTabChange, onNotify } = props;
+  const { paneId, tab, onTabChange, onNotify, settings } = props;
   const [entries, setEntries] = useState<LocalDirEntry[]>([]);
   const [status, setStatus] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -127,6 +147,69 @@ export default function LocalBrowserPane(props: {
     onTabChange({ ...tab, state: { ...tab.state, path: next } });
   }, [onTabChange, relPath, tab]);
 
+  const doBackup = useCallback(async () => {
+    if (!isTauri()) {
+      const msg = t("local.status.desktopOnly");
+      setStatus(msg);
+      onNotify("warning", msg);
+      return;
+    }
+    const server = settings.serverBaseUrl.trim();
+    if (!server) {
+      const msg = t("local.status.noServer");
+      setStatus(msg);
+      onNotify("warning", msg);
+      return;
+    }
+    if (!basePath) {
+      const msg = t("local.status.noFolder");
+      setStatus(msg);
+      onNotify("warning", msg);
+      return;
+    }
+
+    const folder = fullPath || basePath;
+    const currentDevice = loadBackupDeviceName() || "desktop";
+    const deviceNameRaw = prompt(t("local.prompt.deviceName"), currentDevice);
+    if (!deviceNameRaw) return;
+    const deviceName = deviceNameRaw.trim();
+    if (!deviceName) return;
+    saveBackupDeviceName(deviceName);
+
+    const noteRaw = prompt(t("local.prompt.note"), folder);
+    if (noteRaw === null) return;
+    const note = noteRaw.trim() || undefined;
+
+    setLoading(true);
+    setStatus(t("local.status.backupRunning", { path: folder }));
+    try {
+      const resp = await pushFolderSnapshot({
+        server_base_url: server,
+        token: settings.token || undefined,
+        device_id: settings.deviceId || undefined,
+        device_token: settings.deviceToken || undefined,
+        device_name: deviceName,
+        folder,
+        note
+      });
+      if (resp.snapshot_id) {
+        const msg = t("local.status.backupDone", { snapshot: resp.snapshot_id });
+        setStatus(msg);
+        onNotify("info", msg);
+      } else {
+        const msg = t("local.status.backupDoneNoId");
+        setStatus(msg);
+        onNotify("info", msg);
+      }
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      setStatus(msg);
+      onNotify("error", msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [basePath, fullPath, onNotify, settings, t]);
+
   useEffect(() => {
     return onPaneCommand((cmd) => {
       if (cmd.paneId !== paneId) return;
@@ -162,6 +245,9 @@ export default function LocalBrowserPane(props: {
           </button>
           <button className="db-mini" onClick={refresh} disabled={loading || !basePath} title={t("local.actions.refreshTitle")}>
             {t("local.actions.refresh")}
+          </button>
+          <button className="db-mini" onClick={doBackup} disabled={loading || !basePath} title={t("local.actions.backupTitle")}>
+            {t("local.actions.backup")}
           </button>
         </span>
       </div>

@@ -85,6 +85,30 @@ export async function listLocalDir(path: string): Promise<LocalDirEntry[]> {
   return await invoke<LocalDirEntry[]>("list_local_dir", { path });
 }
 
+export type PushFolderSnapshotRequest = {
+  server_base_url: string;
+  token?: string;
+  device_id?: string;
+  device_token?: string;
+  device_name: string;
+  folder: string;
+  note?: string;
+  concurrency?: number;
+};
+
+export type PushFolderSnapshotResponse = {
+  snapshot_id?: string | null;
+  stdout: string;
+  stderr: string;
+};
+
+export async function pushFolderSnapshot(
+  req: PushFolderSnapshotRequest
+): Promise<PushFolderSnapshotResponse> {
+  const invoke = await getInvoke();
+  return await invoke<PushFolderSnapshotResponse>("push_folder_snapshot", { req });
+}
+
 export type RunFiledockPluginRequest = {
   name: string;
   json: string;
@@ -143,8 +167,11 @@ export type ImportSftpFileToSnapshotRequest = {
   dst_device_name: string;
   dst_device_id?: string;
   dst_base_snapshot_id?: string;
+  dst_root_path?: string;
   dst_path: string;
   conflict_policy?: "overwrite" | "skip" | "rename";
+  note?: string;
+  delete_remote?: boolean;
   sftp_conn: unknown;
   remote_path: string;
   runner?: {

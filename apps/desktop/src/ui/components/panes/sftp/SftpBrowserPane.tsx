@@ -5,6 +5,7 @@ import { uid } from "../../../model/layout";
 import { runFiledockPlugin } from "../../../api/tauri";
 import { openDialog, saveDialog } from "../../../api/dialog";
 import { onPaneCommand } from "../../../commandBus";
+import type { Settings } from "../../../model/settings";
 
 type SftpTab = Extract<PaneTab, { pane: "sftpBrowser" }>;
 
@@ -31,9 +32,24 @@ function joinPosix(a: string, b: string): string {
   return `${aa}/${bb}`;
 }
 
+function cleanRelPath(p: string): string {
+  return p
+    .split("/")
+    .map((s) => s.trim())
+    .filter((s) => s && s !== "." && s !== "..")
+    .join("/");
+}
+
+function safeSeg(s: string): string {
+  const trimmed = s.trim();
+  if (!trimmed) return "vps";
+  return trimmed.replace(/[\\/]/g, "_").replace(/\.\.+/g, "_");
+}
+
 export default function SftpBrowserPane(props: {
   paneId: string;
   tab: SftpTab;
+  settings: Settings;
   onTabChange: (tab: SftpTab) => void;
   onEnqueueSftpDownload: (job: {
     runner?: import("../../../model/transfers").PluginRunConfig;
@@ -48,6 +64,20 @@ export default function SftpBrowserPane(props: {
     remotePath: string;
     mkdirs?: boolean;
   }) => void;
+  onEnqueueSftpToSnapshot: (job: {
+    runner?: import("../../../model/transfers").PluginRunConfig;
+    conn: import("../../../model/transfers").SftpConn;
+    remotePath: string;
+    dst: import("../../../model/transfers").Conn;
+    dstDeviceName: string;
+    dstDeviceId?: string;
+    dstBaseSnapshotId?: string;
+    dstRootPath?: string;
+    dstPath: string;
+    conflictPolicy?: "overwrite" | "skip" | "rename";
+    note?: string;
+    deleteSource?: boolean;
+  }) => void;
   onEnqueueSnapshotToSftp: (job: {
     src: import("../../../model/transfers").Conn;
     snapshotId: string;
@@ -58,12 +88,13 @@ export default function SftpBrowserPane(props: {
     mkdirs?: boolean;
   }) => void;
 }) {
-  const { paneId } = props;
+  const { paneId, settings } = props;
   const { t } = useTranslation();
   const st = props.tab.state;
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>("");
   const [entries, setEntries] = useState<Entry[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -92,6 +123,34 @@ export default function SftpBrowserPane(props: {
       timeout_secs: 300
     };
   }, [st.filedockPath, st.pluginDirs]);
+
+  const dstConn = useMemo(
+    () => ({
+      serverBaseUrl: settings.serverBaseUrl,
+      token: settings.token,
+      deviceId: settings.deviceId,
+      deviceToken: settings.deviceToken
+    }),
+    [settings]
+  );
+
+  const backupDeviceDefault = useMemo(() => {
+    const host = safeSeg(st.host || "vps");
+    const user = st.user ? `${safeSeg(st.user)}@` : "";
+    const port = st.port && st.port !== 22 ? `:${st.port}` : "";
+    return `sftp:${user}${host}${port}`;
+  }, [st.host, st.port, st.user]);
+
+  const backupBasePrefix = useMemo(() => {
+    const host = safeSeg(st.host || "vps");
+    const user = st.user ? `${safeSeg(st.user)}@` : "";
+    const port = st.port && st.port !== 22 ? `-p${st.port}` : "";
+    return `sftp/${user}${host}${port}`;
+  }, [st.host, st.port, st.user]);
+
+  const deleteBasePrefix = useMemo(() => {
+    return `__deleted__/${backupBasePrefix}`;
+  }, [backupBasePrefix]);
 
   const call = useCallback(async (op: string, args: any): Promise<any> => {
     const payload = {
@@ -122,6 +181,7 @@ export default function SftpBrowserPane(props: {
 
   const refresh = useCallback(async () => {
     setErr(null);
+    setStatus("");
     setLoading(true);
     try {
       const p = st.path && st.path.trim() ? st.path.trim() : "/";
@@ -141,6 +201,101 @@ export default function SftpBrowserPane(props: {
       setLoading(false);
     }
   }, [call, st.path]);
+
+  const getRemotePath = useCallback(
+    (name: string) => {
+      return st.path && st.path !== "/" ? joinPosix(st.path, name) : `/${name}`;
+    },
+    [st.path]
+  );
+
+  const pickBackupDeviceName = useCallback(() => {
+    const current = st.backupDeviceName?.trim() || backupDeviceDefault;
+    const next = prompt(t("sftp.prompt.backupDeviceName"), current);
+    if (!next) return null;
+    const trimmed = next.trim();
+    if (!trimmed) return null;
+    if (trimmed !== st.backupDeviceName) {
+      props.onTabChange({ ...props.tab, state: { ...st, backupDeviceName: trimmed } });
+    }
+    return trimmed;
+  }, [backupDeviceDefault, props, st, t]);
+
+  const ensureServer = useCallback(() => {
+    const base = settings.serverBaseUrl?.trim() || "";
+    if (!base) {
+      setErr(t("sftp.error.noServerBase"));
+      return false;
+    }
+    return true;
+  }, [settings.serverBaseUrl, t]);
+
+  const queueBackup = useCallback(
+    async (ent: Entry, opts: { deleteSource?: boolean }) => {
+      if (ent.kind === "other") {
+        setErr(t("sftp.error.backupFileOnly"));
+        return;
+      }
+      if (!ensureServer()) return;
+
+      const deviceName = pickBackupDeviceName();
+      if (!deviceName) return;
+
+      const remote = getRemotePath(ent.name);
+      const rel = cleanRelPath(remote);
+      if (!rel) {
+        setErr(t("sftp.error.invalidRemotePath"));
+        return;
+      }
+
+      const prefix = opts.deleteSource ? deleteBasePrefix : backupBasePrefix;
+      const dstPath = joinPosix(prefix, rel).replace(/^\//, "");
+      const noteDefault = opts.deleteSource ? `DELETE ${remote}` : remote;
+      const noteRaw = prompt(t("sftp.prompt.note"), noteDefault);
+      if (noteRaw === null) return;
+      const note = noteRaw.trim() || undefined;
+
+      if (opts.deleteSource) {
+        const ok1 = confirm(t("sftp.confirm.delete", { kind: t(`sftp.kind.${ent.kind}`), path: remote }));
+        if (!ok1) return;
+        const ok2 = confirm(
+          t("sftp.confirm.deleteBackup", { path: remote, device: deviceName, dst: dstPath })
+        );
+        if (!ok2) return;
+      }
+
+      props.onEnqueueSftpToSnapshot({
+        runner,
+        conn: conn as any,
+        remotePath: remote,
+        dst: dstConn,
+        dstDeviceName: deviceName,
+        dstPath,
+        dstRootPath: prefix,
+        note,
+        deleteSource: opts.deleteSource ?? false
+      });
+
+      setErr(null);
+      setStatus(
+        opts.deleteSource
+          ? t("sftp.status.queuedDeleteBackup", { src: remote, dst: dstPath })
+          : t("sftp.status.queuedBackup", { src: remote, dst: dstPath })
+      );
+    },
+    [
+      backupBasePrefix,
+      deleteBasePrefix,
+      conn,
+      dstConn,
+      ensureServer,
+      getRemotePath,
+      pickBackupDeviceName,
+      props,
+      runner,
+      t
+    ]
+  );
 
   useEffect(() => {
     // Refresh when connection or path changes.
@@ -259,22 +414,8 @@ export default function SftpBrowserPane(props: {
   }, [call, refresh, st.path, t]);
 
   const onDeleteEntry = useCallback(async (ent: Entry) => {
-    const p = st.path && st.path !== "/" ? joinPosix(st.path, ent.name) : `/${ent.name}`;
-    const kindLabel = t(`sftp.kind.${ent.kind}`);
-    const ok = confirm(t("sftp.confirm.delete", { kind: kindLabel, path: p }));
-    if (!ok) return;
-
-    setErr(null);
-    setLoading(true);
-    try {
-      await call("rm", { path: p, recursive: false });
-      await refresh();
-    } catch (e: any) {
-      setErr(e?.message || String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [call, refresh, st.path, t]);
+    await queueBackup(ent, { deleteSource: true });
+  }, [queueBackup]);
 
   useEffect(() => {
     return onPaneCommand((cmd) => {
@@ -488,6 +629,7 @@ export default function SftpBrowserPane(props: {
         ) : null}
       </div>
 
+      {status ? <div className="db-status">{status}</div> : null}
       {err ? <div className="pane-error">{t("sftp.error.prefix", { message: err })}</div> : null}
 
       <div className="pane-table">
@@ -499,15 +641,18 @@ export default function SftpBrowserPane(props: {
         </div>
         {entries.map((e) => (
           <div key={e.name} className="pane-row">
-            <div className="mono">
+            <div className="sftp-name">
+              <span className="db-emoji" aria-hidden="true">
+                {e.kind === "dir" ? "📁" : e.kind === "file" ? "📄" : "•"}
+              </span>
               {e.kind === "dir" ? (
-                <button className="linklike" onClick={() => onEnterDir(e.name)} disabled={loading}>
+                <button className="linklike" onClick={() => onEnterDir(e.name)} disabled={loading} title={e.name}>
                   {e.name}/
                 </button>
               ) : (
                 <span
                   draggable={e.kind === "file"}
-                  title={e.kind === "file" ? t("sftp.drag.downloadHint") : undefined}
+                  title={e.kind === "file" ? t("sftp.drag.downloadHint") : e.name}
                   onDragStart={(ev) => {
                     if (e.kind !== "file") return;
                     const remote = st.path && st.path !== "/" ? joinPosix(st.path, e.name) : `/${e.name}`;
@@ -529,6 +674,11 @@ export default function SftpBrowserPane(props: {
             <div className="mono">{typeof e.size === "number" ? e.size : ""}</div>
             <div>
               <div className="pane-actions">
+                {e.kind !== "other" ? (
+                  <button className="pane-btn" onClick={() => queueBackup(e, { deleteSource: false })} disabled={loading}>
+                    {t("sftp.actions.backup")}
+                  </button>
+                ) : null}
                 {e.kind === "file" ? (
                   <button className="pane-btn" onClick={() => onDownloadFile(e.name)} disabled={loading}>
                     {t("sftp.actions.download")}
@@ -540,9 +690,11 @@ export default function SftpBrowserPane(props: {
                 <button className="pane-btn" onClick={() => onMoveEntry(e)} disabled={loading}>
                   {t("sftp.actions.move")}
                 </button>
-                <button className="pane-btn danger" onClick={() => onDeleteEntry(e)} disabled={loading}>
-                  {t("sftp.actions.delete")}
-                </button>
+                {e.kind !== "other" ? (
+                  <button className="pane-btn danger" onClick={() => onDeleteEntry(e)} disabled={loading}>
+                    {t("sftp.actions.deleteBackup")}
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>

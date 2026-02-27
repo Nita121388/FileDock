@@ -289,11 +289,22 @@
       "up": "上级",
       "upTitle": "上级",
       "refresh": "刷新",
-      "refreshTitle": "刷新"
+      "refreshTitle": "刷新",
+      "backup": "备份",
+      "backupTitle": "一键备份当前文件夹到服务端"
+    },
+    "prompt": {
+      "deviceName": "备份设备名称？",
+      "note": "备注（可选）？"
     },
     "status": {
       "desktopOnly": "本地文件选择仅在桌面端可用。",
-      "items": "项目数：{{count}}"
+      "items": "项目数：{{count}}",
+      "noServer": "请先设置服务器基础地址",
+      "noFolder": "请先选择文件夹",
+      "backupRunning": "正在备份 {{path}}...",
+      "backupDone": "备份完成：{{snapshot}}",
+      "backupDoneNoId": "备份完成"
     },
     "notice": {
       "selected": "已选择文件夹：{{path}}"
@@ -314,16 +325,26 @@
       "pluginNonJson": "插件返回了非 JSON：{{output}}",
       "plugin": "插件错误",
       "invalidName": "无效名称：不能包含 '/'",
-      "prefix": "错误：{{message}}"
+      "prefix": "错误：{{message}}",
+      "noServerBase": "请先设置服务器基础地址",
+    "backupFileOnly": "备份/删除仅支持文件和文件夹",
+      "invalidRemotePath": "远程路径无效"
     },
     "prompt": {
       "newFolder": "新建文件夹名称？",
       "rename": "重命名为？",
       "move": "移动到（绝对 POSIX 路径）？",
-      "uploadRemote": "上传到远程路径（绝对 POSIX 路径）？"
+      "uploadRemote": "上传到远程路径（绝对 POSIX 路径）？",
+      "backupDeviceName": "备份设备名称？",
+      "note": "备注（可选）？"
     },
     "confirm": {
-      "delete": "删除 {{kind}} {{path}}？（已禁用递归删除）"
+      "delete": "删除 {{kind}} {{path}}？（已禁用递归删除）",
+      "deleteBackup": "将先备份到服务端：{{device}} / {{dst}}\n确认删除 {{path}}？"
+    },
+    "status": {
+      "queuedBackup": "已加入备份：{{src}} -> {{dst}}",
+      "queuedDeleteBackup": "已加入删前备份：{{src}} -> {{dst}}"
     },
     "labels": {
       "host": "主机",
@@ -369,12 +390,14 @@
       "up": "上级",
       "mkdir": "新建文件夹",
       "upload": "上传",
+      "backup": "备份到服务",
       "advancedShow": "高级设置",
       "advancedHide": "收起高级",
       "download": "下载",
       "rename": "重命名",
       "move": "移动",
-      "delete": "删除"
+      "delete": "删除",
+      "deleteBackup": "删除（先备份）"
     },
     "table": {
       "name": "名称",
@@ -443,7 +466,8 @@
       "allFilesWithDate": "全部文件 · {{date}}",
       "allFiles": "全部文件",
       "historyWithDate": "历史 · {{date}}",
-      "history": "历史"
+      "history": "历史",
+      "note": "备注：{{note}}"
     },
     "actions": {
       "refresh": "刷新",

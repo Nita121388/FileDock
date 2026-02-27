@@ -1124,7 +1124,10 @@ export default function App() {
     dstDeviceId?: string;
     dstPath: string;
     dstBaseSnapshotId?: string;
+    dstRootPath?: string;
     conflictPolicy?: "overwrite" | "skip" | "rename";
+    note?: string;
+    deleteSource?: boolean;
   }) => {
     const job: TransferJob = {
       id: uid("xfer"),
@@ -1138,8 +1141,11 @@ export default function App() {
       dstDeviceName: req.dstDeviceName,
       dstDeviceId: req.dstDeviceId,
       dstBaseSnapshotId: req.dstBaseSnapshotId,
+      dstRootPath: req.dstRootPath,
       dstPath: req.dstPath,
-      conflictPolicy: req.conflictPolicy ?? "overwrite"
+      conflictPolicy: req.conflictPolicy ?? "overwrite",
+      note: req.note,
+      deleteSource: req.deleteSource
     } as any;
     setTransfers((xs) => [job, ...xs]);
   };
@@ -1535,8 +1541,11 @@ export default function App() {
         dst_device_name: job.dstDeviceName,
         dst_device_id: job.dstDeviceId || undefined,
         dst_base_snapshot_id: job.dstBaseSnapshotId || undefined,
+        dst_root_path: job.dstRootPath || undefined,
         dst_path: job.dstPath,
         conflict_policy: job.conflictPolicy ?? "overwrite",
+        note: job.note || undefined,
+        delete_remote: job.deleteSource ?? false,
         sftp_conn: job.conn,
         remote_path: job.remotePath,
         runner: {

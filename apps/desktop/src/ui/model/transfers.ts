@@ -158,8 +158,14 @@ export type SftpToSnapshotJob = {
   dstDeviceName: string;
   dstDeviceId?: string;
   dstBaseSnapshotId?: string;
+  // Optional snapshot root_path override (metadata only).
+  dstRootPath?: string;
   dstPath: string; // snapshot-relative POSIX path
   conflictPolicy?: "overwrite" | "skip" | "rename";
+  // Optional snapshot note (metadata only).
+  note?: string;
+  // If true, delete the remote file after a successful import.
+  deleteSource?: boolean;
 
   error?: string;
   progress?: TransferProgress;

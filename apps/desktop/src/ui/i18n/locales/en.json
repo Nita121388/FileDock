@@ -289,11 +289,22 @@
       "up": "Up",
       "upTitle": "Up",
       "refresh": "Refresh",
-      "refreshTitle": "Refresh"
+      "refreshTitle": "Refresh",
+      "backup": "Backup",
+      "backupTitle": "Back up current folder to server"
+    },
+    "prompt": {
+      "deviceName": "Backup device name?",
+      "note": "Note (optional)?"
     },
     "status": {
       "desktopOnly": "Local file picker is available only in the desktop app.",
-      "items": "items: {{count}}"
+      "items": "items: {{count}}",
+      "noServer": "Please set the server base URL first",
+      "noFolder": "Please choose a folder first",
+      "backupRunning": "Backing up {{path}}...",
+      "backupDone": "Backup completed: {{snapshot}}",
+      "backupDoneNoId": "Backup completed"
     },
     "notice": {
       "selected": "Selected folder: {{path}}"
@@ -314,16 +325,26 @@
       "pluginNonJson": "plugin returned non-JSON: {{output}}",
       "plugin": "plugin error",
       "invalidName": "Invalid name: must not contain '/'",
-      "prefix": "Error: {{message}}"
+      "prefix": "Error: {{message}}",
+      "noServerBase": "Please set the server base URL first",
+    "backupFileOnly": "Backup/delete only supports files and folders",
+      "invalidRemotePath": "Invalid remote path"
     },
     "prompt": {
       "newFolder": "New folder name?",
       "rename": "Rename to?",
       "move": "Move to (absolute POSIX path)?",
-      "uploadRemote": "Upload to remote path (absolute POSIX path)?"
+      "uploadRemote": "Upload to remote path (absolute POSIX path)?",
+      "backupDeviceName": "Backup device name?",
+      "note": "Note (optional)?"
     },
     "confirm": {
-      "delete": "Delete {{kind}} {{path}}? (recursive delete is disabled)"
+      "delete": "Delete {{kind}} {{path}}? (recursive delete is disabled)",
+      "deleteBackup": "Back up to server: {{device}} / {{dst}}\nConfirm delete {{path}}?"
+    },
+    "status": {
+      "queuedBackup": "Queued backup: {{src}} -> {{dst}}",
+      "queuedDeleteBackup": "Queued backup-before-delete: {{src}} -> {{dst}}"
     },
     "labels": {
       "host": "Host",
@@ -369,12 +390,14 @@
       "up": "Up",
       "mkdir": "Mkdir",
       "upload": "Upload",
+      "backup": "Back up to server",
       "advancedShow": "Advanced",
       "advancedHide": "Hide advanced",
       "download": "Download",
       "rename": "Rename",
       "move": "Move",
-      "delete": "Delete"
+      "delete": "Delete",
+      "deleteBackup": "Delete (backup first)"
     },
     "table": {
       "name": "Name",
@@ -443,7 +466,8 @@
       "allFilesWithDate": "All files · {{date}}",
       "allFiles": "All files",
       "historyWithDate": "History · {{date}}",
-      "history": "History"
+      "history": "History",
+      "note": "Note: {{note}}"
     },
     "actions": {
       "refresh": "Refresh",

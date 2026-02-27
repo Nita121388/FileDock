@@ -102,6 +102,8 @@ pub struct SnapshotCreateRequest {
     /// When omitted, server relies on device_name only.
     pub device_id: Option<String>,
     pub root_path: String,
+    /// Optional free-form note (shown in history).
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,6 +118,8 @@ pub struct SnapshotMeta {
     pub device_id: Option<String>,
     pub root_path: String,
     pub created_unix: i64,
+    /// Optional free-form note (shown in history).
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

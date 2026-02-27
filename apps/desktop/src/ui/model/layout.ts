@@ -40,6 +40,9 @@ export type SftpBrowserTabState = {
   // optional: filedock plugin runner configuration
   filedockPath: string; // empty => default "filedock"
   pluginDirs: string; // ":"-separated
+
+  // optional: default device name for server backups
+  backupDeviceName: string;
 };
 
 export type LocalBrowserTabState = {
@@ -119,7 +122,8 @@ export function makeTab(pane: PaneKind, title?: string): PaneTab {
         basePath: "",
         path: "/",
         filedockPath: "",
-        pluginDirs: ""
+        pluginDirs: "",
+        backupDeviceName: ""
       }
     };
   }
@@ -271,7 +275,8 @@ export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
               basePath: typeof st?.basePath === "string" ? st.basePath : "",
               path: typeof st?.path === "string" ? st.path : "/",
               filedockPath: typeof st?.filedockPath === "string" ? st.filedockPath : "",
-              pluginDirs: typeof st?.pluginDirs === "string" ? st.pluginDirs : ""
+              pluginDirs: typeof st?.pluginDirs === "string" ? st.pluginDirs : "",
+              backupDeviceName: typeof st?.backupDeviceName === "string" ? st.backupDeviceName : ""
             }
           };
         }
@@ -407,7 +412,8 @@ export function setLeafPane(node: LayoutNode, leafId: string, pane: PaneKind): L
             basePath: "",
             path: "/",
             filedockPath: "",
-            pluginDirs: ""
+            pluginDirs: "",
+            backupDeviceName: ""
           };
           return { id: t.id, pane, title, state: { ...prev } };
         }

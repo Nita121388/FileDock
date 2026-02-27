@@ -393,6 +393,7 @@ async fn create_snapshot(
         device_id: req.device_id,
         root_path: req.root_path,
         created_unix: now_unix(),
+        note: req.note,
     };
     let key = format!("snapshots/{snapshot_id}.json");
     let data = serde_json::to_vec(&meta)

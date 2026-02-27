@@ -27,6 +27,7 @@ export type SnapshotMeta = {
   root_path: string;
   created_unix: number;
   device_id?: string | null;
+  note?: string | null;
 };
 
 export type TreeEntry = {
@@ -65,6 +66,7 @@ export type SnapshotCreateRequest = {
   device_name: string;
   device_id?: string | null;
   root_path: string;
+  note?: string | null;
 };
 
 export type SnapshotCreateResponse = { snapshot_id: string };

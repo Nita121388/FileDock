@@ -99,6 +99,10 @@ enum Command {
         #[arg(long)]
         folder: PathBuf,
 
+        /// Optional note stored in snapshot metadata.
+        #[arg(long)]
+        note: Option<String>,
+
         /// Number of files to upload in parallel.
         #[arg(long, default_value_t = DEFAULT_CONCURRENCY)]
         concurrency: usize,
@@ -127,6 +131,10 @@ enum Command {
         /// Root folder to back up.
         #[arg(long)]
         folder: PathBuf,
+
+        /// Optional note stored in snapshot metadata.
+        #[arg(long)]
+        note: Option<String>,
 
         /// Number of files to upload in parallel.
         #[arg(long, default_value_t = DEFAULT_CONCURRENCY)]
@@ -358,6 +366,10 @@ struct AgentConfig {
     /// Root folder to back up.
     folder: PathBuf,
 
+    /// Optional note stored in snapshot metadata.
+    #[serde(default)]
+    note: Option<String>,
+
     /// Seconds between snapshot runs.
     #[serde(default = "default_agent_interval")]
     interval_secs: u64,
@@ -459,6 +471,7 @@ async fn push_folder_impl(
     server: String,
     device: String,
     folder: PathBuf,
+    note: Option<String>,
     concurrency: usize,
     exclude: Vec<String>,
     ignore_file: Option<PathBuf>,
@@ -483,6 +496,7 @@ async fn push_folder_impl(
         device_name: device,
         device_id,
         root_path: root.display().to_string(),
+        note,
     };
     let create_resp: SnapshotCreateResponse = client
         .post(create_url)
@@ -745,18 +759,20 @@ async fn main() -> Result<(), String> {
             server,
             device,
             folder,
+            note,
             concurrency,
             exclude,
             ignore_file,
         } => {
             let _ =
-                push_folder_impl(server, device, folder, concurrency, exclude, ignore_file).await?;
+                push_folder_impl(server, device, folder, note, concurrency, exclude, ignore_file).await?;
         }
 
         Command::PushFolderLoop {
             server,
             device,
             folder,
+            note,
             concurrency,
             exclude,
             ignore_file,
@@ -766,6 +782,7 @@ async fn main() -> Result<(), String> {
                 server.clone(),
                 device.clone(),
                 folder.clone(),
+                note.clone(),
                 concurrency,
                 exclude.clone(),
                 ignore_file.clone(),
@@ -1102,6 +1119,7 @@ async fn main() -> Result<(), String> {
                     cfg.server.clone(),
                     cfg.device_name.clone(),
                     cfg.folder.clone(),
+                    cfg.note.clone(),
                     cfg.concurrency,
                     cfg.exclude.clone(),
                     cfg.ignore_file.clone(),
@@ -1156,6 +1174,7 @@ async fn main() -> Result<(), String> {
                                 cfg.server.clone(),
                                 cfg.device_name.clone(),
                                 cfg.folder.clone(),
+                                cfg.note.clone(),
                                 cfg.concurrency,
                                 cfg.exclude.clone(),
                                 cfg.ignore_file.clone(),
