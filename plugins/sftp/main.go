@@ -450,12 +450,7 @@ func authMethods(cfg *connConfig) ([]ssh.AuthMethod, error) {
 	}
 
 	if strings.TrimSpace(cfg.Auth.KeyPath) != "" {
-		keyPath := cfg.Auth.KeyPath
-		if strings.HasPrefix(keyPath, "~") {
-			home, _ := os.UserHomeDir()
-			keyPath = strings.Replace(keyPath, "~", home, 1)
-		}
-		keyPath = filepath.Clean(keyPath)
+		keyPath := expandHomePath(cfg.Auth.KeyPath)
 		key, err := os.ReadFile(keyPath)
 		if err != nil {
 			return nil, fmt.Errorf("read key: %w", err)
@@ -486,6 +481,41 @@ func authMethods(cfg *connConfig) ([]ssh.AuthMethod, error) {
 	return out, nil
 }
 
+func expandHomePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	if !strings.HasPrefix(p, "~") {
+		return filepath.Clean(p)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return filepath.Clean(p)
+	}
+	if p == "~" {
+		return filepath.Clean(home)
+	}
+	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "~\\") {
+		return filepath.Clean(filepath.Join(home, p[2:]))
+	}
+	return filepath.Clean(p)
+}
+
+func ensureKnownHostsFile(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("empty path")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
 func hostKeyCallback(cfg *connConfig) (ssh.HostKeyCallback, error) {
 	policy := strings.TrimSpace(cfg.KnownHosts.Policy)
 	if policy == "" {
@@ -499,25 +529,32 @@ func hostKeyCallback(cfg *connConfig) (ssh.HostKeyCallback, error) {
 		return nil, fmt.Errorf("invalid known_hosts.policy: %s", policy)
 	}
 
-	kp := strings.TrimSpace(cfg.KnownHosts.Path)
+	kp := expandHomePath(cfg.KnownHosts.Path)
 	if kp == "" {
 		home, _ := os.UserHomeDir()
 		kp = filepath.Join(home, ".ssh", "known_hosts")
 	}
-	kp = filepath.Clean(kp)
+	if err := ensureKnownHostsFile(kp); err != nil {
+		return nil, fmt.Errorf("prepare known_hosts(%s): %w", kp, err)
+	}
 
 	cb, err := knownhosts.New(kp)
 	if err != nil {
-		// Create directory if needed, then try again.
-		_ = os.MkdirAll(filepath.Dir(kp), 0o700)
-		cb, err = knownhosts.New(kp)
-		if err != nil {
-			return nil, err
-		}
+		return nil, fmt.Errorf("load known_hosts(%s): %w", kp, err)
 	}
 
 	if policy == "strict" {
-		return cb, nil
+		return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			err := cb(hostname, remote, key)
+			var ke *knownhosts.KeyError
+			if errors.As(err, &ke) {
+				if len(ke.Want) == 0 {
+					return fmt.Errorf("strict known_hosts check failed: host %s not found in %s", hostname, kp)
+				}
+				return fmt.Errorf("strict known_hosts check failed: host key mismatch for %s in %s", hostname, kp)
+			}
+			return err
+		}, nil
 	}
 
 	// accept-new: if host is unknown, append it to known_hosts and accept.
@@ -528,22 +565,18 @@ func hostKeyCallback(cfg *connConfig) (ssh.HostKeyCallback, error) {
 			// Unknown host: Want is empty.
 			if len(ke.Want) == 0 {
 				line := knownhosts.Line([]string{hostname}, key)
-				// Ensure file exists.
-				if err := os.MkdirAll(filepath.Dir(kp), 0o700); err != nil {
-					return err
-				}
 				f, err := os.OpenFile(kp, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 				if err != nil {
-					return err
+					return fmt.Errorf("append known_hosts(%s): %w", kp, err)
 				}
 				defer f.Close()
 				if _, err := f.WriteString(line + "\n"); err != nil {
-					return err
+					return fmt.Errorf("write known_hosts(%s): %w", kp, err)
 				}
 				return nil
 			}
 			// Host key mismatch.
-			return err
+			return fmt.Errorf("accept-new refused: host key mismatch for %s in %s", hostname, kp)
 		}
 		return err
 	}, nil
