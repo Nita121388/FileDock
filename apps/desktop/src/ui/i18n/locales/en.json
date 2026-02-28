@@ -166,6 +166,7 @@
       "device": "View: Server Device",
       "local": "View: Local",
       "sftp": "View: SFTP",
+      "terminal": "View: Terminal",
       "queue": "View: Transfer Queue",
       "notes": "View: Notes"
     },
@@ -218,6 +219,7 @@
       "viewDevice": "view device server",
       "viewLocal": "view local",
       "viewSftp": "view sftp vps",
+      "viewTerminal": "view terminal ssh",
       "viewQueue": "view queue transfers",
       "viewNotes": "view notes",
       "queueRunQueued": "queue run queued",
@@ -284,6 +286,7 @@
       "device": "Device Browser (Server)",
       "local": "Local",
       "sftp": "SFTP (VPS)",
+      "terminal": "Terminal",
       "queue": "Transfer Queue",
       "notes": "Notes"
     },
@@ -294,6 +297,19 @@
   "notes": {
     "hint": "This pane is a scratchpad. (Later: device/snapshot details, filters, settings.)",
     "placeholder": "Write notes here..."
+  },
+  "terminal": {
+    "title": "Terminal",
+    "actions": {
+      "reconnect": "Reconnect"
+    },
+    "status": {
+      "desktopOnly": "Terminal is available only in the desktop app.",
+      "connecting": "Connecting…",
+      "ready": "Connected",
+      "closed": "Closed",
+      "error": "Error"
+    }
   },
   "notice": {
     "info": "Info",
@@ -421,6 +437,7 @@
       "up": "Up",
       "mkdir": "Mkdir",
       "upload": "Upload",
+      "terminal": "Terminal",
       "backup": "Back up to server",
       "advancedShow": "Advanced",
       "advancedHide": "Hide advanced",
@@ -617,6 +634,7 @@
     "device": "Device",
     "vps": "VPS",
     "local": "Local",
+    "terminal": "Terminal",
     "transfers": "Transfers",
     "notes": "Notes",
     "workspace": "Workspace"

@@ -36,7 +36,8 @@
     ],
     "externalBin": [
       "binaries/filedock",
-      "binaries/filedock-sftp"
+      "binaries/filedock-sftp",
+      "binaries/filedock-ssh"
     ]
   }
 }

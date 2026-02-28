@@ -75,6 +75,7 @@ export default function LeafPane(props: {
   onCancelTransfer: (id: string) => void;
   onUpdateTransfer: (id: string, updates: Partial<TransferJob>) => void;
   onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
+  onOpenTerminal: (tab: PaneTab) => void;
   draggingLeafId: string | null;
   setDraggingLeafId: (id: string | null) => void;
   onDrop: (sourceLeafId: string, targetLeafId: string, zone: DropZone) => void;
@@ -105,6 +106,7 @@ export default function LeafPane(props: {
     onCancelTransfer,
     onUpdateTransfer,
     onSetDeviceAuth,
+    onOpenTerminal,
     draggingLeafId,
     setDraggingLeafId,
     onDrop,
@@ -195,6 +197,7 @@ export default function LeafPane(props: {
           <option value="deviceBrowser">{t("pane.types.device")}</option>
           <option value="localBrowser">{t("pane.types.local")}</option>
           <option value="sftpBrowser">{t("pane.types.sftp")}</option>
+          <option value="terminal">{t("pane.types.terminal")}</option>
           <option value="transferQueue">{t("pane.types.queue")}</option>
           <option value="notes">{t("pane.types.notes")}</option>
         </select>
@@ -249,6 +252,7 @@ export default function LeafPane(props: {
           onCancelTransfer={onCancelTransfer}
           onUpdateTransfer={onUpdateTransfer}
           onSetDeviceAuth={onSetDeviceAuth}
+          onOpenTerminal={onOpenTerminal}
         />
       </div>
     </div>

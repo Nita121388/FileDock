@@ -166,6 +166,7 @@
       "device": "视图：服务器设备",
       "local": "视图：本地",
       "sftp": "视图：SFTP",
+      "terminal": "视图：终端",
       "queue": "视图：传输队列",
       "notes": "视图：笔记"
     },
@@ -218,6 +219,7 @@
       "viewDevice": "view device server 设备 服务器 查看",
       "viewLocal": "view local 本地",
       "viewSftp": "view sftp vps SFTP",
+      "viewTerminal": "view terminal 终端 ssh",
       "viewQueue": "view queue transfers 传输 队列",
       "viewNotes": "view notes 笔记",
       "queueRunQueued": "queue run queued 排队 运行",
@@ -284,6 +286,7 @@
       "device": "设备浏览器（服务器）",
       "local": "本地",
       "sftp": "SFTP（VPS）",
+      "terminal": "终端",
       "queue": "传输队列",
       "notes": "笔记"
     },
@@ -294,6 +297,19 @@
   "notes": {
     "hint": "此面板用于临时记录。（后续：设备/快照详情、过滤器、设置）",
     "placeholder": "在此记录..."
+  },
+  "terminal": {
+    "title": "终端",
+    "actions": {
+      "reconnect": "重新连接"
+    },
+    "status": {
+      "desktopOnly": "终端仅在桌面应用可用。",
+      "connecting": "连接中…",
+      "ready": "已连接",
+      "closed": "已关闭",
+      "error": "错误"
+    }
   },
   "notice": {
     "info": "信息",
@@ -421,6 +437,7 @@
       "up": "上级",
       "mkdir": "新建文件夹",
       "upload": "上传",
+      "terminal": "终端",
       "backup": "备份到服务",
       "advancedShow": "高级设置",
       "advancedHide": "收起高级",
@@ -617,6 +634,7 @@
     "device": "设备",
     "vps": "VPS",
     "local": "本地",
+    "terminal": "终端",
     "transfers": "传输",
     "notes": "笔记",
     "workspace": "工作区"

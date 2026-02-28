@@ -45,6 +45,14 @@ if command -v go >/dev/null 2>&1; then
   mv -f "$tmp" "$DST_SFTP"
   chmod +x "$DST_SFTP" 2>/dev/null || true
   echo "[desktop-sidecars] wrote $DST_SFTP"
+
+  echo "[desktop-sidecars] building filedock-ssh (go)"
+  tmp="$OUT_DIR/.tmp_filedock-ssh${EXT}"
+  (cd "$ROOT/plugins/ssh" && go build -o "$tmp")
+  DST_SSH="$OUT_DIR/filedock-ssh-${HOST_TRIPLE}${EXT}"
+  mv -f "$tmp" "$DST_SSH"
+  chmod +x "$DST_SSH" 2>/dev/null || true
+  echo "[desktop-sidecars] wrote $DST_SSH"
 else
   echo "[desktop-sidecars] go not found; skipping filedock-sftp sidecar" >&2
 fi

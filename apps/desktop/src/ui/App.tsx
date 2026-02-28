@@ -13,10 +13,13 @@ import {
   activeTab as activeLeafTab,
   findLeaf,
   leafFromPane,
+  leafFromTab,
   setLeafPane,
+  splitLeafWithLeaf,
   type LayoutNode,
   type LeafNode,
   type PaneKind,
+  type PaneTab,
   uid as layoutUid
 } from "./model/layout";
 import { loadActiveLeafByTab, loadState, saveActiveLeafByTab, saveState } from "./model/storage";
@@ -370,6 +373,17 @@ export default function App() {
     if (!leafId) return;
     updateActiveRoot((root) => setLeafPane(root, leafId, pane));
   };
+
+  const openTerminalInNewPane = useCallback(
+    (terminalTab: PaneTab) => {
+      const leafId = getActiveLeafId(activeTab);
+      if (!leafId) return;
+      const leaf = leafFromTab(terminalTab);
+      updateActiveRoot((root) => splitLeafWithLeaf(root, leafId, "row", leaf, 0.5));
+      setActiveLeaf(activeTab.id, leaf.id);
+    },
+    [activeTab, getActiveLeafId, setActiveLeaf, updateActiveRoot]
+  );
 
   const collectLeaves = (node: LayoutNode, acc: LeafNode[] = []): LeafNode[] => {
     if (node.kind === "leaf") {
@@ -809,6 +823,12 @@ export default function App() {
         keywords: t("command.keywords.viewSftp"),
         shortcut: "Ctrl/⌘ + 3",
         run: () => setActiveLeafPane("sftpBrowser")
+      },
+      {
+        id: "view-terminal",
+        title: t("command.view.terminal"),
+        keywords: t("command.keywords.viewTerminal"),
+        run: () => setActiveLeafPane("terminal")
       },
       {
         id: "view-queue",
@@ -2711,6 +2731,7 @@ export default function App() {
             onSetDeviceAuth={(deviceId, deviceToken) =>
               setSettings((s) => ({ ...s, deviceId, deviceToken }))
             }
+            onOpenTerminal={openTerminalInNewPane}
             onTabChange={(tab) => {
               setState((s) => ({
                 ...s,

@@ -5,6 +5,7 @@ import DeviceBrowserPane from "./device/DeviceBrowserPane";
 import LocalBrowserPane from "./local/LocalBrowserPane";
 import NotesPane from "./notes/NotesPane";
 import SftpBrowserPane from "./sftp/SftpBrowserPane";
+import TerminalPane from "./terminal/TerminalPane";
 import TransferQueuePane from "./transfer/TransferQueuePane";
 import type { NoticeLevel } from "../NoticeCenter";
 
@@ -78,6 +79,7 @@ export function PaneView(props: {
   onRunTransfer: (id: string) => Promise<void>;
   onCancelTransfer: (id: string) => void;
   onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
+  onOpenTerminal: (tab: import("../../model/layout").PaneTab) => void;
 }) {
   switch (props.tab.pane) {
     case "deviceBrowser":
@@ -114,6 +116,14 @@ export function PaneView(props: {
           onEnqueueSftpUpload={props.onEnqueueSftpUpload}
           onEnqueueSftpToSnapshot={props.onEnqueueSftpToSnapshot}
           onEnqueueSnapshotToSftp={props.onEnqueueSnapshotToSftp}
+          onOpenTerminal={props.onOpenTerminal}
+        />
+      );
+    case "terminal":
+      return (
+        <TerminalPane
+          tab={props.tab}
+          onTabChange={(next) => props.onUpdateTab(() => next)}
         />
       );
     case "transferQueue":

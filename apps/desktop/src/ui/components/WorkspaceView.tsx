@@ -86,6 +86,7 @@ export function WorkspaceView(props: {
   onCancelTransfer: (id: string) => void;
   onUpdateTransfer: (id: string, updates: Partial<TransferJob>) => void;
   onSetDeviceAuth: (deviceId: string, deviceToken: string) => void;
+  onOpenTerminal: (tab: PaneTab) => void;
   onTabChange: (tab: TabState) => void;
   onActivateLeaf?: (leafId: string) => void;
 }) {
@@ -107,6 +108,7 @@ export function WorkspaceView(props: {
     onCancelTransfer,
     onUpdateTransfer,
     onSetDeviceAuth,
+    onOpenTerminal,
     onTabChange,
     onActivateLeaf
   } = props;
@@ -153,6 +155,7 @@ export function WorkspaceView(props: {
           onCancelTransfer={onCancelTransfer}
           onUpdateTransfer={onUpdateTransfer}
           onSetDeviceAuth={onSetDeviceAuth}
+          onOpenTerminal={onOpenTerminal}
           onNotify={onNotify}
           draggingLeafId={draggingLeafId}
           setDraggingLeafId={setDraggingLeafId}
@@ -186,6 +189,7 @@ export function WorkspaceView(props: {
       onRemoveTransfer,
       onRunTransfer,
       onSetDeviceAuth,
+      onOpenTerminal,
       onUpdateTransfer,
       onNotify,
       settings,

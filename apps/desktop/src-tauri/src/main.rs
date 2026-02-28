@@ -1,13 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use base64::Engine;
 use filedock_protocol::{
     is_valid_rel_path, ChunkPresenceRequest, ChunkPresenceResponse, ChunkRef, ManifestFileEntry,
     SnapshotCreateRequest, SnapshotCreateResponse, SnapshotManifest,
 };
 use futures_util::StreamExt;
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -23,6 +26,8 @@ const DEVICE_ID_HEADER: &str = "x-filedock-device-id";
 const DEVICE_TOKEN_HEADER: &str = "x-filedock-device-token";
 const RESTORE_EVENT: &str = "filedock_restore_progress";
 const IMPORT_EVENT: &str = "filedock_import_progress";
+const TERMINAL_OUTPUT_EVENT: &str = "filedock_terminal_output";
+const TERMINAL_EXIT_EVENT: &str = "filedock_terminal_exit";
 const CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
 #[derive(Default)]
@@ -35,6 +40,17 @@ struct RestoreManager {
 struct PluginRunManager {
     // run_id -> cancellation flag
     cancel: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+struct TerminalSession {
+    writer: Box<dyn Write + Send>,
+    master: Box<dyn portable_pty::MasterPty + Send>,
+    child: Box<dyn portable_pty::Child + Send>,
+}
+
+#[derive(Default)]
+struct TerminalManager {
+    sessions: Arc<std::sync::Mutex<HashMap<String, TerminalSession>>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,6 +92,55 @@ struct ImportSftpFileToSnapshotRequest {
     sftp_conn: serde_json::Value,
     remote_path: String,
     runner: Option<RunnerConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TerminalStartRequest {
+    kind: String, // "local" | "ssh"
+    cols: Option<u16>,
+    rows: Option<u16>,
+    cwd: Option<String>,
+    conn: Option<TerminalSshConn>,
+}
+
+#[derive(Debug, Serialize)]
+struct TerminalStartResponse {
+    session_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct TerminalSshConn {
+    host: String,
+    port: u16,
+    user: String,
+    auth: TerminalSshAuth,
+    known_hosts: TerminalKnownHosts,
+    #[serde(default)]
+    base_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct TerminalSshAuth {
+    password: String,
+    key_path: String,
+    agent: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct TerminalKnownHosts {
+    policy: String,
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TerminalOutputPayload {
+    session_id: String,
+    data: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TerminalExitPayload {
+    session_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -546,6 +611,221 @@ fn local_copy(from: String, to: String) -> Result<(), String> {
     Ok(())
 }
 
+fn next_terminal_id() -> String {
+    static TERMINAL_SEQ: AtomicUsize = AtomicUsize::new(1);
+    let n = TERMINAL_SEQ.fetch_add(1, Ordering::Relaxed);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    format!("term_{now}_{n}")
+}
+
+fn default_shell_command() -> CommandBuilder {
+    if cfg!(windows) {
+        let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+        CommandBuilder::new(shell)
+    } else {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+        let mut cmd = CommandBuilder::new(shell);
+        cmd.arg("-l");
+        cmd
+    }
+}
+
+fn resolve_local_cwd(raw: Option<String>) -> Option<PathBuf> {
+    let trimmed = raw.unwrap_or_default();
+    if trimmed.trim().is_empty() {
+        return default_home_dir();
+    }
+    let pb = PathBuf::from(trimmed);
+    if pb.is_dir() {
+        return Some(pb);
+    }
+    default_home_dir()
+}
+
+fn default_home_dir() -> Option<PathBuf> {
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.trim().is_empty() {
+            return Some(PathBuf::from(home));
+        }
+    }
+    if let Ok(home) = std::env::var("USERPROFILE") {
+        if !home.trim().is_empty() {
+            return Some(PathBuf::from(home));
+        }
+    }
+    None
+}
+
+#[tauri::command]
+fn terminal_start(
+    app: AppHandle,
+    state: State<'_, TerminalManager>,
+    req: TerminalStartRequest,
+) -> Result<TerminalStartResponse, String> {
+    let cols = req.cols.unwrap_or(80).max(1);
+    let rows = req.rows.unwrap_or(24).max(1);
+
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("open pty: {e}"))?;
+
+    let mut cmd = if req.kind.trim() == "ssh" {
+        let conn = req
+            .conn
+            .as_ref()
+            .ok_or_else(|| "conn required for ssh".to_string())?;
+        let config = serde_json::json!({
+            "conn": conn,
+            "cwd": req.cwd.clone().unwrap_or_default(),
+            "cols": cols,
+            "rows": rows,
+            "term": "xterm-256color"
+        });
+        let encoded = base64::engine::general_purpose::STANDARD.encode(
+            serde_json::to_vec(&config).map_err(|e| format!("encode ssh config: {e}"))?,
+        );
+        let exe = resolve_sidecar_path("filedock-ssh");
+        let mut cmd = CommandBuilder::new(exe);
+        cmd.arg("--config-b64").arg(encoded);
+        cmd
+    } else {
+        let mut cmd = default_shell_command();
+        if let Some(cwd) = resolve_local_cwd(req.cwd.clone()) {
+            cmd.cwd(cwd);
+        }
+        cmd
+    };
+
+    cmd.env("TERM", "xterm-256color");
+    let child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("spawn terminal: {e}"))?;
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("pty reader: {e}"))?;
+    let writer = pair.master.take_writer().map_err(|e| format!("pty writer: {e}"))?;
+
+    let session_id = next_terminal_id();
+    let sessions = state.sessions.clone();
+    {
+        let mut m = sessions
+            .lock()
+            .map_err(|_| "terminal manager lock poisoned".to_string())?;
+        m.insert(
+            session_id.clone(),
+            TerminalSession {
+                writer,
+                master: pair.master,
+                child,
+            },
+        );
+    }
+
+    let app_handle = app.clone();
+    let session_for_thread = session_id.clone();
+    std::thread::spawn(move || {
+        let mut rdr = reader;
+        let mut buf = [0u8; 8192];
+        loop {
+            match rdr.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let _ = app_handle.emit(
+                        TERMINAL_OUTPUT_EVENT,
+                        TerminalOutputPayload {
+                            session_id: session_for_thread.clone(),
+                            data,
+                        },
+                    );
+                }
+                Err(_) => break,
+            }
+        }
+        let _ = app_handle.emit(
+            TERMINAL_EXIT_EVENT,
+            TerminalExitPayload {
+                session_id: session_for_thread.clone(),
+            },
+        );
+        if let Ok(mut m) = sessions.lock() {
+            m.remove(&session_for_thread);
+        }
+    });
+
+    Ok(TerminalStartResponse { session_id })
+}
+
+#[tauri::command]
+fn terminal_write(
+    state: State<'_, TerminalManager>,
+    session_id: String,
+    data: String,
+) -> Result<(), String> {
+    let mut m = state
+        .sessions
+        .lock()
+        .map_err(|_| "terminal manager lock poisoned".to_string())?;
+    let sess = m
+        .get_mut(&session_id)
+        .ok_or_else(|| "terminal session not found".to_string())?;
+    sess.writer
+        .write_all(data.as_bytes())
+        .map_err(|e| format!("terminal write: {e}"))?;
+    sess.writer
+        .flush()
+        .map_err(|e| format!("terminal flush: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn terminal_resize(
+    state: State<'_, TerminalManager>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let m = state
+        .sessions
+        .lock()
+        .map_err(|_| "terminal manager lock poisoned".to_string())?;
+    let sess = m
+        .get(&session_id)
+        .ok_or_else(|| "terminal session not found".to_string())?;
+    sess.master
+        .resize(PtySize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("terminal resize: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn terminal_close(state: State<'_, TerminalManager>, session_id: String) -> Result<(), String> {
+    let mut m = state
+        .sessions
+        .lock()
+        .map_err(|_| "terminal manager lock poisoned".to_string())?;
+    if let Some(mut sess) = m.remove(&session_id) {
+        let _ = sess.child.kill();
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn cancel_restore_snapshot(
     state: State<'_, RestoreManager>,
@@ -764,6 +1044,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(RestoreManager::default())
         .manage(PluginRunManager::default())
+        .manage(TerminalManager::default())
         .invoke_handler(tauri::generate_handler![
             restore_snapshot_to_folder,
             cancel_restore_snapshot,
@@ -772,6 +1053,10 @@ fn main() {
             local_move,
             local_delete,
             local_copy,
+            terminal_start,
+            terminal_write,
+            terminal_resize,
+            terminal_close,
             run_filedock_plugin,
             cancel_filedock_plugin_run,
             copy_snapshot_file_to_sftp,
@@ -1981,6 +2266,38 @@ fn resolve_filedock_path(explicit: Option<&str>) -> (String, Option<PathBuf>) {
     }
 
     ("filedock".to_string(), None)
+}
+
+fn resolve_sidecar_path(name: &str) -> String {
+    let exe = tauri::process::current_binary(&tauri::Env::default()).ok();
+    let exe_dir = exe
+        .as_deref()
+        .and_then(|p| p.parent())
+        .map(Path::to_path_buf);
+    if let Some(dir) = exe_dir {
+        let mut candidates = vec![dir.join(name)];
+        if cfg!(windows) {
+            candidates.push(dir.join(format!("{name}.exe")));
+        }
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            let prefix = format!("{name}-");
+            for e in rd.flatten() {
+                let p = e.path();
+                let file_name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                if file_name.starts_with(&prefix) {
+                    candidates.push(p);
+                }
+            }
+        }
+
+        for c in candidates {
+            if c.is_file() {
+                return c.to_string_lossy().to_string();
+            }
+        }
+    }
+
+    name.to_string()
 }
 
 #[tauri::command]

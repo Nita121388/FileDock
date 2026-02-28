@@ -20,6 +20,8 @@ filedock-protocol = { path = "../../../crates/protocol" }
 urlencoding = "2"
 rand = "0.8"
 blake3 = "1"
+base64 = "0.22"
+portable-pty = "0.8"
 
 [profile.release]
 panic = "abort"

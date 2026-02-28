@@ -87,6 +87,7 @@ export default function SftpBrowserPane(props: {
     remotePath: string;
     mkdirs?: boolean;
   }) => void;
+  onOpenTerminal: (tab: import("../../../model/layout").PaneTab) => void;
 }) {
   const { paneId, settings } = props;
   const { t } = useTranslation();
@@ -178,6 +179,29 @@ export default function SftpBrowserPane(props: {
     }
     return parsed.data;
   }, [conn, st.filedockPath, st.pluginDirs, t]);
+
+  const openTerminal = useCallback(() => {
+    const terminalTab: PaneTab = {
+      id: uid("tab"),
+      pane: "terminal",
+      title: "",
+      state: {
+        mode: "sftp",
+        title: "",
+        path: st.path || "/",
+        host: st.host,
+        port: st.port || 22,
+        user: st.user,
+        password: st.password,
+        keyPath: st.keyPath,
+        useAgent: st.useAgent,
+        knownHostsPolicy: st.knownHostsPolicy,
+        knownHostsPath: st.knownHostsPath,
+        basePath: st.basePath
+      }
+    };
+    props.onOpenTerminal(terminalTab);
+  }, [props, st]);
 
   const refresh = useCallback(async () => {
     setErr(null);
@@ -567,6 +591,9 @@ export default function SftpBrowserPane(props: {
           </button>
           <button className="pane-btn" onClick={() => onUploadFile()} disabled={loading}>
             {t("sftp.actions.upload")}
+          </button>
+          <button className="pane-btn" onClick={() => openTerminal()} disabled={loading}>
+            {t("sftp.actions.terminal")}
           </button>
           <button
             className="pane-btn"

@@ -2,7 +2,13 @@ import { i18next } from "../i18n";
 
 export type SplitDir = "row" | "col";
 
-export type PaneKind = "deviceBrowser" | "sftpBrowser" | "localBrowser" | "transferQueue" | "notes";
+export type PaneKind =
+  | "deviceBrowser"
+  | "sftpBrowser"
+  | "localBrowser"
+  | "terminal"
+  | "transferQueue"
+  | "notes";
 
 export type DropZone = "center" | "left" | "right" | "top" | "bottom";
 
@@ -52,10 +58,26 @@ export type LocalBrowserTabState = {
   path: string;
 };
 
+export type TerminalTabState = {
+  mode: "local" | "sftp";
+  title: string;
+  path: string;
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  keyPath: string;
+  useAgent: boolean;
+  knownHostsPolicy: "strict" | "accept-new" | "insecure";
+  knownHostsPath: string;
+  basePath: string;
+};
+
 export type PaneTab =
   | { id: string; pane: "deviceBrowser"; title?: string; state: DeviceBrowserTabState }
   | { id: string; pane: "sftpBrowser"; title?: string; state: SftpBrowserTabState }
   | { id: string; pane: "localBrowser"; title?: string; state: LocalBrowserTabState }
+  | { id: string; pane: "terminal"; title?: string; state: TerminalTabState }
   | { id: string; pane: "transferQueue"; title?: string }
   | { id: string; pane: "notes"; title?: string };
 
@@ -142,12 +164,37 @@ export function makeTab(pane: PaneKind, title?: string): PaneTab {
       }
     };
   }
+  if (pane === "terminal") {
+    return {
+      id,
+      pane,
+      title,
+      state: {
+        mode: "local",
+        title: "",
+        path: "",
+        host: "",
+        port: 22,
+        user: "",
+        password: "",
+        keyPath: "",
+        useAgent: false,
+        knownHostsPolicy: "strict",
+        knownHostsPath: "",
+        basePath: ""
+      }
+    };
+  }
   return { id, pane: pane as any, title } as PaneTab;
 }
 
 export function leafFromPane(pane: PaneKind): LeafNode {
   const t = makeTab(pane);
   return { kind: "leaf", id: uid("pane"), tabs: [t], activeTabId: t.id };
+}
+
+export function leafFromTab(tab: PaneTab): LeafNode {
+  return { kind: "leaf", id: uid("pane"), tabs: [tab], activeTabId: tab.id };
 }
 
 export function activeTab(leaf: LeafNode): PaneTab {
@@ -176,6 +223,19 @@ export function displayTabTitle(tab: PaneTab): string {
     const base = tab.state.basePath || t("tab.local");
     const p = tab.state.path ? ` /${tab.state.path}` : "";
     return `${base}${p}`;
+  }
+
+  if (tab.pane === "terminal") {
+    const title = tab.state.title?.trim();
+    if (title) return title;
+    if (tab.state.mode === "sftp") {
+      const host = tab.state.host || t("tab.vps");
+      const user = tab.state.user ? `${tab.state.user}@` : "";
+      const p = tab.state.path ? ` ${tab.state.path}` : "";
+      return `${user}${host}${p}`;
+    }
+    const p = tab.state.path ? ` ${tab.state.path}` : "";
+    return `${t("tab.terminal")}${p}`;
   }
 
   if (tab.pane === "transferQueue") return t("tab.transfers");
@@ -289,6 +349,32 @@ export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
             state: {
               basePath: typeof st?.basePath === "string" ? st.basePath : "",
               path: typeof st?.path === "string" ? st.path : ""
+            }
+          };
+        }
+        if (pane === "terminal") {
+          const st = t.state as Partial<TerminalTabState> | undefined;
+          const mode = st?.mode === "sftp" ? "sftp" : "local";
+          const khPolicy = (st?.knownHostsPolicy as any) ?? "strict";
+          const policy: "strict" | "accept-new" | "insecure" =
+            khPolicy === "accept-new" || khPolicy === "insecure" ? khPolicy : "strict";
+          return {
+            id: t.id,
+            pane,
+            title,
+            state: {
+              mode,
+              title: typeof st?.title === "string" ? st.title : "",
+              path: typeof st?.path === "string" ? st.path : "",
+              host: typeof st?.host === "string" ? st.host : "",
+              port: typeof st?.port === "number" && Number.isFinite(st.port) ? st.port : 22,
+              user: typeof st?.user === "string" ? st.user : "",
+              password: typeof st?.password === "string" ? st.password : "",
+              keyPath: typeof st?.keyPath === "string" ? st.keyPath : "",
+              useAgent: typeof st?.useAgent === "boolean" ? st.useAgent : false,
+              knownHostsPolicy: policy,
+              knownHostsPath: typeof st?.knownHostsPath === "string" ? st.knownHostsPath : "",
+              basePath: typeof st?.basePath === "string" ? st.basePath : ""
             }
           };
         }
@@ -426,9 +512,48 @@ export function setLeafPane(node: LayoutNode, leafId: string, pane: PaneKind): L
           };
           return { id: t.id, pane, title, state: { ...prev } };
         }
+        if (pane === "terminal") {
+          const prev: TerminalTabState = t.pane === "terminal" ? t.state : {
+            mode: "local",
+            title: "",
+            path: "",
+            host: "",
+            port: 22,
+            user: "",
+            password: "",
+            keyPath: "",
+            useAgent: false,
+            knownHostsPolicy: "strict",
+            knownHostsPath: "",
+            basePath: ""
+          };
+          return { id: t.id, pane, title, state: { ...prev } };
+        }
         if (pane === "transferQueue") return { id: t.id, pane, title };
         return { id: t.id, pane: "notes", title };
       })
+    };
+  });
+}
+
+export function splitLeafWithLeaf(
+  node: LayoutNode,
+  leafId: string,
+  dir: SplitDir,
+  right: LeafNode,
+  ratio: number = 0.5
+): LayoutNode {
+  return mapNode(node, (n) => {
+    if (n.kind !== "leaf") return n;
+    if (n.id !== leafId) return n;
+    const left: LeafNode = { ...n };
+    return {
+      kind: "split",
+      id: uid("split"),
+      dir,
+      ratio: clampRatio(ratio),
+      a: left,
+      b: right
     };
   });
 }

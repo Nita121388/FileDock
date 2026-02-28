@@ -1,7 +1,7 @@
 # Desktop sidecar binaries
 
-This folder is used by Tauri `bundle.externalBin` to ship `filedock` and optional plugins (e.g. `filedock-sftp`)
-inside the desktop app bundle.
+This folder is used by Tauri `bundle.externalBin` to ship `filedock` and optional plugins (e.g. `filedock-sftp`,
+`filedock-ssh`) inside the desktop app bundle.
 
 Tauri looks for platform-specific binaries using this naming pattern:
 
@@ -9,7 +9,8 @@ Tauri looks for platform-specific binaries using this naming pattern:
 - `filedock-x86_64-apple-darwin`
 - `filedock-x86_64-unknown-linux-gnu`
 
-Same for plugins (example: `filedock-sftp-x86_64-unknown-linux-gnu`).
+Same for plugins (example: `filedock-sftp-x86_64-unknown-linux-gnu`,
+`filedock-ssh-x86_64-unknown-linux-gnu`).
 
 On a build machine, run:
 
@@ -18,4 +19,3 @@ On a build machine, run:
 ```
 
 Then build the desktop app normally (Tauri will pick up the correct binaries).
-

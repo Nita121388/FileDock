@@ -230,3 +230,58 @@ export async function importSftpFileToSnapshot(
     if (unlisten) await unlisten();
   }
 }
+
+export type TerminalStartRequest = {
+  kind: "local" | "ssh";
+  cols?: number;
+  rows?: number;
+  cwd?: string;
+  conn?: unknown;
+};
+
+export type TerminalStartResponse = {
+  session_id: string;
+};
+
+export type TerminalOutput = {
+  session_id: string;
+  data: string;
+};
+
+export type TerminalExit = {
+  session_id: string;
+};
+
+export async function startTerminal(req: TerminalStartRequest): Promise<TerminalStartResponse> {
+  const invoke = await getInvoke();
+  return await invoke<TerminalStartResponse>("terminal_start", { req });
+}
+
+export async function writeTerminal(sessionId: string, data: string): Promise<void> {
+  const invoke = await getInvoke();
+  await invoke("terminal_write", { sessionId, data });
+}
+
+export async function resizeTerminal(sessionId: string, cols: number, rows: number): Promise<void> {
+  const invoke = await getInvoke();
+  await invoke("terminal_resize", { sessionId, cols, rows });
+}
+
+export async function closeTerminal(sessionId: string): Promise<void> {
+  const invoke = await getInvoke();
+  await invoke("terminal_close", { sessionId });
+}
+
+export async function listenTerminalOutput(
+  handler: (payload: TerminalOutput) => void
+): Promise<UnlistenFn> {
+  const listen = await getListen();
+  return await listen<TerminalOutput>("filedock_terminal_output", (e) => handler(e.payload));
+}
+
+export async function listenTerminalExit(
+  handler: (payload: TerminalExit) => void
+): Promise<UnlistenFn> {
+  const listen = await getListen();
+  return await listen<TerminalExit>("filedock_terminal_exit", (e) => handler(e.payload));
+}
