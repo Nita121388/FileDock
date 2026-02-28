@@ -18,6 +18,7 @@ Implemented (see `progress/` for exact commits):
 - Encryption at rest (optional): per-device key, client-side encryption before upload.
 - Better ignore rules: `.gitignore`-style files, default excludes (node_modules, .git, etc).
 - Restore UX: desktop \"restore folder\" workflow (not only per-file download).
+- Onboarding config export: copyable JSON + QR code + CLI export for server configs.
 
 ## Later
 

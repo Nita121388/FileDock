@@ -1,19 +1,19 @@
 use axum::{
     body::Body,
     extract::{Path, State},
-    http::Request,
-    http::StatusCode,
+    http::{header, Request, StatusCode},
     middleware::Next,
     routing::{delete, get, post, put},
+    response::IntoResponse,
     Json, Router,
 };
 use bytes::Bytes;
 use filedock_protocol::{
     is_valid_chunk_hash, is_valid_rel_path, ChunkGcRequest, ChunkGcResponse, ChunkPresenceRequest,
     ChunkPresenceResponse, ChunkRef, DeviceHeartbeatRequest, DeviceHeartbeatResponse, DeviceInfo,
-    DeviceRegisterRequest, DeviceRegisterResponse, HealthResponse, SnapshotCreateRequest,
-    SnapshotCreateResponse, SnapshotDeleteResponse, SnapshotManifest, SnapshotMeta,
-    SnapshotPruneRequest, SnapshotPruneResponse, TreeEntry, TreeResponse,
+    DeviceRegisterRequest, DeviceRegisterResponse, HealthResponse, ServerConfigExport,
+    SnapshotCreateRequest, SnapshotCreateResponse, SnapshotDeleteResponse, SnapshotManifest,
+    SnapshotMeta, SnapshotPruneRequest, SnapshotPruneResponse, TreeEntry, TreeResponse, API_VERSION,
 };
 use filedock_storage::{DiskStorage, PutOpts, S3Storage, S3StorageConfig, Storage};
 use std::{net::SocketAddr, sync::Arc};
@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use axum::extract::Query;
 use clap::Parser;
+use qrcode::QrCode;
 use serde::Deserialize;
 use std::io;
 
@@ -59,6 +60,10 @@ struct Opt {
     /// Force S3 path-style addressing (useful for MinIO).
     #[arg(long, env = "FILEDOCK_S3_FORCE_PATH_STYLE", default_value_t = false)]
     s3_force_path_style: bool,
+
+    /// Public base URL used when exporting server config (e.g. https://files.example.com).
+    #[arg(long, env = "FILEDOCK_PUBLIC_URL")]
+    public_url: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -75,6 +80,7 @@ struct DeviceRecord {
 struct AppState {
     storage: Arc<dyn Storage>,
     token: Option<String>,
+    public_base_url: String,
 }
 
 async fn health() -> Json<HealthResponse> {
@@ -82,6 +88,35 @@ async fn health() -> Json<HealthResponse> {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     })
+}
+
+fn resolve_public_base_url(opt: &Opt) -> String {
+    if let Some(raw) = &opt.public_url {
+        let trimmed = raw.trim().trim_end_matches('/');
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    // Fallback to localhost + listen port when public URL is not provided.
+    let port = opt
+        .listen
+        .rsplit(':')
+        .next()
+        .unwrap_or("8787")
+        .trim();
+    format!("http://127.0.0.1:{port}")
+}
+
+fn build_config_export(state: &AppState) -> ServerConfigExport {
+    ServerConfigExport {
+        server_base_url: state.public_base_url.clone(),
+        token: state.token.clone(),
+        device_id: None,
+        device_token: None,
+        api_version: API_VERSION.to_string(),
+        generated_unix: now_unix(),
+    }
 }
 
 async fn register_device(
@@ -307,6 +342,25 @@ async fn auth(
     }
 
     Ok(next.run(req).await)
+}
+
+async fn export_config(State(state): State<AppState>) -> Json<ServerConfigExport> {
+    Json(build_config_export(&state))
+}
+
+async fn export_config_qr(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let config = build_config_export(&state);
+    let json =
+        serde_json::to_string(&config).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let code = QrCode::new(json.as_bytes())
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let svg = code
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(256, 256)
+        .build();
+    Ok(([(header::CONTENT_TYPE, "image/svg+xml; charset=utf-8")], svg).into_response())
 }
 
 async fn chunks_presence(
@@ -909,6 +963,7 @@ async fn main() {
         .init();
 
     let opt = Opt::parse();
+    let public_base_url = resolve_public_base_url(&opt);
 
     let storage: Arc<dyn Storage> = match opt.storage_backend.trim() {
         "disk" => Arc::new(DiskStorage::new(opt.storage_dir)),
@@ -953,7 +1008,11 @@ async fn main() {
         tracing::warn!("auth: disabled (FILEDOCK_TOKEN not set)");
     }
 
-    let state = AppState { storage, token };
+    let state = AppState {
+        storage,
+        token,
+        public_base_url,
+    };
 
     let app = Router::new()
         .route("/health", get(health))
@@ -963,6 +1022,8 @@ async fn main() {
         .route("/v1/snapshots", post(create_snapshot).get(list_snapshots))
         .route("/v1/snapshots/prune", post(prune_snapshots))
         .route("/v1/snapshots/:snapshot_id", delete(delete_snapshot))
+        .route("/v1/admin/config/export", get(export_config))
+        .route("/v1/admin/config/qr", get(export_config_qr))
         .route("/v1/admin/chunks/gc", post(gc_chunks))
         .route(
             "/v1/snapshots/:snapshot_id/manifest",

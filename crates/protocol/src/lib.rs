@@ -2,6 +2,22 @@ use serde::{Deserialize, Serialize};
 
 pub const API_VERSION: &str = "v1";
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerConfigExport {
+    /// Public base URL clients should use, e.g. https://files.example.com.
+    pub server_base_url: String,
+    /// Optional server token (present when FILEDOCK_TOKEN is set).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    /// Optional device auth (if pre-provisioned).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_token: Option<String>,
+    pub api_version: String,
+    pub generated_unix: i64,
+}
+
 /// MVP assumes BLAKE3 hashes encoded as 64 hex characters (32 bytes).
 pub fn is_valid_chunk_hash(s: &str) -> bool {
     if s.len() != 64 {

@@ -37,6 +37,7 @@ Example (manual run):
 ```bash
 export FILEDOCK_STORAGE_DIR=/var/lib/filedock
 export FILEDOCK_TOKEN="change-me"   # optional but recommended
+export FILEDOCK_PUBLIC_URL="https://files.example.com"   # optional (used for config export)
 ./target/release/filedock-server --listen 0.0.0.0:8787
 ```
 

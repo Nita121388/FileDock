@@ -112,6 +112,14 @@ In the UI, set:
 - server URL: `http://127.0.0.1:8787`
 - token: `FILEDOCK_TOKEN` (if configured)
 
+You can also export a server config for copy/paste or QR:
+
+```bash
+export FILEDOCK_TOKEN="change-me"
+filedock config export --server http://127.0.0.1:8787
+filedock config qr --server http://127.0.0.1:8787
+```
+
 ### Restore a snapshot to a local folder (desktop)
 
 In the Device Browser pane:

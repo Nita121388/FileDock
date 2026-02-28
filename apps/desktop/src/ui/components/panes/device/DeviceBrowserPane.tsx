@@ -557,6 +557,18 @@ export default function DeviceBrowserPane(props: {
     if (snapshotId) refreshSnapshotTree(snapshotId, path);
   }, [path, refreshSnapshotTree, snapshotId, updateViewState]);
 
+  const copyPath = useCallback(
+    async (targetPath: string) => {
+      try {
+        await navigator.clipboard.writeText(targetPath);
+      } catch {
+        window.prompt(t("common.prompt.copyPath"), targetPath);
+      }
+      setStatus(t("device.status.copyPath", { path: targetPath }));
+    },
+    [t]
+  );
+
   const goUp = useCallback(() => {
     const up = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
     if (viewMode === "snapshot") {
@@ -1081,6 +1093,11 @@ export default function DeviceBrowserPane(props: {
                       if (tab.state.path !== next) {
                         onTabChange({ ...tab, state: { ...tab.state, path: next } });
                       }
+                    }}
+                    onContextMenu={(ev) => {
+                      ev.preventDefault();
+                      ev.stopPropagation();
+                      copyPath(itemPath);
                     }}
                     onDragStart={(ev) => {
                       if (viewMode === "all" && e.kind === "dir") return;

@@ -2,12 +2,13 @@ use clap::{Parser, Subcommand};
 use filedock_protocol::{
     is_valid_chunk_hash, is_valid_rel_path, ChunkGcRequest, ChunkGcResponse, ChunkPresenceRequest,
     ChunkPresenceResponse, ChunkRef, DeviceHeartbeatRequest, DeviceHeartbeatResponse,
-    HealthResponse, ManifestFileEntry, SnapshotCreateRequest, SnapshotCreateResponse,
-    SnapshotDeleteResponse, SnapshotManifest, SnapshotMeta, SnapshotPruneRequest,
-    SnapshotPruneResponse, TreeResponse,
+    HealthResponse, ManifestFileEntry, ServerConfigExport, SnapshotCreateRequest,
+    SnapshotCreateResponse, SnapshotDeleteResponse, SnapshotManifest, SnapshotMeta,
+    SnapshotPruneRequest, SnapshotPruneResponse, TreeResponse,
 };
 use futures_util::stream::{self, StreamExt};
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use qrcode::QrCode;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::{
@@ -60,6 +61,26 @@ fn build_client() -> Result<reqwest::Client, String> {
         .default_headers(headers)
         .build()
         .map_err(|e| format!("build http client: {e}"))
+}
+
+async fn fetch_server_config(
+    client: &reqwest::Client,
+    server: &str,
+) -> Result<ServerConfigExport, String> {
+    let url = format!(
+        "{}/v1/admin/config/export",
+        server.trim_end_matches('/')
+    );
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("config export request: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("config export response: {e}"))?;
+    resp.json()
+        .await
+        .map_err(|e| format!("config export decode: {e}"))
 }
 
 #[derive(Parser, Debug)]
@@ -153,6 +174,12 @@ enum Command {
         /// Seconds between runs. Use 0 to run once.
         #[arg(long, default_value_t = 900)]
         interval_secs: u64,
+    },
+
+    /// Export server connection config (JSON or QR).
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
     },
 
     /// List a snapshot directory (server-side) using the uploaded manifest.
@@ -329,6 +356,23 @@ enum Command {
     Plugin {
         #[command(subcommand)]
         command: PluginCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ConfigCommand {
+    /// Export server config JSON (requires FILEDOCK_TOKEN when auth is enabled).
+    Export {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
+    },
+
+    /// Print a QR code for server config (requires FILEDOCK_TOKEN when auth is enabled).
+    Qr {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
     },
 }
 
@@ -724,6 +768,25 @@ async fn main() -> Result<(), String> {
                 "{}",
                 serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?
             );
+        }
+        Command::Config { command } => {
+            let client = build_client()?;
+            match command {
+                ConfigCommand::Export { server } => {
+                    let cfg = fetch_server_config(&client, &server).await?;
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?
+                    );
+                }
+                ConfigCommand::Qr { server } => {
+                    let cfg = fetch_server_config(&client, &server).await?;
+                    let json = serde_json::to_string(&cfg).map_err(|e| e.to_string())?;
+                    let code = QrCode::new(json.as_bytes()).map_err(|e| e.to_string())?;
+                    let rendered = code.render::<qrcode::render::unicode::Dense1x2>().build();
+                    println!("{rendered}");
+                }
+            }
         }
         Command::PushFile { server, file } => {
             let data = tokio::fs::read(&file)

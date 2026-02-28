@@ -162,6 +162,18 @@ export default function LocalBrowserPane(props: {
     onTabChange({ ...tab, state: { ...tab.state, path: next } });
   }, [onTabChange, relPath, tab]);
 
+  const copyPath = useCallback(
+    async (targetPath: string) => {
+      try {
+        await navigator.clipboard.writeText(targetPath);
+      } catch {
+        window.prompt(t("common.prompt.copyPath"), targetPath);
+      }
+      setStatus(t("local.status.copyPath", { path: targetPath }));
+    },
+    [t]
+  );
+
   const pickBackupDeviceName = useCallback(() => {
     const currentDevice = loadBackupDeviceName() || "desktop";
     const deviceNameRaw = prompt(t("local.prompt.deviceName"), currentDevice);
@@ -400,7 +412,14 @@ export default function LocalBrowserPane(props: {
         </div>
         {entries.map((entry) => (
           <div key={entry.path} className="pane-row">
-            <div className="sftp-name">
+            <div
+              className="sftp-name"
+              onContextMenu={(ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                copyPath(entry.path);
+              }}
+            >
               <span className="db-emoji" aria-hidden="true">
                 {entry.kind === "dir" ? "📁" : "📄"}
               </span>

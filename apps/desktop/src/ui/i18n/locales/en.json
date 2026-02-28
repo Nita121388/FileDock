@@ -32,6 +32,9 @@
       "type": "Type",
       "size": "Size",
       "actions": "Actions"
+    },
+    "prompt": {
+      "copyPath": "Copy path:"
     }
   },
   "app": {
@@ -104,9 +107,26 @@
       "exportTitle": "Copy preferences JSON",
       "exportPrompt": "Copy settings JSON:",
       "import": "Import JSON",
-      "importTitle": "Paste preferences JSON (replaces current settings)",
-      "importPrompt": "Paste settings JSON:",
+      "importTitle": "Paste preferences JSON or server config JSON",
+      "importPrompt": "Paste settings or server config JSON:",
       "invalidJson": "Invalid JSON"
+    },
+    "qrImport": {
+      "open": "Scan QR",
+      "openTitle": "Scan a QR code to import server config",
+      "title": "Scan QR Import",
+      "close": "Close",
+      "preview": "Camera preview",
+      "previewHint": "Camera feed will appear here.",
+      "webHint": "Camera scanning is disabled in web preview.",
+      "desc": "Scan a server config QR or paste its JSON payload.",
+      "stepsTitle": "Steps",
+      "step1": "Open the server config QR.",
+      "step2": "Point it at the frame.",
+      "step3": "Confirm and import.",
+      "pasteLabel": "Paste QR payload",
+      "pastePlaceholder": "Paste the QR JSON...",
+      "apply": "Apply Import"
     },
     "statusbar": {
       "source": "Source",
@@ -313,7 +333,8 @@
       "backupRunning": "Backing up {{path}}...",
       "backupDone": "Backup completed: {{snapshot}}",
       "backupDoneNoId": "Backup completed",
-      "copyDone": "Copied to {{path}}"
+      "copyDone": "Copied to {{path}}",
+      "copyPath": "Copied path: {{path}}"
     },
     "notice": {
       "selected": "Selected folder: {{path}}"
@@ -353,7 +374,8 @@
     },
     "status": {
       "queuedBackup": "Queued backup: {{src}} -> {{dst}}",
-      "queuedDeleteBackup": "Queued backup-before-delete: {{src}} -> {{dst}}"
+      "queuedDeleteBackup": "Queued backup-before-delete: {{src}} -> {{dst}}",
+      "copyPath": "copied path: {{path}}"
     },
     "labels": {
       "host": "Host",
@@ -460,6 +482,7 @@
       "queuedCopyDir": "queued copy dir: {{src}} -> {{dst}}",
       "queuedCopy": "queued copy: {{src}} -> {{dst}}",
       "queuedPath": "queued {{path}}",
+      "copyPath": "copied path: {{path}}",
       "downloaded": "downloaded {{path}}"
     },
     "history": {

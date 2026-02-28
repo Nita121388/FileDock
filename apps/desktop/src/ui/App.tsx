@@ -59,6 +59,24 @@ import { isTauri } from "./util/tauriEnv";
 
 const QUEUE_KEY = "filedock.desktop.queue.v1";
 
+type ServerConfigImport = {
+  serverBaseUrl: string;
+  token?: string | null;
+  deviceId?: string | null;
+  deviceToken?: string | null;
+};
+
+const parseServerConfigImport = (input: any): ServerConfigImport | null => {
+  if (!input || typeof input !== "object") return null;
+  if (typeof input.server_base_url !== "string") return null;
+  const serverBaseUrl = input.server_base_url.trim();
+  if (!serverBaseUrl) return null;
+  const token = typeof input.token === "string" ? input.token : null;
+  const deviceId = typeof input.device_id === "string" ? input.device_id : null;
+  const deviceToken = typeof input.device_token === "string" ? input.device_token : null;
+  return { serverBaseUrl, token, deviceId, deviceToken };
+};
+
 export default function App() {
   const { t, i18n } = useTranslation();
   const [state, setState] = useState<AppState>(() => loadState() ?? DEFAULT_APP_STATE);
@@ -66,6 +84,8 @@ export default function App() {
   const [transfers, setTransfers] = useState<TransferJob[]>(() => loadTransfers());
   const [showPrefs, setShowPrefs] = useState(false);
   const [showCommand, setShowCommand] = useState(false);
+  const [showQrImport, setShowQrImport] = useState(false);
+  const [qrPayload, setQrPayload] = useState("");
   const [showConnHelp, setShowConnHelp] = useState(false);
   const [activeLeafByTab, setActiveLeafByTab] = useState<Record<string, string>>(() => loadActiveLeafByTab());
   const [notices, setNotices] = useState<NoticeItem[]>([]);
@@ -514,9 +534,10 @@ export default function App() {
       if (e.key === "Escape") {
         setShowPrefs(false);
         setShowCommand(false);
+        setShowQrImport(false);
       }
 
-      if (showCommand || showPrefs) return;
+      if (showCommand || showPrefs || showQrImport) return;
 
       if (isTypingTarget) return;
 
@@ -630,7 +651,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activePane, goToNextWorkspace, setActiveLeafPane, showCommand, showPrefs]);
+  }, [activePane, goToNextWorkspace, setActiveLeafPane, showCommand, showPrefs, showQrImport]);
 
   const onNewTab = () => {
     setState((s) => {
@@ -653,6 +674,38 @@ export default function App() {
   const openPrefs = () => {
     setShowPrefs(true);
     setShowCommand(false);
+  };
+
+  const openQrImport = () => {
+    setQrPayload("");
+    setShowQrImport(true);
+    setShowCommand(false);
+  };
+
+  const applyImportJson = (raw: string | null | undefined) => {
+    const payload = raw?.trim();
+    if (!payload) return false;
+    try {
+      const parsed = JSON.parse(payload);
+      const serverConfig = parseServerConfigImport(parsed);
+      if (serverConfig) {
+        setSettings((s) => ({
+          ...s,
+          serverBaseUrl: serverConfig.serverBaseUrl,
+          token: serverConfig.token ?? "",
+          deviceId: serverConfig.deviceId ?? "",
+          deviceToken: serverConfig.deviceToken ?? ""
+        }));
+        return true;
+      }
+      // Reuse the loader's validation logic by persisting and reloading.
+      localStorage.setItem("filedock.desktop.settings.v1", JSON.stringify(parsed));
+      setSettings(loadSettings());
+      return true;
+    } catch {
+      window.alert(t("app.prefs.invalidJson"));
+      return false;
+    }
   };
 
   const toggleTheme = () => {
@@ -2326,11 +2379,15 @@ export default function App() {
   };
 
   const brandMeta = t("app.brand.meta");
+  const canApplyQr = qrPayload.trim().length > 0;
 
   return (
     <div className="app">
       <div className="topbar">
         <div className="brand">
+          <span className="brand-icon" aria-hidden="true">
+            ⚓
+          </span>
           <h1>{t("app.brand.title")}</h1>
           {brandMeta ? <div className="meta">{brandMeta}</div> : null}
         </div>
@@ -2540,20 +2597,17 @@ export default function App() {
                 {t("app.prefs.export")}
               </button>
 
+              <button className="btn" title={t("app.qrImport.openTitle")} onClick={openQrImport}>
+                {t("app.qrImport.open")}
+              </button>
+
               <button
                 className="btn"
                 title={t("app.prefs.importTitle")}
                 onClick={() => {
                   const pasted = window.prompt(t("app.prefs.importPrompt"));
                   if (!pasted) return;
-                  try {
-                    const parsed = JSON.parse(pasted);
-                    // Reuse the loader's validation logic by persisting and reloading.
-                    localStorage.setItem("filedock.desktop.settings.v1", JSON.stringify(parsed));
-                    setSettings(loadSettings());
-                  } catch {
-                    window.alert(t("app.prefs.invalidJson"));
-                  }
+                  applyImportJson(pasted);
                 }}
               >
                 {t("app.prefs.import")}
@@ -2561,6 +2615,77 @@ export default function App() {
             </div>
           </div>
           <button className="modal-backdrop" aria-label={t("common.actions.close")} onClick={() => setShowPrefs(false)} />
+        </div>
+      ) : null}
+
+      {showQrImport ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label={t("app.qrImport.title")}>
+          <div className="modal-panel qr-panel">
+            <div className="modal-header qr-header">
+              <div className="qr-title">{t("app.qrImport.title")}</div>
+              <button className="btn" onClick={() => setShowQrImport(false)} title={t("app.qrImport.close")}>
+                {t("app.qrImport.close")}
+              </button>
+            </div>
+
+            <div className="modal-body qr-body">
+              <div className="qr-preview">
+                <div className="qr-preview-label">
+                  <span>{t("app.qrImport.preview")}</span>
+                  {webPreview ? <span className="qr-preview-note">{t("app.qrImport.webHint")}</span> : null}
+                </div>
+                <div className="qr-preview-box" aria-hidden="true">
+                  <div className="qr-frame">
+                    <span className="qr-corner tl" />
+                    <span className="qr-corner tr" />
+                    <span className="qr-corner bl" />
+                    <span className="qr-corner br" />
+                    <span className="qr-scan-line" />
+                  </div>
+                  <div className="qr-preview-hint">{t("app.qrImport.previewHint")}</div>
+                </div>
+              </div>
+
+              <div className="qr-steps">
+                <div className="qr-desc">{t("app.qrImport.desc")}</div>
+                <div className="qr-steps-title">{t("app.qrImport.stepsTitle")}</div>
+                <ol className="qr-step-list">
+                  <li>{t("app.qrImport.step1")}</li>
+                  <li>{t("app.qrImport.step2")}</li>
+                  <li>{t("app.qrImport.step3")}</li>
+                </ol>
+                <label className="qr-paste-label" htmlFor="qr-import-payload">
+                  {t("app.qrImport.pasteLabel")}
+                </label>
+                <textarea
+                  id="qr-import-payload"
+                  className="qr-input"
+                  placeholder={t("app.qrImport.pastePlaceholder")}
+                  value={qrPayload}
+                  onChange={(e) => setQrPayload(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="modal-footer qr-footer">
+              <button className="btn" onClick={() => setShowQrImport(false)}>
+                {t("app.qrImport.close")}
+              </button>
+              <button
+                className="btn primary"
+                disabled={!canApplyQr}
+                onClick={() => {
+                  if (applyImportJson(qrPayload)) {
+                    setQrPayload("");
+                    setShowQrImport(false);
+                  }
+                }}
+              >
+                {t("app.qrImport.apply")}
+              </button>
+            </div>
+          </div>
+          <button className="modal-backdrop" aria-label={t("common.actions.close")} onClick={() => setShowQrImport(false)} />
         </div>
       ) : null}
 

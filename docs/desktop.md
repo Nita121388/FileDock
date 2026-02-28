@@ -2,6 +2,20 @@
 
 The desktop app (Tauri) provides a multi-pane UI for browsing snapshots and (via plugins) remote filesystems like SFTP.
 
+## Server config import
+
+You can paste a server config JSON into Preferences → Import JSON. Supported fields:
+
+- `server_base_url`
+- `token` (optional; required if server auth is enabled)
+- `device_id` / `device_token` (optional)
+
+This config can be exported from the server (see `GET /v1/admin/config/export`) or via the CLI:
+
+```bash
+filedock config export --server http://127.0.0.1:8787
+```
+
 ## Drag-and-drop transfers (MVP)
 
 - Snapshot file → SFTP pane: uploads a snapshot file to a remote SFTP path (queues `snapshot_to_sftp`).

@@ -32,6 +32,9 @@
       "type": "类型",
       "size": "大小",
       "actions": "操作"
+    },
+    "prompt": {
+      "copyPath": "复制路径："
     }
   },
   "app": {
@@ -104,9 +107,26 @@
       "exportTitle": "复制偏好设置 JSON",
       "exportPrompt": "复制设置 JSON：",
       "import": "导入 JSON",
-      "importTitle": "粘贴偏好设置 JSON（会覆盖当前设置）",
-      "importPrompt": "粘贴设置 JSON：",
+      "importTitle": "粘贴偏好设置 JSON 或服务端配置 JSON",
+      "importPrompt": "粘贴设置或服务端配置 JSON：",
       "invalidJson": "无效的 JSON"
+    },
+    "qrImport": {
+      "open": "扫码导入",
+      "openTitle": "扫码导入服务端配置",
+      "title": "扫码导入",
+      "close": "关闭",
+      "preview": "相机预览",
+      "previewHint": "相机画面将在此显示。",
+      "webHint": "网页预览不支持相机扫码。",
+      "desc": "扫描服务端配置二维码，或粘贴二维码中的 JSON。",
+      "stepsTitle": "步骤",
+      "step1": "打开服务端配置二维码。",
+      "step2": "对准扫码框。",
+      "step3": "确认并导入。",
+      "pasteLabel": "粘贴二维码内容",
+      "pastePlaceholder": "粘贴二维码中的 JSON...",
+      "apply": "应用导入"
     },
     "statusbar": {
       "source": "来源",
@@ -313,7 +333,8 @@
       "backupRunning": "正在备份 {{path}}...",
       "backupDone": "备份完成：{{snapshot}}",
       "backupDoneNoId": "备份完成",
-      "copyDone": "已复制到 {{path}}"
+      "copyDone": "已复制到 {{path}}",
+      "copyPath": "已复制路径：{{path}}"
     },
     "notice": {
       "selected": "已选择文件夹：{{path}}"
@@ -353,7 +374,8 @@
     },
     "status": {
       "queuedBackup": "已加入备份：{{src}} -> {{dst}}",
-      "queuedDeleteBackup": "已加入删前备份：{{src}} -> {{dst}}"
+      "queuedDeleteBackup": "已加入删前备份：{{src}} -> {{dst}}",
+      "copyPath": "已复制路径：{{path}}"
     },
     "labels": {
       "host": "主机",
@@ -460,6 +482,7 @@
       "queuedCopyDir": "已加入复制目录：{{src}} -> {{dst}}",
       "queuedCopy": "已加入复制：{{src}} -> {{dst}}",
       "queuedPath": "已加入 {{path}}",
+      "copyPath": "已复制路径：{{path}}",
       "downloaded": "已下载 {{path}}"
     },
     "history": {

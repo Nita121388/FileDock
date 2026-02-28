@@ -209,6 +209,18 @@ export default function SftpBrowserPane(props: {
     [st.path]
   );
 
+  const copyPath = useCallback(
+    async (targetPath: string) => {
+      try {
+        await navigator.clipboard.writeText(targetPath);
+      } catch {
+        window.prompt(t("common.prompt.copyPath"), targetPath);
+      }
+      setStatus(t("sftp.status.copyPath", { path: targetPath }));
+    },
+    [t]
+  );
+
   const pickBackupDeviceName = useCallback(() => {
     const current = st.backupDeviceName?.trim() || backupDeviceDefault;
     const next = prompt(t("sftp.prompt.backupDeviceName"), current);
@@ -641,7 +653,14 @@ export default function SftpBrowserPane(props: {
         </div>
         {entries.map((e) => (
           <div key={e.name} className="pane-row">
-            <div className="sftp-name">
+            <div
+              className="sftp-name"
+              onContextMenu={(ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                copyPath(getRemotePath(e.name));
+              }}
+            >
               <span className="db-emoji" aria-hidden="true">
                 {e.kind === "dir" ? "📁" : e.kind === "file" ? "📄" : "•"}
               </span>

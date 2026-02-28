@@ -85,6 +85,8 @@ Notes:
 ### Admin
 
 - `POST /v1/admin/chunks/gc` (garbage-collect unreferenced chunks; requires server token)
+- `GET /v1/admin/config/export` (export server connection config JSON; requires server token)
+- `GET /v1/admin/config/qr` (render config QR as SVG; requires server token)
 
 ### Transfer
 
