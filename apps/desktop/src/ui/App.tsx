@@ -19,7 +19,7 @@ import {
   type PaneKind,
   uid as layoutUid
 } from "./model/layout";
-import { loadState, saveState } from "./model/storage";
+import { loadActiveLeafByTab, loadState, saveActiveLeafByTab, saveState } from "./model/storage";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type LocaleSetting, type Settings } from "./model/settings";
 import {
   basename,
@@ -67,7 +67,7 @@ export default function App() {
   const [showPrefs, setShowPrefs] = useState(false);
   const [showCommand, setShowCommand] = useState(false);
   const [showConnHelp, setShowConnHelp] = useState(false);
-  const [activeLeafByTab, setActiveLeafByTab] = useState<Record<string, string>>({});
+  const [activeLeafByTab, setActiveLeafByTab] = useState<Record<string, string>>(() => loadActiveLeafByTab());
   const [notices, setNotices] = useState<NoticeItem[]>([]);
   const webPreview = !isTauri();
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
@@ -291,6 +291,10 @@ export default function App() {
   useEffect(() => {
     saveState(state);
   }, [state]);
+
+  useEffect(() => {
+    saveActiveLeafByTab(activeLeafByTab);
+  }, [activeLeafByTab]);
 
   useEffect(() => {
     saveSettings(settings);
@@ -2397,8 +2401,13 @@ export default function App() {
           {t("app.buttons.prefs")}
         </button>
 
-        <button className="btn" title={t("app.buttons.toggleThemeTitle")} onClick={toggleTheme}>
-          {settings.theme.mode === "dark" ? t("app.buttons.themeDark") : t("app.buttons.themeLight")}
+        <button
+          className="btn"
+          title={t("app.buttons.toggleThemeTitle")}
+          aria-label={t("app.buttons.toggleThemeTitle")}
+          onClick={toggleTheme}
+        >
+          {settings.theme.mode === "dark" ? "🌙" : "☀️"}
         </button>
 
         <button

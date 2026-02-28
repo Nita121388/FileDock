@@ -17,6 +17,8 @@ export type DeviceBrowserTabState = {
   deviceName: string;
   snapshotId: string;
   path: string;
+  showHistory: boolean;
+  viewMode: "all" | "snapshot";
 };
 
 export type SftpBrowserTabState = {
@@ -101,7 +103,9 @@ export function makeTab(pane: PaneKind, title?: string): PaneTab {
         deviceToken: "",
         deviceName: "",
         snapshotId: "",
-        path: ""
+        path: "",
+        showHistory: false,
+        viewMode: "all"
       }
     };
   }
@@ -208,13 +212,6 @@ export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
   if (node.kind === "split") {
     const normA = normalizeLayoutNode(node.a);
     const normB = normalizeLayoutNode(node.b);
-    if (normA.kind === "leaf" && normB.kind === "leaf") {
-      const keep = toSingleLeaf(normA);
-      const move = toSingleLeaf(normB);
-      keep.tabs = [...keep.tabs, ...move.tabs];
-      if (move.activeTabId) keep.activeTabId = move.activeTabId;
-      return keep;
-    }
     return {
       ...node,
       ratio: clampRatio(node.ratio),
@@ -239,6 +236,7 @@ export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
         const title = typeof t.title === "string" ? t.title : undefined;
         if (pane === "deviceBrowser") {
           const st = t.state as Partial<DeviceBrowserTabState> | undefined;
+          const mode = st?.viewMode === "snapshot" ? "snapshot" : "all";
           return {
             id: t.id,
             pane,
@@ -250,7 +248,9 @@ export function normalizeLayoutNode(node: LayoutNode): LayoutNode {
               deviceToken: typeof st?.deviceToken === "string" ? st.deviceToken : "",
               deviceName: typeof st?.deviceName === "string" ? st.deviceName : "",
               snapshotId: typeof st?.snapshotId === "string" ? st.snapshotId : "",
-              path: typeof st?.path === "string" ? st.path : ""
+              path: typeof st?.path === "string" ? st.path : "",
+              showHistory: typeof st?.showHistory === "boolean" ? st.showHistory : false,
+              viewMode: mode
             }
           };
         }
@@ -395,7 +395,9 @@ export function setLeafPane(node: LayoutNode, leafId: string, pane: PaneKind): L
             deviceToken: "",
             deviceName: "",
             snapshotId: "",
-            path: ""
+            path: "",
+            showHistory: false,
+            viewMode: "all"
           };
           return { id: t.id, pane, title, state: { ...prev } };
         }

@@ -143,8 +143,11 @@ export default function DeviceBrowserPane(props: {
   const [lastSelIndex, setLastSelIndex] = useState<number | null>(null);
   const [restorePct, setRestorePct] = useState<number | null>(null);
   const [restoreConcurrency, setRestoreConcurrency] = useState<number>(() => loadRestoreConcurrency());
-  const [showHistory, setShowHistory] = useState(false);
-  const [viewMode, setViewMode] = useState<"all" | "snapshot">("all");
+
+  const showHistory = tab.state.showHistory;
+  const viewMode = tab.state.viewMode;
+
+  const prevDeviceNameRef = useRef<string | null>(null);
 
   useEffect(() => {
     saveRestoreConcurrency(restoreConcurrency);
@@ -183,6 +186,15 @@ export default function DeviceBrowserPane(props: {
       deviceToken: effSettings.deviceToken
     };
   }, [effSettings.deviceId, effSettings.deviceToken, effSettings.serverBaseUrl, effSettings.token]);
+
+  const updateViewState = useCallback(
+    (next: { showHistory?: boolean; viewMode?: "all" | "snapshot" }) => {
+      const merged = { ...tab.state, ...next };
+      if (merged.showHistory === tab.state.showHistory && merged.viewMode === tab.state.viewMode) return;
+      onTabChange({ ...tab, state: merged });
+    },
+    [onTabChange, tab]
+  );
 
   const deviceNames = useMemo(() => {
     // Prefer registered devices; fall back to snapshot-derived names.
@@ -336,10 +348,11 @@ export default function DeviceBrowserPane(props: {
   }, [deviceNames, deviceName, onTabChange, tab]);
 
   useEffect(() => {
-    if (!deviceName) return;
-    setShowHistory(false);
-    setViewMode("all");
-  }, [deviceName]);
+    if (prevDeviceNameRef.current !== null && prevDeviceNameRef.current !== deviceName) {
+      updateViewState({ showHistory: false, viewMode: "all" });
+    }
+    prevDeviceNameRef.current = deviceName;
+  }, [deviceName, updateViewState]);
 
   useEffect(() => {
     refreshDevices();
@@ -531,23 +544,18 @@ export default function DeviceBrowserPane(props: {
   }, [effConn, items, onEnqueueDownload, selected, snapshotId, t]);
 
   const toggleHistoryList = useCallback(() => {
-    setShowHistory((v) => {
-      const next = !v;
-      if (!next) setViewMode("all");
-      return next;
-    });
-  }, []);
+    const next = !showHistory;
+    updateViewState({ showHistory: next, viewMode: next ? viewMode : "all" });
+  }, [showHistory, updateViewState, viewMode]);
 
   const showAllFiles = useCallback(() => {
-    setShowHistory(false);
-    setViewMode("all");
-  }, []);
+    updateViewState({ showHistory: false, viewMode: "all" });
+  }, [updateViewState]);
 
   const showHistoryView = useCallback(() => {
-    setShowHistory(true);
-    setViewMode("snapshot");
+    updateViewState({ showHistory: true, viewMode: "snapshot" });
     if (snapshotId) refreshSnapshotTree(snapshotId, path);
-  }, [path, refreshSnapshotTree, snapshotId]);
+  }, [path, refreshSnapshotTree, snapshotId, updateViewState]);
 
   const goUp = useCallback(() => {
     const up = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
@@ -786,7 +794,7 @@ export default function DeviceBrowserPane(props: {
                 key={s.snapshot_id}
                 className={s.snapshot_id === snapshotId ? "db-item ui-item active" : "db-item ui-item"}
                 onClick={() => {
-                  setViewMode("snapshot");
+                  updateViewState({ viewMode: "snapshot" });
                   onTabChange({ ...tab, state: { ...tab.state, snapshotId: s.snapshot_id, path: "" } });
                   setSnapshotEntries([]);
                   setSelected([]);
