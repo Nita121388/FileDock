@@ -1248,6 +1248,21 @@ a {
   white-space: nowrap;
 }
 
+.local-pane .pane-size {
+  color: var(--fg2);
+  font-size: var(--text-xs);
+  text-align: right;
+}
+
+.local-pane .sftp-name .linklike {
+  color: var(--fg1);
+  text-decoration: none;
+}
+
+.local-pane .sftp-name .linklike:hover {
+  text-decoration: underline;
+}
+
 .db-tree {
   padding: var(--space-3);
   overflow: auto;

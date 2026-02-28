@@ -295,7 +295,15 @@
     },
     "prompt": {
       "deviceName": "备份设备名称？",
-      "note": "备注（可选）？"
+      "note": "备注（可选）？",
+      "rename": "重命名为？",
+      "move": "移动到（绝对路径）？"
+    },
+    "confirm": {
+      "deleteBackup": "将先备份到服务端：{{device}}\n确认删除 {{path}}？"
+    },
+    "error": {
+      "invalidName": "无效名称：不能包含 '/' 或 '\\\\'"
     },
     "status": {
       "desktopOnly": "本地文件选择仅在桌面端可用。",
@@ -304,7 +312,8 @@
       "noFolder": "请先选择文件夹",
       "backupRunning": "正在备份 {{path}}...",
       "backupDone": "备份完成：{{snapshot}}",
-      "backupDoneNoId": "备份完成"
+      "backupDoneNoId": "备份完成",
+      "copyDone": "已复制到 {{path}}"
     },
     "notice": {
       "selected": "已选择文件夹：{{path}}"

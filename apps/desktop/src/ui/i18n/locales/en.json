@@ -295,7 +295,15 @@
     },
     "prompt": {
       "deviceName": "Backup device name?",
-      "note": "Note (optional)?"
+      "note": "Note (optional)?",
+      "rename": "Rename to?",
+      "move": "Move to (absolute path)?"
+    },
+    "confirm": {
+      "deleteBackup": "Back up to server: {{device}}\nConfirm delete {{path}}?"
+    },
+    "error": {
+      "invalidName": "Invalid name: must not contain '/' or '\\\\'"
     },
     "status": {
       "desktopOnly": "Local file picker is available only in the desktop app.",
@@ -304,7 +312,8 @@
       "noFolder": "Please choose a folder first",
       "backupRunning": "Backing up {{path}}...",
       "backupDone": "Backup completed: {{snapshot}}",
-      "backupDoneNoId": "Backup completed"
+      "backupDoneNoId": "Backup completed",
+      "copyDone": "Copied to {{path}}"
     },
     "notice": {
       "selected": "Selected folder: {{path}}"

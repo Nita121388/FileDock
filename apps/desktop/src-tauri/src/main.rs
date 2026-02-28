@@ -472,6 +472,81 @@ fn list_local_dir(path: String) -> Result<Vec<LocalDirEntry>, String> {
 }
 
 #[tauri::command]
+fn local_rename(path: String, new_name: String) -> Result<(), String> {
+    let raw = path.trim();
+    if raw.is_empty() {
+        return Err("path required".to_string());
+    }
+    let name = new_name.trim();
+    if name.is_empty() {
+        return Err("new_name required".to_string());
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err("invalid name".to_string());
+    }
+
+    let from = PathBuf::from(raw);
+    let parent = from
+        .parent()
+        .ok_or_else(|| "path has no parent".to_string())?;
+    let to = parent.join(name);
+    std::fs::rename(&from, &to).map_err(|e| format!("rename: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn local_move(from: String, to: String) -> Result<(), String> {
+    let src = from.trim();
+    let dst = to.trim();
+    if src.is_empty() {
+        return Err("from required".to_string());
+    }
+    if dst.is_empty() {
+        return Err("to required".to_string());
+    }
+    std::fs::rename(src, dst).map_err(|e| format!("move: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn local_delete(path: String) -> Result<(), String> {
+    let raw = path.trim();
+    if raw.is_empty() {
+        return Err("path required".to_string());
+    }
+    let meta = std::fs::metadata(raw).map_err(|e| format!("metadata: {e}"))?;
+    if meta.is_dir() {
+        std::fs::remove_dir_all(raw).map_err(|e| format!("remove_dir_all: {e}"))?;
+    } else {
+        std::fs::remove_file(raw).map_err(|e| format!("remove_file: {e}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn local_copy(from: String, to: String) -> Result<(), String> {
+    let src = from.trim();
+    let dst = to.trim();
+    if src.is_empty() {
+        return Err("from required".to_string());
+    }
+    if dst.is_empty() {
+        return Err("to required".to_string());
+    }
+    let meta = std::fs::metadata(src).map_err(|e| format!("metadata: {e}"))?;
+    if !meta.is_file() {
+        return Err("copy only supports files".to_string());
+    }
+    if let Some(parent) = Path::new(dst).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("mkdirs: {e}"))?;
+        }
+    }
+    std::fs::copy(src, dst).map_err(|e| format!("copy: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
 fn cancel_restore_snapshot(
     state: State<'_, RestoreManager>,
     snapshot_id: String,
@@ -693,6 +768,10 @@ fn main() {
             restore_snapshot_to_folder,
             cancel_restore_snapshot,
             list_local_dir,
+            local_rename,
+            local_move,
+            local_delete,
+            local_copy,
             run_filedock_plugin,
             cancel_filedock_plugin_run,
             copy_snapshot_file_to_sftp,
@@ -779,6 +858,127 @@ async fn wait_cancel(flag: Arc<AtomicBool>) {
         }
         tokio::time::sleep(std::time::Duration::from_millis(120)).await;
     }
+}
+
+async fn push_file_snapshot(
+    req: &PushFolderSnapshotRequest,
+    path: &Path,
+) -> Result<PushFolderSnapshotResponse, String> {
+    let server = req.server_base_url.trim_end_matches('/');
+    let device = req.device_name.trim();
+    let client = build_http_client(
+        req.token.as_deref(),
+        req.device_id.as_deref(),
+        req.device_token.as_deref(),
+    )?;
+
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "file name required".to_string())?
+        .to_string();
+    let root_path = path.to_string_lossy().to_string();
+    let note = req
+        .note
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let create_req = SnapshotCreateRequest {
+        device_name: device.to_string(),
+        device_id: req
+            .device_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string()),
+        root_path,
+        note,
+    };
+    let create_url = format!("{}/v1/snapshots", server);
+    let create_resp: SnapshotCreateResponse = client
+        .post(create_url)
+        .json(&create_req)
+        .send()
+        .await
+        .map_err(|e| format!("create snapshot request: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("create snapshot response: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("create snapshot decode: {e}"))?;
+    let snapshot_id = create_resp.snapshot_id.clone();
+
+    let meta = tokio::fs::metadata(path)
+        .await
+        .map_err(|e| format!("stat file: {e}"))?;
+    let size = meta.len();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("time: {e}"))?
+        .as_secs() as i64;
+    let mtime_unix = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(now);
+
+    let chunks = chunk_file(path).await?;
+    let hashes = chunks.iter().map(|c| c.hash.clone()).collect::<Vec<_>>();
+    let missing = presence_missing(&client, server, &hashes).await?;
+
+    if !missing.is_empty() {
+        let mut f = tokio::fs::File::open(path)
+            .await
+            .map_err(|e| format!("open file: {e}"))?;
+        for c in &chunks {
+            let mut buf = vec![0u8; c.size as usize];
+            tokio::io::AsyncReadExt::read_exact(&mut f, &mut buf)
+                .await
+                .map_err(|e| format!("read file: {e}"))?;
+            if missing.contains(&c.hash) {
+                let url = format!("{}/v1/chunks/{}", server, encode(&c.hash));
+                client
+                    .put(url)
+                    .body(buf)
+                    .send()
+                    .await
+                    .map_err(|e| format!("upload chunk request: {e}"))?
+                    .error_for_status()
+                    .map_err(|e| format!("upload chunk response: {e}"))?;
+            }
+        }
+    }
+
+    let manifest = SnapshotManifest {
+        snapshot_id: snapshot_id.clone(),
+        created_unix: now,
+        files: vec![ManifestFileEntry {
+            path: file_name,
+            size,
+            mtime_unix,
+            chunk_hash: None,
+            chunks: Some(chunks),
+        }],
+    };
+
+    let manifest_url = format!("{}/v1/snapshots/{}/manifest", server, encode(&snapshot_id));
+    client
+        .put(manifest_url)
+        .json(&manifest)
+        .send()
+        .await
+        .map_err(|e| format!("manifest request: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("manifest response: {e}"))?;
+
+    Ok(PushFolderSnapshotResponse {
+        snapshot_id: Some(snapshot_id.clone()),
+        stdout: format!("snapshot: {snapshot_id}"),
+        stderr: String::new(),
+    })
 }
 
 #[cfg(windows)]
@@ -1678,6 +1878,17 @@ async fn push_folder_snapshot(req: PushFolderSnapshotRequest) -> Result<PushFold
     let folder = req.folder.trim();
     if folder.is_empty() {
         return Err("folder required".to_string());
+    }
+
+    let path = PathBuf::from(folder);
+    let meta = tokio::fs::metadata(&path)
+        .await
+        .map_err(|e| format!("metadata: {e}"))?;
+    if meta.is_file() {
+        return push_file_snapshot(&req, &path).await;
+    }
+    if !meta.is_dir() {
+        return Err("path must be a file or directory".to_string());
     }
 
     let (filedock, _) = resolve_filedock_path(None);

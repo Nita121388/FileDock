@@ -91,6 +91,7 @@ export type PushFolderSnapshotRequest = {
   device_id?: string;
   device_token?: string;
   device_name: string;
+  // Path to a local folder or file (file backup is handled by the backend).
   folder: string;
   note?: string;
   concurrency?: number;
@@ -107,6 +108,26 @@ export async function pushFolderSnapshot(
 ): Promise<PushFolderSnapshotResponse> {
   const invoke = await getInvoke();
   return await invoke<PushFolderSnapshotResponse>("push_folder_snapshot", { req });
+}
+
+export async function renameLocalPath(path: string, newName: string): Promise<void> {
+  const invoke = await getInvoke();
+  await invoke<void>("local_rename", { path, newName });
+}
+
+export async function moveLocalPath(from: string, to: string): Promise<void> {
+  const invoke = await getInvoke();
+  await invoke<void>("local_move", { from, to });
+}
+
+export async function deleteLocalPath(path: string): Promise<void> {
+  const invoke = await getInvoke();
+  await invoke<void>("local_delete", { path });
+}
+
+export async function copyLocalFile(from: string, to: string): Promise<void> {
+  const invoke = await getInvoke();
+  await invoke<void>("local_copy", { from, to });
 }
 
 export type RunFiledockPluginRequest = {

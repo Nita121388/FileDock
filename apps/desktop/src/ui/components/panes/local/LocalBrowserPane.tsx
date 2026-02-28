@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { openDialog } from "../../../api/dialog";
+import { openDialog, saveDialog } from "../../../api/dialog";
 import { isTauri } from "../../../util/tauriEnv";
 import type { PaneTab } from "../../../model/layout";
-import { listLocalDir, pushFolderSnapshot, type LocalDirEntry } from "../../../api/tauri";
+import {
+  copyLocalFile,
+  deleteLocalPath,
+  listLocalDir,
+  moveLocalPath,
+  pushFolderSnapshot,
+  renameLocalPath,
+  type LocalDirEntry
+} from "../../../api/tauri";
 import { onPaneCommand } from "../../../commandBus";
 import { useTranslation } from "react-i18next";
 import { homeDir } from "@tauri-apps/api/path";
@@ -47,6 +55,10 @@ function joinPath(base: string, rel: string): string {
   return `${base}/${rel}`;
 }
 
+function hasPathSep(name: string): boolean {
+  return name.includes("/") || name.includes("\\");
+}
+
 type LocalTab = Extract<PaneTab, { pane: "localBrowser" }>;
 
 export default function LocalBrowserPane(props: {
@@ -60,6 +72,7 @@ export default function LocalBrowserPane(props: {
   const { paneId, tab, onTabChange, onNotify, settings } = props;
   const [entries, setEntries] = useState<LocalDirEntry[]>([]);
   const [status, setStatus] = useState<string>("");
+  const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const basePath = tab.state.basePath;
@@ -70,6 +83,7 @@ export default function LocalBrowserPane(props: {
     if (!basePath) {
       setEntries([]);
       setStatus("");
+      setErr(null);
       return;
     }
     setLoading(true);
@@ -80,11 +94,11 @@ export default function LocalBrowserPane(props: {
         return a.name.localeCompare(b.name);
       });
       setEntries(sorted);
-      setStatus("");
+      setErr(null);
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       setEntries([]);
-      setStatus(msg);
+      setErr(msg);
       onNotify("error", msg);
     } finally {
       setLoading(false);
@@ -134,6 +148,7 @@ export default function LocalBrowserPane(props: {
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       setStatus(msg);
+      setErr(msg);
       onNotify("error", msg);
     } finally {
       setLoading(false);
@@ -147,68 +162,187 @@ export default function LocalBrowserPane(props: {
     onTabChange({ ...tab, state: { ...tab.state, path: next } });
   }, [onTabChange, relPath, tab]);
 
-  const doBackup = useCallback(async () => {
-    if (!isTauri()) {
-      const msg = t("local.status.desktopOnly");
-      setStatus(msg);
-      onNotify("warning", msg);
-      return;
-    }
-    const server = settings.serverBaseUrl.trim();
-    if (!server) {
-      const msg = t("local.status.noServer");
-      setStatus(msg);
-      onNotify("warning", msg);
-      return;
-    }
+  const pickBackupDeviceName = useCallback(() => {
+    const currentDevice = loadBackupDeviceName() || "desktop";
+    const deviceNameRaw = prompt(t("local.prompt.deviceName"), currentDevice);
+    if (!deviceNameRaw) return null;
+    const deviceName = deviceNameRaw.trim();
+    if (!deviceName) return null;
+    saveBackupDeviceName(deviceName);
+    return deviceName;
+  }, [t]);
+
+  const backupPath = useCallback(
+    async (targetPath: string, opts?: { deleteAfter?: boolean }) => {
+      if (!isTauri()) {
+        const msg = t("local.status.desktopOnly");
+        setStatus(msg);
+        onNotify("warning", msg);
+        return;
+      }
+      const server = settings.serverBaseUrl.trim();
+      if (!server) {
+        const msg = t("local.status.noServer");
+        setErr(msg);
+        onNotify("warning", msg);
+        return;
+      }
+      if (!targetPath) {
+        const msg = t("local.status.noFolder");
+        setErr(msg);
+        onNotify("warning", msg);
+        return;
+      }
+
+      const deviceName = pickBackupDeviceName();
+      if (!deviceName) return;
+
+      const noteRaw = prompt(t("local.prompt.note"), targetPath);
+      if (noteRaw === null) return;
+      const note = noteRaw.trim() || undefined;
+
+      if (opts?.deleteAfter) {
+        const ok = confirm(t("local.confirm.deleteBackup", { device: deviceName, path: targetPath }));
+        if (!ok) return;
+      }
+
+      setErr(null);
+      setLoading(true);
+      setStatus(t("local.status.backupRunning", { path: targetPath }));
+      try {
+        const resp = await pushFolderSnapshot({
+          server_base_url: server,
+          token: settings.token || undefined,
+          device_id: settings.deviceId || undefined,
+          device_token: settings.deviceToken || undefined,
+          device_name: deviceName,
+          folder: targetPath,
+          note
+        });
+
+        if (opts?.deleteAfter) {
+          await deleteLocalPath(targetPath);
+        }
+
+        const msg = resp.snapshot_id
+          ? t("local.status.backupDone", { snapshot: resp.snapshot_id })
+          : t("local.status.backupDoneNoId");
+        setStatus(msg);
+        onNotify("info", msg);
+        await refresh();
+      } catch (e: any) {
+        const msg = String(e?.message ?? e);
+        setStatus(msg);
+        setErr(msg);
+        onNotify("error", msg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [onNotify, pickBackupDeviceName, refresh, settings, t]
+  );
+
+  const backupCurrentFolder = useCallback(async () => {
     if (!basePath) {
       const msg = t("local.status.noFolder");
       setStatus(msg);
       onNotify("warning", msg);
       return;
     }
-
     const folder = fullPath || basePath;
-    const currentDevice = loadBackupDeviceName() || "desktop";
-    const deviceNameRaw = prompt(t("local.prompt.deviceName"), currentDevice);
-    if (!deviceNameRaw) return;
-    const deviceName = deviceNameRaw.trim();
-    if (!deviceName) return;
-    saveBackupDeviceName(deviceName);
+    await backupPath(folder);
+  }, [basePath, backupPath, fullPath, onNotify, t]);
 
-    const noteRaw = prompt(t("local.prompt.note"), folder);
-    if (noteRaw === null) return;
-    const note = noteRaw.trim() || undefined;
+  const onEnterDir = useCallback(
+    (name: string) => {
+      const next = relPath ? `${relPath}/${name}` : name;
+      onTabChange({ ...tab, state: { ...tab.state, path: next } });
+    },
+    [onTabChange, relPath, tab]
+  );
 
-    setLoading(true);
-    setStatus(t("local.status.backupRunning", { path: folder }));
-    try {
-      const resp = await pushFolderSnapshot({
-        server_base_url: server,
-        token: settings.token || undefined,
-        device_id: settings.deviceId || undefined,
-        device_token: settings.deviceToken || undefined,
-        device_name: deviceName,
-        folder,
-        note
-      });
-      if (resp.snapshot_id) {
-        const msg = t("local.status.backupDone", { snapshot: resp.snapshot_id });
+  const onDownloadFile = useCallback(
+    async (entry: LocalDirEntry) => {
+      if (!isTauri()) {
+        const msg = t("local.status.desktopOnly");
         setStatus(msg);
-        onNotify("info", msg);
-      } else {
-        const msg = t("local.status.backupDoneNoId");
-        setStatus(msg);
-        onNotify("info", msg);
+        onNotify("warning", msg);
+        return;
       }
-    } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      setStatus(msg);
-      onNotify("error", msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [basePath, fullPath, onNotify, settings, t]);
+      const dest = await saveDialog({ defaultPath: entry.name });
+      if (!dest) return;
+      setErr(null);
+      setLoading(true);
+      try {
+        await copyLocalFile(entry.path, dest);
+        onNotify("info", t("local.status.copyDone", { path: dest }));
+      } catch (e: any) {
+        const msg = String(e?.message ?? e);
+        setErr(msg);
+        onNotify("error", msg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [onNotify, t]
+  );
+
+  const onRenameEntry = useCallback(
+    async (entry: LocalDirEntry) => {
+      const nextNameRaw = prompt(t("local.prompt.rename"), entry.name);
+      if (!nextNameRaw) return;
+      const nextName = nextNameRaw.trim();
+      if (!nextName || nextName === entry.name) return;
+      if (hasPathSep(nextName)) {
+        const msg = t("local.error.invalidName");
+        setErr(msg);
+        onNotify("warning", msg);
+        return;
+      }
+      setErr(null);
+      setLoading(true);
+      try {
+        await renameLocalPath(entry.path, nextName);
+        await refresh();
+      } catch (e: any) {
+        const msg = String(e?.message ?? e);
+        setErr(msg);
+        onNotify("error", msg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [onNotify, refresh, t]
+  );
+
+  const onMoveEntry = useCallback(
+    async (entry: LocalDirEntry) => {
+      const nextPathRaw = prompt(t("local.prompt.move"), entry.path);
+      if (!nextPathRaw) return;
+      const nextPath = nextPathRaw.trim();
+      if (!nextPath || nextPath === entry.path) return;
+      setErr(null);
+      setLoading(true);
+      try {
+        await moveLocalPath(entry.path, nextPath);
+        await refresh();
+      } catch (e: any) {
+        const msg = String(e?.message ?? e);
+        setErr(msg);
+        onNotify("error", msg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [onNotify, refresh, t]
+  );
+
+  const onDeleteEntry = useCallback(
+    async (entry: LocalDirEntry) => {
+      await backupPath(entry.path, { deleteAfter: true });
+    },
+    [backupPath]
+  );
 
   useEffect(() => {
     return onPaneCommand((cmd) => {
@@ -229,61 +363,83 @@ export default function LocalBrowserPane(props: {
     });
   }, [goUp, paneId, pickFolder, refresh]);
 
+  const emptyMessage = !basePath ? t("local.empty.choose") : t("local.empty.noFiles");
+
   return (
-    <div className="db-col local-browser">
-      <div className="db-head">
-        {t("local.title")}
-        <span className="db-head-right">
+    <div className="pane local-pane">
+      <div className="pane-toolbar">
+        <div className="toolbar-row">
+          <span className="db-meta">{t("local.title")}</span>
           <span className="db-path" title={fullPath || t("local.pathNone")}>
             {fullPath || t("local.pathNone")}
           </span>
-          <button className="db-mini" onClick={pickFolder} disabled={loading} title={t("local.actions.chooseTitle")}>
+          <button className="pane-btn" onClick={pickFolder} disabled={loading} title={t("local.actions.chooseTitle")}>
             {t("local.actions.choose")}
           </button>
-          <button className="db-mini" onClick={goUp} disabled={loading || !relPath} title={t("local.actions.upTitle")}>
+          <button className="pane-btn" onClick={goUp} disabled={loading || !relPath} title={t("local.actions.upTitle")}>
             {t("local.actions.up")}
           </button>
-          <button className="db-mini" onClick={refresh} disabled={loading || !basePath} title={t("local.actions.refreshTitle")}>
+          <button className="pane-btn" onClick={refresh} disabled={loading || !basePath} title={t("local.actions.refreshTitle")}>
             {t("local.actions.refresh")}
           </button>
-          <button className="db-mini" onClick={doBackup} disabled={loading || !basePath} title={t("local.actions.backupTitle")}>
+          <button className="pane-btn" onClick={backupCurrentFolder} disabled={loading || !basePath} title={t("local.actions.backupTitle")}>
             {t("local.actions.backup")}
           </button>
-        </span>
+        </div>
       </div>
 
       {status ? <div className="db-status">{status}</div> : null}
+      {err ? <div className="pane-error">{err}</div> : null}
 
-      <div className="db-list">
-        {!basePath ? (
-          <div className="db-empty">{t("local.empty.choose")}</div>
-        ) : entries.length === 0 ? (
-          <div className="db-empty">{t("local.empty.noFiles")}</div>
-        ) : (
-          entries.map((entry) => (
-            <button
-              key={entry.path}
-              className="db-item ui-item"
-              onClick={() => {
-                if (entry.kind !== "dir") return;
-                const next = relPath ? `${relPath}/${entry.name}` : entry.name;
-                onTabChange({ ...tab, state: { ...tab.state, path: next } });
-              }}
-              title={entry.path}
-            >
-              <div className="db-title">
-                <span className="db-emoji" aria-hidden="true">
-                  {entry.kind === "dir" ? "📁" : "📄"}
-                </span>
-                <span className="db-name">{entry.name}</span>
-              </div>
-              {entry.kind === "dir" ? null : (
-                <div className="db-sub">{formatBytes(entry.size)}</div>
+      <div className="pane-table">
+        <div className="pane-row header">
+          <div>{t("sftp.table.name")}</div>
+          <div>{t("sftp.table.type")}</div>
+          <div>{t("sftp.table.size")}</div>
+          <div>{t("sftp.table.actions")}</div>
+        </div>
+        {entries.map((entry) => (
+          <div key={entry.path} className="pane-row">
+            <div className="sftp-name">
+              <span className="db-emoji" aria-hidden="true">
+                {entry.kind === "dir" ? "📁" : "📄"}
+              </span>
+              {entry.kind === "dir" ? (
+                <button className="linklike" onClick={() => onEnterDir(entry.name)} disabled={loading} title={entry.name}>
+                  {entry.name}
+                </button>
+              ) : (
+                <span title={entry.name}>{entry.name}</span>
               )}
-            </button>
-          ))
-        )}
+            </div>
+            <div>{t(`sftp.kind.${entry.kind}`)}</div>
+            <div className="pane-size">{entry.kind === "file" ? formatBytes(entry.size) : ""}</div>
+            <div>
+              <div className="pane-actions">
+                <button className="pane-btn" onClick={() => backupPath(entry.path)} disabled={loading}>
+                  {t("sftp.actions.backup")}
+                </button>
+                {entry.kind === "file" ? (
+                  <button className="pane-btn" onClick={() => onDownloadFile(entry)} disabled={loading}>
+                    {t("sftp.actions.download")}
+                  </button>
+                ) : null}
+                <button className="pane-btn" onClick={() => onRenameEntry(entry)} disabled={loading}>
+                  {t("sftp.actions.rename")}
+                </button>
+                <button className="pane-btn" onClick={() => onMoveEntry(entry)} disabled={loading}>
+                  {t("sftp.actions.move")}
+                </button>
+                <button className="pane-btn danger" onClick={() => onDeleteEntry(entry)} disabled={loading}>
+                  {t("sftp.actions.deleteBackup")}
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
+
+      {entries.length === 0 ? <div className="db-empty">{emptyMessage}</div> : null}
     </div>
   );
 }
