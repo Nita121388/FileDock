@@ -46,6 +46,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+          cache: true
+          cache-dependency-path: |
+            plugins/sftp/go.sum
+            plugins/ssh/go.sum
 
       - name: Install Linux deps
         if: matrix.os == 'ubuntu-latest'
