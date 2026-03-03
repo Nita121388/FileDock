@@ -388,10 +388,17 @@
       "delete": "Delete {{kind}} {{path}}? (recursive delete is disabled)",
       "deleteBackup": "Back up to server: {{device}} / {{dst}}\nConfirm delete {{path}}?"
     },
+    "dialog": {
+      "chooseKeyTitle": "Choose private key file",
+      "chooseKnownHostsTitle": "Choose known_hosts file"
+    },
     "status": {
       "queuedBackup": "Queued backup: {{src}} -> {{dst}}",
       "queuedDeleteBackup": "Queued backup-before-delete: {{src}} -> {{dst}}",
-      "copyPath": "copied path: {{path}}"
+      "copyPath": "copied path: {{path}}",
+      "desktopOnly": "File picker is available only in the desktop app.",
+      "selectedKey": "Selected key file: {{path}}",
+      "selectedKnownHosts": "Selected known_hosts: {{path}}"
     },
     "labels": {
       "host": "Host",

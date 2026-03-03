@@ -6,6 +6,7 @@ import { runFiledockPlugin } from "../../../api/tauri";
 import { openDialog, saveDialog } from "../../../api/dialog";
 import { onPaneCommand } from "../../../commandBus";
 import type { Settings } from "../../../model/settings";
+import { isTauri } from "../../../util/tauriEnv";
 
 type SftpTab = Extract<PaneTab, { pane: "sftpBrowser" }>;
 
@@ -225,6 +226,48 @@ export default function SftpBrowserPane(props: {
       setLoading(false);
     }
   }, [call, st.path]);
+
+  const pickKeyFile = useCallback(async () => {
+    if (!isTauri()) {
+      setErr(null);
+      setStatus(t("sftp.status.desktopOnly"));
+      return;
+    }
+    try {
+      const picked = await openDialog({
+        title: t("sftp.dialog.chooseKeyTitle"),
+        multiple: false,
+        directory: false
+      });
+      if (!picked || Array.isArray(picked)) return;
+      props.onTabChange({ ...props.tab, state: { ...st, keyPath: picked } });
+      setErr(null);
+      setStatus(t("sftp.status.selectedKey", { path: picked }));
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
+  }, [props, st, t]);
+
+  const pickKnownHostsFile = useCallback(async () => {
+    if (!isTauri()) {
+      setErr(null);
+      setStatus(t("sftp.status.desktopOnly"));
+      return;
+    }
+    try {
+      const picked = await openDialog({
+        title: t("sftp.dialog.chooseKnownHostsTitle"),
+        multiple: false,
+        directory: false
+      });
+      if (!picked || Array.isArray(picked)) return;
+      props.onTabChange({ ...props.tab, state: { ...st, knownHostsPath: picked } });
+      setErr(null);
+      setStatus(t("sftp.status.selectedKnownHosts", { path: picked }));
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
+  }, [props, st, t]);
 
   const getRemotePath = useCallback(
     (name: string) => {
@@ -560,6 +603,9 @@ export default function SftpBrowserPane(props: {
               onChange={(e) => props.onTabChange({ ...props.tab, state: { ...st, keyPath: e.target.value } })}
               placeholder={t("sftp.placeholders.keyPath")}
             />
+            <button className="pane-btn" type="button" onClick={pickKeyFile} disabled={loading}>
+              {t("common.actions.choose")}...
+            </button>
           </label>
           <label title={t("sftp.titles.agent")}>
             {t("sftp.labels.agent")}{" "}
@@ -632,6 +678,9 @@ export default function SftpBrowserPane(props: {
                   }
                   placeholder={t("sftp.placeholders.knownHostsPath")}
                 />
+                <button className="pane-btn" type="button" onClick={pickKnownHostsFile} disabled={loading}>
+                  {t("common.actions.choose")}...
+                </button>
               </label>
             </div>
 
