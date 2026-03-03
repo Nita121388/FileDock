@@ -2137,7 +2137,7 @@ async fn import_sftp_file_to_snapshot(
                 .await?;
             }
             let mut dirs = tree.dirs.clone();
-            dirs.sort_by(|a, b| b.len().cmp(&a.len()));
+            dirs.sort_by_key(|d| std::cmp::Reverse(d.len()));
             for d in dirs {
                 if cancel_flag.load(Ordering::Relaxed) {
                     return Err("canceled".to_string());
