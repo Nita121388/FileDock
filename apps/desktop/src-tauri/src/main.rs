@@ -132,13 +132,13 @@ struct TerminalKnownHosts {
     path: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct TerminalOutputPayload {
     session_id: String,
     data: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct TerminalExitPayload {
     session_id: String,
 }
@@ -702,7 +702,9 @@ fn terminal_start(
             .encode(serde_json::to_vec(&config).map_err(|e| format!("encode ssh config: {e}"))?);
         let exe = resolve_sidecar_path("filedock-ssh");
         let mut cmd = CommandBuilder::new(exe);
-        cmd.arg("--config-b64").arg(encoded);
+        // `CommandBuilder::arg` mutates in-place and returns `()`, so don't chain it.
+        cmd.arg("--config-b64");
+        cmd.arg(encoded);
         cmd
     } else {
         let mut cmd = default_shell_command();
