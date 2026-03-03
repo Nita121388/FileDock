@@ -476,8 +476,16 @@ fn join_posix(a: &str, b: &str) -> String {
 }
 
 fn rel_from_root(root: &str, full: &str) -> Option<String> {
-    let r = if root == "/" { "" } else { root.trim_end_matches('/') };
-    let f = if full == "/" { "" } else { full.trim_end_matches('/') };
+    let r = if root == "/" {
+        ""
+    } else {
+        root.trim_end_matches('/')
+    };
+    let f = if full == "/" {
+        ""
+    } else {
+        full.trim_end_matches('/')
+    };
     if r.is_empty() {
         return Some(f.trim_start_matches('/').to_string());
     }
@@ -690,9 +698,8 @@ fn terminal_start(
             "rows": rows,
             "term": "xterm-256color"
         });
-        let encoded = base64::engine::general_purpose::STANDARD.encode(
-            serde_json::to_vec(&config).map_err(|e| format!("encode ssh config: {e}"))?,
-        );
+        let encoded = base64::engine::general_purpose::STANDARD
+            .encode(serde_json::to_vec(&config).map_err(|e| format!("encode ssh config: {e}"))?);
         let exe = resolve_sidecar_path("filedock-ssh");
         let mut cmd = CommandBuilder::new(exe);
         cmd.arg("--config-b64").arg(encoded);
@@ -714,7 +721,10 @@ fn terminal_start(
         .master
         .try_clone_reader()
         .map_err(|e| format!("pty reader: {e}"))?;
-    let writer = pair.master.take_writer().map_err(|e| format!("pty writer: {e}"))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| format!("pty writer: {e}"))?;
 
     let session_id = next_terminal_id();
     let sessions = state.sessions.clone();
@@ -1432,7 +1442,11 @@ async fn collect_sftp_tree(
     let mut dirs: Vec<String> = Vec::new();
     let mut stack: Vec<String> = Vec::new();
 
-    let root_norm = if root == "/" { "/".to_string() } else { root.trim_end_matches('/').to_string() };
+    let root_norm = if root == "/" {
+        "/".to_string()
+    } else {
+        root.trim_end_matches('/').to_string()
+    };
     stack.push(root_norm.clone());
     dirs.push(root_norm.clone());
 
@@ -1963,7 +1977,10 @@ async fn import_sftp_file_to_snapshot(
             emit_import(
                 &app,
                 &run_id,
-                &format!("uploading chunks {phase_prefix} (0/{})", missing_total_chunks),
+                &format!(
+                    "uploading chunks {phase_prefix} (0/{})",
+                    missing_total_chunks
+                ),
                 Some(0),
                 Some(missing_total_bytes),
                 Some(0),
@@ -1993,7 +2010,9 @@ async fn import_sftp_file_to_snapshot(
                     missing_done_bytes = missing_done_bytes.saturating_add(c.size);
                     missing_done_chunks = missing_done_chunks.saturating_add(1);
                     let pct = if missing_total_bytes > 0 {
-                        Some(((missing_done_bytes.saturating_mul(100)) / missing_total_bytes) as u32)
+                        Some(
+                            ((missing_done_bytes.saturating_mul(100)) / missing_total_bytes) as u32,
+                        )
                     } else {
                         Some(100)
                     };
@@ -2151,7 +2170,9 @@ async fn import_sftp_file_to_snapshot(
 }
 
 #[tauri::command]
-async fn push_folder_snapshot(req: PushFolderSnapshotRequest) -> Result<PushFolderSnapshotResponse, String> {
+async fn push_folder_snapshot(
+    req: PushFolderSnapshotRequest,
+) -> Result<PushFolderSnapshotResponse, String> {
     let server = req.server_base_url.trim();
     if server.is_empty() {
         return Err("server_base_url required".to_string());
@@ -2197,21 +2218,43 @@ async fn push_folder_snapshot(req: PushFolderSnapshotRequest) -> Result<PushFold
         cmd.arg("--concurrency").arg(c.to_string());
     }
 
-    if let Some(tok) = req.token.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(tok) = req
+        .token
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         cmd.env("FILEDOCK_TOKEN", tok);
     }
-    if let Some(id) = req.device_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(id) = req
+        .device_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         cmd.env("FILEDOCK_DEVICE_ID", id);
     }
-    if let Some(tok) = req.device_token.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(tok) = req
+        .device_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         cmd.env("FILEDOCK_DEVICE_TOKEN", tok);
     }
 
-    let output = cmd.output().await.map_err(|e| format!("run filedock: {e}"))?;
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("run filedock: {e}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     if !output.status.success() {
-        return Err(format!("push-folder failed: {} {}", output.status, stderr.trim()));
+        return Err(format!(
+            "push-folder failed: {} {}",
+            output.status,
+            stderr.trim()
+        ));
     }
 
     let snapshot_id = stdout

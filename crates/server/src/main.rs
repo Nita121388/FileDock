@@ -3,8 +3,8 @@ use axum::{
     extract::{Path, State},
     http::{header, Request, StatusCode},
     middleware::Next,
-    routing::{delete, get, post, put},
     response::IntoResponse,
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use bytes::Bytes;
@@ -13,7 +13,8 @@ use filedock_protocol::{
     ChunkPresenceResponse, ChunkRef, DeviceHeartbeatRequest, DeviceHeartbeatResponse, DeviceInfo,
     DeviceRegisterRequest, DeviceRegisterResponse, HealthResponse, ServerConfigExport,
     SnapshotCreateRequest, SnapshotCreateResponse, SnapshotDeleteResponse, SnapshotManifest,
-    SnapshotMeta, SnapshotPruneRequest, SnapshotPruneResponse, TreeEntry, TreeResponse, API_VERSION,
+    SnapshotMeta, SnapshotPruneRequest, SnapshotPruneResponse, TreeEntry, TreeResponse,
+    API_VERSION,
 };
 use filedock_storage::{DiskStorage, PutOpts, S3Storage, S3StorageConfig, Storage};
 use std::{net::SocketAddr, sync::Arc};
@@ -99,12 +100,7 @@ fn resolve_public_base_url(opt: &Opt) -> String {
     }
 
     // Fallback to localhost + listen port when public URL is not provided.
-    let port = opt
-        .listen
-        .rsplit(':')
-        .next()
-        .unwrap_or("8787")
-        .trim();
+    let port = opt.listen.rsplit(':').next().unwrap_or("8787").trim();
     format!("http://127.0.0.1:{port}")
 }
 
@@ -352,15 +348,19 @@ async fn export_config_qr(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let config = build_config_export(&state);
-    let json =
-        serde_json::to_string(&config).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let json = serde_json::to_string(&config)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let code = QrCode::new(json.as_bytes())
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let svg = code
         .render::<qrcode::render::svg::Color>()
         .min_dimensions(256, 256)
         .build();
-    Ok(([(header::CONTENT_TYPE, "image/svg+xml; charset=utf-8")], svg).into_response())
+    Ok((
+        [(header::CONTENT_TYPE, "image/svg+xml; charset=utf-8")],
+        svg,
+    )
+        .into_response())
 }
 
 async fn chunks_presence(

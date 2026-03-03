@@ -67,10 +67,7 @@ async fn fetch_server_config(
     client: &reqwest::Client,
     server: &str,
 ) -> Result<ServerConfigExport, String> {
-    let url = format!(
-        "{}/v1/admin/config/export",
-        server.trim_end_matches('/')
-    );
+    let url = format!("{}/v1/admin/config/export", server.trim_end_matches('/'));
     let resp = client
         .get(url)
         .send()
@@ -827,8 +824,16 @@ async fn main() -> Result<(), String> {
             exclude,
             ignore_file,
         } => {
-            let _ =
-                push_folder_impl(server, device, folder, note, concurrency, exclude, ignore_file).await?;
+            let _ = push_folder_impl(
+                server,
+                device,
+                folder,
+                note,
+                concurrency,
+                exclude,
+                ignore_file,
+            )
+            .await?;
         }
 
         Command::PushFolderLoop {
