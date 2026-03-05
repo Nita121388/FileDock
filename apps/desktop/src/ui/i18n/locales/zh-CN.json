@@ -282,6 +282,7 @@
     "tabNewTitle": "新建标签",
     "typeAria": "面板类型",
     "dropZonesAria": "拖拽区域",
+    "openTerminal": "打开终端",
     "types": {
       "device": "设备浏览器（服务器）",
       "local": "本地",

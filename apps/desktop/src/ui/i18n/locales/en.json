@@ -282,6 +282,7 @@
     "tabNewTitle": "New tab",
     "typeAria": "Pane type",
     "dropZonesAria": "Drop zones",
+    "openTerminal": "Open terminal",
     "types": {
       "device": "Device Browser (Server)",
       "local": "Local",

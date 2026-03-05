@@ -2406,7 +2406,7 @@ export default function App() {
       <div className="topbar">
         <div className="brand">
           <span className="brand-icon" aria-hidden="true">
-            ⚓
+            🗂️
           </span>
           <h1>{t("app.brand.title")}</h1>
           {brandMeta ? <div className="meta">{brandMeta}</div> : null}

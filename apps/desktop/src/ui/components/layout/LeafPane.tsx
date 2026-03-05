@@ -1,5 +1,5 @@
 import type { DropZone, LeafNode, PaneKind, SplitDir, PaneTab } from "../../model/layout";
-import { activeTab } from "../../model/layout";
+import { activeTab, uid } from "../../model/layout";
 import type { Settings } from "../../model/settings";
 import type { TransferJob } from "../../model/transfers";
 import { PaneView } from "../panes/PaneView";
@@ -130,6 +130,35 @@ export default function LeafPane(props: {
     .filter(Boolean)
     .join(" ");
 
+  const canOpenSftpTerminal = tab.pane === "sftpBrowser" && !!tab.state.host.trim() && !!tab.state.user.trim();
+  const openSftpTerminal = () => {
+    if (tab.pane !== "sftpBrowser") return;
+    if (!tab.state.host.trim() || !tab.state.user.trim()) return;
+
+    const title = `${tab.state.user}@${tab.state.host}`;
+    const terminalTab: PaneTab = {
+      id: uid("tab"),
+      pane: "terminal",
+      title,
+      state: {
+        mode: "sftp",
+        title,
+        path: tab.state.path || "/",
+        host: tab.state.host,
+        port: tab.state.port || 22,
+        user: tab.state.user,
+        password: tab.state.password,
+        keyPath: tab.state.keyPath,
+        useAgent: tab.state.useAgent,
+        knownHostsPolicy: tab.state.knownHostsPolicy,
+        knownHostsPath: tab.state.knownHostsPath,
+        basePath: tab.state.basePath
+      }
+    };
+
+    onOpenTerminal(terminalTab);
+  };
+
   return (
     <div
       className={className}
@@ -203,6 +232,18 @@ export default function LeafPane(props: {
         </select>
 
         <div className="pane-spacer" />
+
+        {tab.pane === "sftpBrowser" ? (
+          <button
+            className="pane-btn icon-only"
+            onClick={openSftpTerminal}
+            title={t("pane.openTerminal")}
+            aria-label={t("pane.openTerminal")}
+            disabled={!canOpenSftpTerminal}
+          >
+            <span className="icon icon-terminal" aria-hidden="true" />
+          </button>
+        ) : null}
 
         <button
           className="pane-btn icon-only"
