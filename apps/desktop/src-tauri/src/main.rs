@@ -1148,6 +1148,35 @@ fn build_http_client(
         .map_err(|e| format!("build http client: {e}"))
 }
 
+fn summarize_http_body(body: &str) -> String {
+    let compact = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    let max_chars = 240;
+    let truncated: String = compact.chars().take(max_chars).collect();
+    if compact.chars().count() > max_chars {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+async fn ensure_success_response(
+    resp: reqwest::Response,
+    label: &str,
+) -> Result<reqwest::Response, String> {
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(resp);
+    }
+
+    let body = resp.text().await.unwrap_or_default();
+    let body = summarize_http_body(body.trim());
+    if body.is_empty() {
+        Err(format!("{label}: HTTP {status}"))
+    } else {
+        Err(format!("{label}: HTTP {status} - {body}"))
+    }
+}
+
 async fn wait_cancel(flag: Arc<AtomicBool>) {
     loop {
         if flag.load(Ordering::Relaxed) {
@@ -1194,14 +1223,17 @@ async fn push_file_snapshot(
         note,
     };
     let create_url = format!("{}/v1/snapshots", server);
-    let create_resp: SnapshotCreateResponse = client
+    let create_resp = client
         .post(create_url)
         .json(&create_req)
         .send()
         .await
-        .map_err(|e| format!("create snapshot request: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("create snapshot response: {e}"))?
+        .map_err(|e| format!("create snapshot request: {e}"))?;
+    let create_resp: SnapshotCreateResponse = ensure_success_response(
+        create_resp,
+        "create snapshot response",
+    )
+    .await?
         .json()
         .await
         .map_err(|e| format!("create snapshot decode: {e}"))?;
@@ -1237,14 +1269,13 @@ async fn push_file_snapshot(
                 .map_err(|e| format!("read file: {e}"))?;
             if missing.contains(&c.hash) {
                 let url = format!("{}/v1/chunks/{}", server, encode(&c.hash));
-                client
+                let upload_resp = client
                     .put(url)
                     .body(buf)
                     .send()
                     .await
-                    .map_err(|e| format!("upload chunk request: {e}"))?
-                    .error_for_status()
-                    .map_err(|e| format!("upload chunk response: {e}"))?;
+                    .map_err(|e| format!("upload chunk request: {e}"))?;
+                ensure_success_response(upload_resp, "upload chunk response").await?;
             }
         }
     }
@@ -1262,14 +1293,13 @@ async fn push_file_snapshot(
     };
 
     let manifest_url = format!("{}/v1/snapshots/{}/manifest", server, encode(&snapshot_id));
-    client
+    let manifest_resp = client
         .put(manifest_url)
         .json(&manifest)
         .send()
         .await
-        .map_err(|e| format!("manifest request: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("manifest response: {e}"))?;
+        .map_err(|e| format!("manifest request: {e}"))?;
+    ensure_success_response(manifest_resp, "manifest response").await?;
 
     Ok(PushFolderSnapshotResponse {
         snapshot_id: Some(snapshot_id.clone()),

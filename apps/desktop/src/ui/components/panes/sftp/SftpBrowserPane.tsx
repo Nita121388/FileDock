@@ -6,7 +6,11 @@ import { runFiledockPlugin } from "../../../api/tauri";
 import { openDialog, saveDialog } from "../../../api/dialog";
 import { onPaneCommand } from "../../../commandBus";
 import type { Settings } from "../../../model/settings";
+import { makeSftpTerminalTab } from "../../../model/terminalPresets";
 import { isTauri } from "../../../util/tauriEnv";
+import Icon from "../../Icon";
+import { usePaneTableColumns } from "../usePaneTableColumns";
+import { formatBytes } from "../../../util/formatBytes";
 
 type SftpTab = Extract<PaneTab, { pane: "sftpBrowser" }>;
 
@@ -99,6 +103,9 @@ export default function SftpBrowserPane(props: {
   const [status, setStatus] = useState<string>("");
   const [entries, setEntries] = useState<Entry[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const { draggingIndex, resetWidths, setHeaderCellRef, startResize, tableStyle } = usePaneTableColumns(
+    "filedock.desktop.tableColumns.sftp.v1"
+  );
 
   const conn = useMemo(() => {
     return {
@@ -181,28 +188,34 @@ export default function SftpBrowserPane(props: {
     return parsed.data;
   }, [conn, st.filedockPath, st.pluginDirs, t]);
 
-  const openTerminal = useCallback(() => {
-    const terminalTab: PaneTab = {
-      id: uid("tab"),
-      pane: "terminal",
-      title: "",
-      state: {
-        mode: "sftp",
-        title: "",
-        path: st.path || "/",
-        host: st.host,
-        port: st.port || 22,
-        user: st.user,
-        password: st.password,
-        keyPath: st.keyPath,
-        useAgent: st.useAgent,
-        knownHostsPolicy: st.knownHostsPolicy,
-        knownHostsPath: st.knownHostsPath,
-        basePath: st.basePath
-      }
-    };
-    props.onOpenTerminal(terminalTab);
-  }, [props, st]);
+  const openTerminal = useCallback(
+    (targetPath?: string) => {
+      props.onOpenTerminal(
+        makeSftpTerminalTab({
+          host: st.host,
+          port: st.port || 22,
+          user: st.user,
+          password: st.password,
+          keyPath: st.keyPath,
+          useAgent: st.useAgent,
+          knownHostsPolicy: st.knownHostsPolicy,
+          knownHostsPath: st.knownHostsPath,
+          basePath: st.basePath,
+          path: targetPath || st.path || "/"
+        })
+      );
+    },
+    [props, st]
+  );
+
+  const openTerminalForEntry = useCallback(
+    (entry: Entry) => {
+      const basePath = st.path && st.path.trim() ? st.path.trim() : "/";
+      const targetPath = entry.kind === "dir" ? joinPosix(basePath, entry.name) : basePath;
+      openTerminal(targetPath);
+    },
+    [openTerminal, st.path]
+  );
 
   const refresh = useCallback(async () => {
     setErr(null);
@@ -626,20 +639,50 @@ export default function SftpBrowserPane(props: {
               placeholder={t("sftp.placeholders.path")}
             />
           </label>
-          <button className="pane-btn" onClick={() => refresh()} disabled={loading}>
-            {t("sftp.actions.refresh")}
+          <button
+            className="pane-btn icon-only"
+            onClick={() => refresh()}
+            disabled={loading}
+            title={t("sftp.actions.refresh")}
+            aria-label={t("sftp.actions.refresh")}
+          >
+            <Icon name="refresh" />
           </button>
-          <button className="pane-btn" onClick={() => onGoUp()} disabled={loading}>
-            {t("sftp.actions.up")}
+          <button
+            className="pane-btn icon-only"
+            onClick={() => onGoUp()}
+            disabled={loading}
+            title={t("sftp.actions.up")}
+            aria-label={t("sftp.actions.up")}
+          >
+            <Icon name="up" />
           </button>
-          <button className="pane-btn" onClick={() => onMkdir()} disabled={loading}>
-            {t("sftp.actions.mkdir")}
+          <button
+            className="pane-btn icon-only"
+            onClick={() => onMkdir()}
+            disabled={loading}
+            title={t("sftp.actions.mkdir")}
+            aria-label={t("sftp.actions.mkdir")}
+          >
+            <Icon name="folderPlus" />
           </button>
-          <button className="pane-btn" onClick={() => onUploadFile()} disabled={loading}>
-            {t("sftp.actions.upload")}
+          <button
+            className="pane-btn icon-only"
+            onClick={() => onUploadFile()}
+            disabled={loading}
+            title={t("sftp.actions.upload")}
+            aria-label={t("sftp.actions.upload")}
+          >
+            <Icon name="backup" />
           </button>
-          <button className="pane-btn" onClick={() => openTerminal()} disabled={loading}>
-            {t("sftp.actions.terminal")}
+          <button
+            className="pane-btn icon-only"
+            onClick={() => openTerminal()}
+            disabled={loading}
+            title={t("sftp.actions.terminal")}
+            aria-label={t("sftp.actions.terminal")}
+          >
+            <Icon name="terminal" />
           </button>
           <button
             className="pane-btn"
@@ -720,12 +763,50 @@ export default function SftpBrowserPane(props: {
       {status ? <div className="db-status">{status}</div> : null}
       {err ? <div className="pane-error">{t("sftp.error.prefix", { message: err })}</div> : null}
 
-      <div className="pane-table">
+      <div className="pane-table resizable-pane-table" style={tableStyle}>
         <div className="pane-row header">
-          <div>{t("sftp.table.name")}</div>
-          <div>{t("sftp.table.type")}</div>
-          <div>{t("sftp.table.size")}</div>
-          <div>{t("sftp.table.actions")}</div>
+          <div ref={setHeaderCellRef(0)} className="pane-head-cell">
+            <span className="pane-head-label">{t("sftp.table.name")}</span>
+            <div
+              className={draggingIndex === 0 ? "pane-col-resizer dragging" : "pane-col-resizer"}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("sftp.table.resize")}
+              title={t("sftp.table.resize")}
+              tabIndex={-1}
+              onPointerDown={(ev) => startResize(0, ev)}
+              onDoubleClick={resetWidths}
+            />
+          </div>
+          <div ref={setHeaderCellRef(1)} className="pane-head-cell">
+            <span className="pane-head-label">{t("sftp.table.type")}</span>
+            <div
+              className={draggingIndex === 1 ? "pane-col-resizer dragging" : "pane-col-resizer"}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("sftp.table.resize")}
+              title={t("sftp.table.resize")}
+              tabIndex={-1}
+              onPointerDown={(ev) => startResize(1, ev)}
+              onDoubleClick={resetWidths}
+            />
+          </div>
+          <div ref={setHeaderCellRef(2)} className="pane-head-cell">
+            <span className="pane-head-label">{t("sftp.table.size")}</span>
+            <div
+              className={draggingIndex === 2 ? "pane-col-resizer dragging" : "pane-col-resizer"}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("sftp.table.resize")}
+              title={t("sftp.table.resize")}
+              tabIndex={-1}
+              onPointerDown={(ev) => startResize(2, ev)}
+              onDoubleClick={resetWidths}
+            />
+          </div>
+          <div ref={setHeaderCellRef(3)} className="pane-head-cell">
+            <span className="pane-head-label">{t("sftp.table.actions")}</span>
+          </div>
         </div>
         {entries.map((e) => (
           <div key={e.name} className="pane-row">
@@ -766,28 +847,67 @@ export default function SftpBrowserPane(props: {
               )}
             </div>
             <div>{t(`sftp.kind.${e.kind}`)}</div>
-            <div className="mono">{typeof e.size === "number" ? e.size : ""}</div>
+            <div className="pane-size">{e.kind === "file" ? formatBytes(e.size) : ""}</div>
             <div>
               <div className="pane-actions">
                 {e.kind !== "other" ? (
-                  <button className="pane-btn" onClick={() => queueBackup(e, { deleteSource: false })} disabled={loading}>
-                    {t("sftp.actions.backup")}
+                  <button
+                    className="pane-btn icon-only"
+                    onClick={() => queueBackup(e, { deleteSource: false })}
+                    disabled={loading}
+                    title={t("sftp.actions.backup")}
+                    aria-label={t("sftp.actions.backup")}
+                  >
+                    <Icon name="backup" />
                   </button>
                 ) : null}
-                {e.kind === "file" ? (
-                  <button className="pane-btn" onClick={() => onDownloadFile(e.name)} disabled={loading}>
-                    {t("sftp.actions.download")}
-                  </button>
-                ) : null}
-                <button className="pane-btn" onClick={() => onRenameEntry(e)} disabled={loading}>
-                  {t("sftp.actions.rename")}
+                <button
+                  className="pane-btn icon-only"
+                  onClick={() => openTerminalForEntry(e)}
+                  disabled={loading}
+                  title={t("sftp.actions.terminalHere")}
+                  aria-label={t("sftp.actions.terminalHere")}
+                >
+                  <Icon name="terminal" />
                 </button>
-                <button className="pane-btn" onClick={() => onMoveEntry(e)} disabled={loading}>
-                  {t("sftp.actions.move")}
+                {e.kind === "file" ? (
+                  <button
+                    className="pane-btn icon-only"
+                    onClick={() => onDownloadFile(e.name)}
+                    disabled={loading}
+                    title={t("sftp.actions.download")}
+                    aria-label={t("sftp.actions.download")}
+                  >
+                    <Icon name="download" />
+                  </button>
+                ) : null}
+                <button
+                  className="pane-btn icon-only"
+                  onClick={() => onRenameEntry(e)}
+                  disabled={loading}
+                  title={t("sftp.actions.rename")}
+                  aria-label={t("sftp.actions.rename")}
+                >
+                  <Icon name="rename" />
+                </button>
+                <button
+                  className="pane-btn icon-only"
+                  onClick={() => onMoveEntry(e)}
+                  disabled={loading}
+                  title={t("sftp.actions.move")}
+                  aria-label={t("sftp.actions.move")}
+                >
+                  <Icon name="move" />
                 </button>
                 {e.kind !== "other" ? (
-                  <button className="pane-btn danger" onClick={() => onDeleteEntry(e)} disabled={loading}>
-                    {t("sftp.actions.deleteBackup")}
+                  <button
+                    className="pane-btn danger icon-only"
+                    onClick={() => onDeleteEntry(e)}
+                    disabled={loading}
+                    title={t("sftp.actions.deleteBackup")}
+                    aria-label={t("sftp.actions.deleteBackup")}
+                  >
+                    <Icon name="delete" />
                   </button>
                 ) : null}
               </div>

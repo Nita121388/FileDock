@@ -45,5 +45,7 @@ npm run tauri build
 ```
 
 Notes:
+- Debug/dev builds now auto-skip `bundle.externalBin` when the host-specific sidecars are missing, so `cargo check -p filedock-desktop` and local dev loops do not need placeholder binaries.
+- Release packaging still expects the real sidecars to exist first; run `./scripts/build-desktop-sidecars.sh` before `npm run tauri build`.
 - Tauri expects binaries named with the host target triple (see `apps/desktop/src-tauri/binaries/README.md`).
 - The app will default `FILEDOCK_PLUGIN_DIRS` to the directory of the bundled `filedock` binary, so plugins can live alongside it.

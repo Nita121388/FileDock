@@ -63,6 +63,35 @@ fn build_client() -> Result<reqwest::Client, String> {
         .map_err(|e| format!("build http client: {e}"))
 }
 
+fn summarize_http_body(body: &str) -> String {
+    let compact = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    let max_chars = 240;
+    let truncated: String = compact.chars().take(max_chars).collect();
+    if compact.chars().count() > max_chars {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+async fn ensure_success_response(
+    resp: reqwest::Response,
+    label: &str,
+) -> Result<reqwest::Response, String> {
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(resp);
+    }
+
+    let body = resp.text().await.unwrap_or_default();
+    let body = summarize_http_body(body.trim());
+    if body.is_empty() {
+        Err(format!("{label}: HTTP {status}"))
+    } else {
+        Err(format!("{label}: HTTP {status} - {body}"))
+    }
+}
+
 async fn fetch_server_config(
     client: &reqwest::Client,
     server: &str,
@@ -539,14 +568,17 @@ async fn push_folder_impl(
         root_path: root.display().to_string(),
         note,
     };
-    let create_resp: SnapshotCreateResponse = client
+    let create_resp = client
         .post(create_url)
         .json(&create_req)
         .send()
         .await
-        .map_err(|e| format!("create snapshot request: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("create snapshot response: {e}"))?
+        .map_err(|e| format!("create snapshot request: {e}"))?;
+    let create_resp: SnapshotCreateResponse = ensure_success_response(
+        create_resp,
+        "create snapshot response",
+    )
+    .await?
         .json()
         .await
         .map_err(|e| format!("create snapshot decode: {e}"))?;
@@ -737,14 +769,13 @@ async fn push_folder_impl(
         server.trim_end_matches('/'),
         snapshot_id
     );
-    client
+    let put_resp = client
         .put(put_url)
         .json(&manifest)
         .send()
         .await
-        .map_err(|e| format!("put manifest request: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("put manifest response: {e}"))?;
+        .map_err(|e| format!("put manifest request: {e}"))?;
+    ensure_success_response(put_resp, "put manifest response").await?;
 
     println!("manifest uploaded: {snapshot_id}");
 

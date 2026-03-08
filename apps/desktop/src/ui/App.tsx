@@ -23,7 +23,16 @@ import {
   uid as layoutUid
 } from "./model/layout";
 import { loadActiveLeafByTab, loadState, saveActiveLeafByTab, saveState } from "./model/storage";
-import { DEFAULT_SETTINGS, loadSettings, saveSettings, type LocaleSetting, type Settings } from "./model/settings";
+import {
+  DEFAULT_SETTINGS,
+  loadSettings,
+  saveSettings,
+  type LocaleSetting,
+  type SavedNodePreset,
+  type SavedTerminalPreset,
+  type Settings
+} from "./model/settings";
+import { makeTerminalTabFromPreset, terminalPresetFromPane } from "./model/terminalPresets";
 import {
   basename,
   loadTransfers,
@@ -41,6 +50,7 @@ import {
   apiGetUint8Array,
   chunksPresence,
   createSnapshot,
+  getHealth,
   getChunkBytes,
   getTree,
   getManifest,
@@ -56,6 +66,7 @@ import {
 } from "./api/tauri";
 import { applyTheme } from "./theme/applyTheme";
 import CommandPalette, { type CommandItem } from "./components/CommandPalette";
+import Icon from "./components/Icon";
 import { emitPaneCommand } from "./commandBus";
 import { setLanguage } from "./i18n";
 import { isTauri } from "./util/tauriEnv";
@@ -69,6 +80,12 @@ type ServerConfigImport = {
   deviceToken?: string | null;
 };
 
+type ServiceStatus = {
+  kind: "checking" | "online" | "offline" | "error";
+  message?: string;
+  version?: string;
+};
+
 const parseServerConfigImport = (input: any): ServerConfigImport | null => {
   if (!input || typeof input !== "object") return null;
   if (typeof input.server_base_url !== "string") return null;
@@ -78,6 +95,34 @@ const parseServerConfigImport = (input: any): ServerConfigImport | null => {
   const deviceId = typeof input.device_id === "string" ? input.device_id : null;
   const deviceToken = typeof input.device_token === "string" ? input.device_token : null;
   return { serverBaseUrl, token, deviceId, deviceToken };
+};
+
+const isSameSavedNodeConfig = (
+  node: SavedNodePreset,
+  conn: Pick<Settings, "serverBaseUrl" | "token" | "deviceId" | "deviceToken">
+): boolean => {
+  return (
+    node.serverBaseUrl === conn.serverBaseUrl.trim() &&
+    node.token === conn.token &&
+    node.deviceId === conn.deviceId &&
+    node.deviceToken === conn.deviceToken
+  );
+};
+
+const isSameSavedTerminalConfig = (preset: SavedTerminalPreset, other: SavedTerminalPreset): boolean => {
+  return (
+    preset.mode === other.mode &&
+    preset.path === other.path &&
+    preset.host === other.host &&
+    preset.port === other.port &&
+    preset.user === other.user &&
+    preset.password === other.password &&
+    preset.keyPath === other.keyPath &&
+    preset.useAgent === other.useAgent &&
+    preset.knownHostsPolicy === other.knownHostsPolicy &&
+    preset.knownHostsPath === other.knownHostsPath &&
+    preset.basePath === other.basePath
+  );
 };
 
 export default function App() {
@@ -92,6 +137,7 @@ export default function App() {
   const [showConnHelp, setShowConnHelp] = useState(false);
   const [activeLeafByTab, setActiveLeafByTab] = useState<Record<string, string>>(() => loadActiveLeafByTab());
   const [notices, setNotices] = useState<NoticeItem[]>([]);
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatus>({ kind: "checking" });
   const webPreview = !isTauri();
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
   const runAllBusyRef = useRef(false);
@@ -335,6 +381,59 @@ export default function App() {
     saveTransfers(transfers);
   }, [transfers]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let currentAbort: AbortController | null = null;
+    const serverBaseUrl = settings.serverBaseUrl.trim();
+
+    if (!serverBaseUrl) {
+      setServiceStatus({ kind: "offline" });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const checkHealth = async (showChecking: boolean) => {
+      if (showChecking) {
+        setServiceStatus((prev) => ({
+          kind: "checking",
+          message: prev.message,
+          version: prev.version
+        }));
+      }
+
+      currentAbort?.abort();
+      const aborter = new AbortController();
+      currentAbort = aborter;
+
+      try {
+        const health = await getHealth(settings, aborter.signal);
+        if (cancelled || aborter.signal.aborted) return;
+        setServiceStatus({
+          kind: health.status === "ok" ? "online" : "error",
+          message: health.status === "ok" ? undefined : health.status,
+          version: health.version
+        });
+      } catch (e: any) {
+        if (cancelled || aborter.signal.aborted) return;
+        const message = String(e?.message ?? e).trim();
+        const offline = /failed to fetch|networkerror|load failed|econnrefused|err_connection_refused|fetch failed/i.test(message);
+        setServiceStatus({ kind: offline ? "offline" : "error", message });
+      }
+    };
+
+    void checkHealth(true);
+    const intervalId = window.setInterval(() => {
+      void checkHealth(false);
+    }, 15_000);
+
+    return () => {
+      cancelled = true;
+      currentAbort?.abort();
+      window.clearInterval(intervalId);
+    };
+  }, [settings]);
+
   const activeTab: TabState = useMemo(() => {
     const t = state.tabs.find((x) => x.id === state.activeTabId);
     return t ?? state.tabs[0];
@@ -352,6 +451,11 @@ export default function App() {
     if (!leaf) return null;
     return activeLeafTab(leaf);
   }, [activeLeafId, activeTab]);
+
+  const activeTerminalPreset = useMemo(() => {
+    if (!activePane) return null;
+    return terminalPresetFromPane(activePane);
+  }, [activePane]);
 
   const setActiveTab = (tabId: string) => {
     setState((s) => ({ ...s, activeTabId: tabId }));
@@ -508,6 +612,15 @@ export default function App() {
         layout: describeLayout(next)
       });
       return next;
+    });
+    setActiveLeaf(activeTab.id, newLeaf.id);
+  };
+
+  const addTerminalView = () => {
+    const newLeaf = leafFromPane("terminal");
+    updateActiveRoot((root) => {
+      const leaves = collectLeavesForAddView(root);
+      return buildAddViewLayout([...leaves, newLeaf]);
     });
     setActiveLeaf(activeTab.id, newLeaf.id);
   };
@@ -731,6 +844,123 @@ export default function App() {
       }
     }));
   };
+
+  const applySavedNode = useCallback(
+    (name: string) => {
+      const node = settings.savedNodes.find((item) => item.name === name);
+      if (!node) return;
+      setSettings((s) => ({
+        ...s,
+        serverBaseUrl: node.serverBaseUrl,
+        token: node.token,
+        deviceId: node.deviceId,
+        deviceToken: node.deviceToken
+      }));
+      notify("info", t("app.conn.savedNodes.applied", { name: node.name }));
+    },
+    [notify, settings.savedNodes, t]
+  );
+
+  const saveCurrentNode = useCallback(() => {
+    const serverBaseUrl = settings.serverBaseUrl.trim();
+    if (!serverBaseUrl) {
+      notify("warning", t("app.conn.savedNodes.serverRequired"));
+      return;
+    }
+    const matched = settings.savedNodes.find((item) => isSameSavedNodeConfig(item, settings));
+    const nameRaw = window.prompt(t("app.conn.savedNodes.savePrompt"), matched?.name ?? serverBaseUrl);
+    if (nameRaw === null) return;
+    const name = nameRaw.trim();
+    if (!name) {
+      notify("warning", t("app.conn.savedNodes.nameRequired"));
+      return;
+    }
+
+    const nextNode: SavedNodePreset = {
+      name,
+      serverBaseUrl,
+      token: settings.token,
+      deviceId: settings.deviceId,
+      deviceToken: settings.deviceToken
+    };
+    const existingIndex = settings.savedNodes.findIndex((item) => item.name === name);
+    setSettings((s) => {
+      const nextSavedNodes = [...s.savedNodes];
+      const index = nextSavedNodes.findIndex((item) => item.name === name);
+      if (index >= 0) {
+        nextSavedNodes[index] = nextNode;
+      } else {
+        nextSavedNodes.push(nextNode);
+      }
+      return { ...s, savedNodes: nextSavedNodes };
+    });
+    notify("info", t(existingIndex >= 0 ? "app.conn.savedNodes.updated" : "app.conn.savedNodes.saved", { name }));
+  }, [notify, settings, t]);
+
+  const suggestTerminalPresetName = useCallback(
+    (preset: SavedTerminalPreset) => {
+      if (preset.mode === "local") {
+        const trimmed = preset.path.replace(/[\\/]+$/, "");
+        const parts = trimmed.split(/[\\/]+/).filter(Boolean);
+        return parts[parts.length - 1] || t("app.conn.savedTerminals.localDefault");
+      }
+      const user = preset.user ? `${preset.user}@` : "";
+      const host = preset.host || t("tab.vps");
+      const path = preset.path && preset.path !== "/" ? ` ${preset.path}` : "";
+      return `${user}${host}${path}`.trim();
+    },
+    [t]
+  );
+
+  const applySavedTerminal = useCallback(
+    (name: string) => {
+      const preset = settings.savedTerminals.find((item) => item.name === name);
+      if (!preset) return;
+      openTerminalInNewPane(makeTerminalTabFromPreset(preset));
+      notify("info", t("app.conn.savedTerminals.opened", { name: preset.name }));
+    },
+    [notify, openTerminalInNewPane, settings.savedTerminals, t]
+  );
+
+  const saveCurrentTerminalPreset = useCallback(() => {
+    if (!activeTerminalPreset) {
+      notify("warning", t("app.conn.savedTerminals.sourceRequired"));
+      return;
+    }
+
+    const matched = settings.savedTerminals.find((item) => isSameSavedTerminalConfig(item, activeTerminalPreset));
+    const nameRaw = window.prompt(
+      t("app.conn.savedTerminals.savePrompt"),
+      matched?.name ?? suggestTerminalPresetName(activeTerminalPreset)
+    );
+    if (nameRaw === null) return;
+
+    const name = nameRaw.trim();
+    if (!name) {
+      notify("warning", t("app.conn.savedTerminals.nameRequired"));
+      return;
+    }
+
+    const nextPreset: SavedTerminalPreset = {
+      ...activeTerminalPreset,
+      name
+    };
+    const existingIndex = settings.savedTerminals.findIndex((item) => item.name === name);
+    setSettings((s) => {
+      const nextSavedTerminals = [...s.savedTerminals];
+      const index = nextSavedTerminals.findIndex((item) => item.name === name);
+      if (index >= 0) {
+        nextSavedTerminals[index] = nextPreset;
+      } else {
+        nextSavedTerminals.push(nextPreset);
+      }
+      return { ...s, savedTerminals: nextSavedTerminals };
+    });
+    notify(
+      "info",
+      t(existingIndex >= 0 ? "app.conn.savedTerminals.updated" : "app.conn.savedTerminals.saved", { name })
+    );
+  }, [activeTerminalPreset, notify, settings.savedTerminals, suggestTerminalPresetName, t]);
 
   const runTransfers = async (mode: "queued" | "failed" | "all") => {
     if (runAllBusyRef.current) return;
@@ -2400,6 +2630,25 @@ export default function App() {
 
   const brandMeta = t("app.brand.meta");
   const canApplyQr = qrPayload.trim().length > 0;
+  const selectedSavedNodeName =
+    settings.savedNodes.find((item) => isSameSavedNodeConfig(item, settings))?.name ?? "";
+  const serviceStatusText =
+    serviceStatus.kind === "online"
+      ? t("app.conn.serviceStatus.online")
+      : serviceStatus.kind === "offline"
+        ? t("app.conn.serviceStatus.offline")
+        : serviceStatus.kind === "error"
+          ? t("app.conn.serviceStatus.error")
+          : t("app.conn.serviceStatus.checking");
+  const serviceStatusTitle = [
+    t("app.conn.serviceStatus.title"),
+    serviceStatus.message,
+    serviceStatus.kind === "online" && serviceStatus.version
+      ? t("app.conn.serviceStatus.version", { version: serviceStatus.version })
+      : ""
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div className="app">
@@ -2427,13 +2676,75 @@ export default function App() {
             placeholder={t("app.conn.token.placeholder")}
             title={t("app.conn.token.title")}
           />
+          <select
+            className="conn-input conn-select"
+            value={selectedSavedNodeName}
+            onChange={(e) => {
+              if (!e.target.value) return;
+              applySavedNode(e.target.value);
+            }}
+            title={t("app.conn.savedNodes.title")}
+          >
+            <option value="">{t("app.conn.savedNodes.placeholder")}</option>
+            {settings.savedNodes.map((node) => (
+              <option key={node.name} value={node.name}>
+                {node.name}
+              </option>
+            ))}
+          </select>
           <button
-            className="btn"
+            className="btn icon-only"
+            title={t("app.conn.savedNodes.saveTitle")}
+            aria-label={t("app.conn.savedNodes.saveTitle")}
+            onClick={saveCurrentNode}
+          >
+            <Icon name="save" />
+          </button>
+          <select
+            className="conn-input conn-select"
+            defaultValue=""
+            onChange={(e) => {
+              const name = e.target.value;
+              if (!name) return;
+              applySavedTerminal(name);
+              e.currentTarget.value = "";
+            }}
+            title={t("app.conn.savedTerminals.title")}
+          >
+            <option value="">{t("app.conn.savedTerminals.placeholder")}</option>
+            {settings.savedTerminals.map((preset) => (
+              <option key={preset.name} value={preset.name}>
+                {preset.name}
+              </option>
+            ))}
+          </select>
+          <button
+            className="btn icon-only"
+            title={t("app.conn.savedTerminals.saveTitle")}
+            aria-label={t("app.conn.savedTerminals.saveTitle")}
+            onClick={saveCurrentTerminalPreset}
+            disabled={!activeTerminalPreset}
+          >
+            <Icon name="save" />
+          </button>
+          <button
+            className={showConnHelp ? "btn icon-only active" : "btn icon-only"}
             title={t("app.conn.helpTitle")}
+            aria-label={t("app.conn.helpTitle")}
             onClick={() => setShowConnHelp((v) => !v)}
           >
-            {t("app.conn.help")}
+            <Icon name="help" />
           </button>
+          <div className={`service-pill ${serviceStatus.kind}`} title={serviceStatusTitle} aria-label={serviceStatusTitle}>
+            <span className="service-pill-dot" aria-hidden="true" />
+            <span className="service-pill-label">{t("app.conn.serviceStatus.label")}</span>
+            <span className="service-pill-value">{serviceStatusText}</span>
+            {serviceStatus.kind === "online" && serviceStatus.version ? (
+              <span className="service-pill-version">
+                {t("app.conn.serviceStatus.version", { version: serviceStatus.version })}
+              </span>
+            ) : null}
+          </div>
         </div>
 
         <div className="tabs" role="tablist" aria-label={t("app.workspaces.label")}>
@@ -2462,38 +2773,44 @@ export default function App() {
                 <button
                   className="tab-close"
                   title={t("app.workspaces.closeTab")}
+                  aria-label={t("app.workspaces.closeTab")}
                   onClick={(e) => {
                     e.stopPropagation();
                     onCloseTab(tab.id);
                   }}
                 >
-                  x
+                  <Icon name="close" />
                 </button>
               ) : null}
             </div>
           ))}
         </div>
 
-        <button className="btn" title={t("app.buttons.prefsTitle")} onClick={openPrefs}>
-          {t("app.buttons.prefs")}
+        <button
+          className="btn icon-only"
+          title={t("app.buttons.prefsTitle")}
+          aria-label={t("app.buttons.prefsTitle")}
+          onClick={openPrefs}
+        >
+          <Icon name="settings" />
         </button>
 
         <button
-          className="btn"
+          className="btn icon-only"
           title={t("app.buttons.toggleThemeTitle")}
           aria-label={t("app.buttons.toggleThemeTitle")}
           onClick={toggleTheme}
         >
-          {settings.theme.mode === "dark" ? "🌙" : "☀️"}
+          <Icon name={settings.theme.mode === "dark" ? "moon" : "sun"} />
         </button>
 
         <button
-          className="btn primary"
+          className="btn primary icon-only"
           onClick={onNewTab}
           title={t("app.buttons.newTabTitle")}
           aria-label={t("app.buttons.newTabTitle")}
         >
-          +
+          <Icon name="plus" />
         </button>
       </div>
 
@@ -2503,6 +2820,8 @@ export default function App() {
           <ul>
             <li>{t("app.conn.helpText.serverBaseUrl")}</li>
             <li>{t("app.conn.helpText.token")}</li>
+            <li>{t("app.conn.helpText.savedNodes")}</li>
+            <li>{t("app.conn.helpText.savedTerminals")}</li>
           </ul>
         </div>
       ) : null}
@@ -2521,8 +2840,13 @@ export default function App() {
           <div className="modal-panel prefs-panel">
             <div className="modal-header prefs-header">
               <div className="prefs-title">{t("app.prefs.title")}</div>
-              <button className="btn" onClick={() => setShowPrefs(false)} title={t("common.actions.close")}>
-                {t("app.prefs.close")}
+              <button
+                className="btn icon-only"
+                onClick={() => setShowPrefs(false)}
+                title={t("common.actions.close")}
+                aria-label={t("common.actions.close")}
+              >
+                <Icon name="close" />
               </button>
             </div>
 
@@ -2643,8 +2967,13 @@ export default function App() {
           <div className="modal-panel qr-panel">
             <div className="modal-header qr-header">
               <div className="qr-title">{t("app.qrImport.title")}</div>
-              <button className="btn" onClick={() => setShowQrImport(false)} title={t("app.qrImport.close")}>
-                {t("app.qrImport.close")}
+              <button
+                className="btn icon-only"
+                onClick={() => setShowQrImport(false)}
+                title={t("app.qrImport.close")}
+                aria-label={t("app.qrImport.close")}
+              >
+                <Icon name="close" />
               </button>
             </div>
 
@@ -2742,12 +3071,20 @@ export default function App() {
           />
           <div className="workspace-tools" role="toolbar" aria-label={t("workspace.tools.aria")}>
             <button
-              className="tool-btn"
+              className="tool-btn icon-only"
               onClick={addView}
               title={t("workspace.tools.addViewTitle")}
               aria-label={t("workspace.tools.addViewTitle")}
             >
-              +
+              <Icon name="viewAdd" />
+            </button>
+            <button
+              className="tool-btn icon-only"
+              onClick={addTerminalView}
+              title={t("workspace.tools.addTerminalTitle")}
+              aria-label={t("workspace.tools.addTerminalTitle")}
+            >
+              <Icon name="terminal" />
             </button>
           </div>
         </div>

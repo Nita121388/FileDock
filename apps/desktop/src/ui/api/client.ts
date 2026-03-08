@@ -70,6 +70,19 @@ export type SnapshotCreateRequest = {
 };
 
 export type SnapshotCreateResponse = { snapshot_id: string };
+export type HealthResponse = { status: string; version: string };
+
+async function readErrorText(resp: Response): Promise<string> {
+  const text = (await resp.text().catch(() => "")).trim();
+  if (!text) return "";
+  const compact = text.replace(/\s+/g, " ");
+  return compact.length > 240 ? `${compact.slice(0, 240)}…` : compact;
+}
+
+async function throwHttpError(method: string, path: string, resp: Response): Promise<never> {
+  const text = await readErrorText(resp);
+  throw new Error(`${method} ${path} failed: ${resp.status}${text ? ` ${text}` : ""}`.trim());
+}
 
 function headers(settings: Settings): HeadersInit {
   const h: Record<string, string> = {
@@ -95,10 +108,7 @@ async function apiPostJson<T>(
     body: JSON.stringify(body),
     signal
   });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`POST ${path} failed: ${resp.status} ${text}`.trim());
-  }
+  if (!resp.ok) await throwHttpError("POST", path, resp);
   return (await resp.json()) as T;
 }
 
@@ -118,10 +128,7 @@ export async function apiGetJson<T>(
     headers: headers(settings),
     signal
   });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`GET ${path} failed: ${resp.status} ${text}`.trim());
-  }
+  if (!resp.ok) await throwHttpError("GET", path, resp);
   return (await resp.json()) as T;
 }
 
@@ -141,10 +148,7 @@ export async function apiGetBytes(
     headers: headers(settings),
     signal
   });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`GET ${path} failed: ${resp.status} ${text}`.trim());
-  }
+  if (!resp.ok) await throwHttpError("GET", path, resp);
   return await resp.blob();
 }
 
@@ -166,10 +170,7 @@ export async function apiGetUint8Array(
     headers: headers(settings),
     signal
   });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`GET ${path} failed: ${resp.status} ${text}`.trim());
-  }
+  if (!resp.ok) await throwHttpError("GET", path, resp);
 
   const lenHeader = resp.headers.get("content-length");
   const total = lenHeader ? Number(lenHeader) : null;
@@ -213,6 +214,10 @@ export async function apiGetUint8Array(
 
 export async function listSnapshots(settings: Settings): Promise<SnapshotMeta[]> {
   return apiGetJson<SnapshotMeta[]>(settings, "/v1/snapshots");
+}
+
+export async function getHealth(settings: Settings, signal?: AbortSignal): Promise<HealthResponse> {
+  return apiGetJson<HealthResponse>(settings, "/health", undefined, signal);
 }
 
 export async function getTree(
@@ -283,10 +288,7 @@ export async function putChunk(settings: Settings, hash: string, data: Uint8Arra
     body,
     signal
   });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`PUT /v1/chunks/${hash} failed: ${resp.status} ${text}`.trim());
-  }
+  if (!resp.ok) await throwHttpError("PUT", `/v1/chunks/${hash}`, resp);
 }
 
 export async function createSnapshot(
@@ -311,8 +313,5 @@ export async function putManifest(
     body: JSON.stringify(manifest),
     signal
   });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`PUT /v1/snapshots/${snapshotId}/manifest failed: ${resp.status} ${text}`.trim());
-  }
+  if (!resp.ok) await throwHttpError("PUT", `/v1/snapshots/${snapshotId}/manifest`, resp);
 }

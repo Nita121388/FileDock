@@ -8,7 +8,7 @@ Implemented (see `progress/` for exact commits):
 - Server: chunk storage, snapshot metadata + manifests, browse tree + download, optional static token auth, device registry + device-token auth, streaming downloads.
 - CLI: push/pull folders (chunked + dedup), exclusions, retries, progress, periodic `push-folder-loop`.
 - TUI: snapshot browser (read-only).
-- Desktop: tabbed workspaces, split panes with draggable docking + pane tabs, live snapshot browsing, transfer queue, cross-server copy (file/folder), upload local file, concurrency/bandwidth limits, resume-friendly copy.
+- Desktop: tabbed workspaces, split panes with draggable docking + pane tabs, live snapshot browsing, transfer queue, cross-server copy (file/folder), upload local file, concurrency/bandwidth limits, resume-friendly copy, service health indicator, saved node presets, one-click local backup, icon+tooltip actions, resizable browser columns, dedicated add-terminal action, terminal presets / quick-launch flows.
 - Scripts/docs: `scripts/` helpers, quickstart, deploy notes, smoke tests, CI checks, acceptance checklist.
 
 ## Next (near-term)

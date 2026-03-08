@@ -61,11 +61,46 @@
       },
       "help": "Help",
       "helpTitle": "Connection fields",
+      "serviceStatus": {
+        "title": "FileDock service status",
+        "label": "Service",
+        "checking": "Checking",
+        "online": "Online",
+        "offline": "Offline",
+        "error": "Error",
+        "version": "v{{version}}"
+      },
       "helpText": {
         "serverBaseUrl": "Server base URL: FileDock server address (e.g. http://127.0.0.1:8787 or https://your-server).",
         "token": "Token: optional auth token if the server requires it.",
         "deviceId": "Device ID: optional, used to access a specific device.",
-        "deviceToken": "Device token: optional auth for the specific device."
+        "deviceToken": "Device token: optional auth for the specific device.",
+        "savedNodes": "Saved nodes: store the current connection config under a custom name for quick switching.",
+        "savedTerminals": "Saved terminals: store the current local folder or SFTP terminal target under a custom name for one-click launch."
+      },
+      "savedNodes": {
+        "title": "Saved nodes",
+        "placeholder": "Saved nodes",
+        "save": "Save node",
+        "saveTitle": "Save current connection as a node preset",
+        "savePrompt": "Node name (required)",
+        "nameRequired": "Node name is required",
+        "serverRequired": "Enter the server base URL before saving a node",
+        "saved": "Saved node: {{name}}",
+        "updated": "Updated node: {{name}}",
+        "applied": "Applied node: {{name}}"
+      },
+      "savedTerminals": {
+        "title": "Saved terminals",
+        "placeholder": "Saved terminals",
+        "saveTitle": "Save current terminal target as a preset",
+        "savePrompt": "Terminal preset name (required)",
+        "nameRequired": "Terminal preset name is required",
+        "sourceRequired": "Open a local folder, SFTP node, or terminal first",
+        "localDefault": "Local terminal",
+        "saved": "Saved terminal preset: {{name}}",
+        "updated": "Updated terminal preset: {{name}}",
+        "opened": "Opened terminal preset: {{name}}"
       }
     },
     "workspaces": {
@@ -272,7 +307,8 @@
     },
     "tools": {
       "aria": "Workspace tools",
-      "addViewTitle": "Add view (Local)"
+      "addViewTitle": "Add view (Local)",
+      "addTerminalTitle": "Add terminal"
     }
   },
   "pane": {
@@ -328,7 +364,10 @@
       "refresh": "Refresh",
       "refreshTitle": "Refresh",
       "backup": "Backup",
-      "backupTitle": "Back up current folder to server"
+      "backupTitle": "Back up current folder to server",
+      "terminal": "Terminal",
+      "terminalTitle": "Open terminal in the current folder",
+      "terminalHere": "Open terminal here"
     },
     "prompt": {
       "deviceName": "Backup device name?",
@@ -351,7 +390,8 @@
       "backupDone": "Backup completed: {{snapshot}}",
       "backupDoneNoId": "Backup completed",
       "copyDone": "Copied to {{path}}",
-      "copyPath": "Copied path: {{path}}"
+      "copyPath": "Copied path: {{path}}",
+      "terminalOpened": "Opened terminal: {{path}}"
     },
     "notice": {
       "selected": "Selected folder: {{path}}"
@@ -365,6 +405,11 @@
     },
     "dialog": {
       "chooseTitle": "Choose local folder"
+    },
+    "contextMenu": {
+      "backup": "Backup to FileDock",
+      "copyPath": "Copy path",
+      "terminal": "Open terminal here"
     }
   },
   "sftp": {
@@ -374,7 +419,7 @@
       "invalidName": "Invalid name: must not contain '/'",
       "prefix": "Error: {{message}}",
       "noServerBase": "Please set the server base URL first",
-    "backupFileOnly": "Backup/delete only supports files and folders",
+      "backupFileOnly": "Backup/delete only supports files and folders",
       "invalidRemotePath": "Invalid remote path"
     },
     "prompt": {
@@ -453,13 +498,15 @@
       "rename": "Rename",
       "move": "Move",
       "delete": "Delete",
-      "deleteBackup": "Delete (backup first)"
+      "deleteBackup": "Delete (backup first)",
+      "terminalHere": "Open terminal here"
     },
     "table": {
       "name": "Name",
       "type": "Type",
       "size": "Size",
-      "actions": "Actions"
+      "actions": "Actions",
+      "resize": "Drag to resize columns, double-click to reset"
     },
     "drag": {
       "downloadHint": "Drag to Transfer Queue to download"

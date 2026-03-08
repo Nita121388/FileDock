@@ -19,3 +19,5 @@ On a build machine, run:
 ```
 
 Then build the desktop app normally (Tauri will pick up the correct binaries).
+
+For debug/dev builds, missing sidecars are now tolerated automatically so `cargo check -p filedock-desktop` does not need placeholder files. Release packaging still requires the real binaries above.

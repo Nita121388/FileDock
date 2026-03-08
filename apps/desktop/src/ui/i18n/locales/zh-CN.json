@@ -61,11 +61,46 @@
       },
       "help": "说明",
       "helpTitle": "连接参数说明",
+      "serviceStatus": {
+        "title": "FileDock 服务状态",
+        "label": "服务",
+        "checking": "检查中",
+        "online": "在线",
+        "offline": "离线",
+        "error": "异常",
+        "version": "v{{version}}"
+      },
       "helpText": {
         "serverBaseUrl": "服务器基础地址：FileDock 服务端地址（例：http://127.0.0.1:8787 或 https://你的服务器）。",
         "token": "Token：如果服务端开启鉴权，填这里。",
         "deviceId": "设备 ID：可选，用于访问特定设备。",
-        "deviceToken": "设备 Token：可选，特定设备的鉴权。"
+        "deviceToken": "设备 Token：可选，特定设备的鉴权。",
+        "savedNodes": "已保存节点：把当前连接配置保存成自定义名称，方便后续快速切换。",
+        "savedTerminals": "保存终端：把当前本地文件夹或 SFTP 终端目标保存为自定义名称，之后可一键打开。"
+      },
+      "savedNodes": {
+        "title": "已保存节点",
+        "placeholder": "已保存节点",
+        "save": "保存节点",
+        "saveTitle": "将当前连接保存为节点预设",
+        "savePrompt": "节点名称（必填）",
+        "nameRequired": "节点名称不能为空",
+        "serverRequired": "请先填写服务器基础地址，再保存节点",
+        "saved": "已保存节点：{{name}}",
+        "updated": "已更新节点：{{name}}",
+        "applied": "已应用节点：{{name}}"
+      },
+      "savedTerminals": {
+        "title": "保存终端",
+        "placeholder": "保存终端",
+        "saveTitle": "将当前终端目标保存为预设",
+        "savePrompt": "终端预设名称（必填）",
+        "nameRequired": "终端预设名称不能为空",
+        "sourceRequired": "请先选中本地文件夹、SFTP 节点或终端",
+        "localDefault": "本地终端",
+        "saved": "已保存终端预设：{{name}}",
+        "updated": "已更新终端预设：{{name}}",
+        "opened": "已打开终端预设：{{name}}"
       }
     },
     "workspaces": {
@@ -272,7 +307,8 @@
     },
     "tools": {
       "aria": "工作区工具栏",
-      "addViewTitle": "新增视窗（本地）"
+      "addViewTitle": "新增视窗（本地）",
+      "addTerminalTitle": "新增终端"
     }
   },
   "pane": {
@@ -328,7 +364,10 @@
       "refresh": "刷新",
       "refreshTitle": "刷新",
       "backup": "备份",
-      "backupTitle": "一键备份当前文件夹到服务端"
+      "backupTitle": "一键备份当前文件夹到服务端",
+      "terminal": "终端",
+      "terminalTitle": "在当前文件夹打开终端",
+      "terminalHere": "在这里打开终端"
     },
     "prompt": {
       "deviceName": "备份设备名称？",
@@ -351,7 +390,8 @@
       "backupDone": "备份完成：{{snapshot}}",
       "backupDoneNoId": "备份完成",
       "copyDone": "已复制到 {{path}}",
-      "copyPath": "已复制路径：{{path}}"
+      "copyPath": "已复制路径：{{path}}",
+      "terminalOpened": "已打开终端：{{path}}"
     },
     "notice": {
       "selected": "已选择文件夹：{{path}}"
@@ -365,6 +405,11 @@
     },
     "dialog": {
       "chooseTitle": "选择本地文件夹"
+    },
+    "contextMenu": {
+      "backup": "备份到 FileDock",
+      "copyPath": "复制路径",
+      "terminal": "在这里打开终端"
     }
   },
   "sftp": {
@@ -374,7 +419,7 @@
       "invalidName": "无效名称：不能包含 '/'",
       "prefix": "错误：{{message}}",
       "noServerBase": "请先设置服务器基础地址",
-    "backupFileOnly": "备份/删除仅支持文件和文件夹",
+      "backupFileOnly": "备份/删除仅支持文件和文件夹",
       "invalidRemotePath": "远程路径无效"
     },
     "prompt": {
@@ -453,13 +498,15 @@
       "rename": "重命名",
       "move": "移动",
       "delete": "删除",
-      "deleteBackup": "删除（先备份）"
+      "deleteBackup": "删除（先备份）",
+      "terminalHere": "在这里打开终端"
     },
     "table": {
       "name": "名称",
       "type": "类型",
       "size": "大小",
-      "actions": "操作"
+      "actions": "操作",
+      "resize": "拖拽调整列宽，双击恢复默认宽度"
     },
     "drag": {
       "downloadHint": "拖到传输队列以下载"

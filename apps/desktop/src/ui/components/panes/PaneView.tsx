@@ -102,6 +102,7 @@ export function PaneView(props: {
           tab={props.tab}
           settings={props.settings}
           onNotify={props.onNotify}
+          onOpenTerminal={props.onOpenTerminal}
           onTabChange={(next) => props.onUpdateTab(() => next)}
         />
       );

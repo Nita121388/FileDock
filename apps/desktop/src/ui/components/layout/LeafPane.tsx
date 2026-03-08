@@ -1,6 +1,7 @@
 import type { DropZone, LeafNode, PaneKind, SplitDir, PaneTab } from "../../model/layout";
-import { activeTab, uid } from "../../model/layout";
+import { activeTab } from "../../model/layout";
 import type { Settings } from "../../model/settings";
+import { makeSftpTerminalTab } from "../../model/terminalPresets";
 import type { TransferJob } from "../../model/transfers";
 import { PaneView } from "../panes/PaneView";
 import { useState } from "react";
@@ -136,14 +137,8 @@ export default function LeafPane(props: {
     if (!tab.state.host.trim() || !tab.state.user.trim()) return;
 
     const title = `${tab.state.user}@${tab.state.host}`;
-    const terminalTab: PaneTab = {
-      id: uid("tab"),
-      pane: "terminal",
-      title,
-      state: {
-        mode: "sftp",
-        title,
-        path: tab.state.path || "/",
+    onOpenTerminal(
+      makeSftpTerminalTab({
         host: tab.state.host,
         port: tab.state.port || 22,
         user: tab.state.user,
@@ -152,11 +147,11 @@ export default function LeafPane(props: {
         useAgent: tab.state.useAgent,
         knownHostsPolicy: tab.state.knownHostsPolicy,
         knownHostsPath: tab.state.knownHostsPath,
-        basePath: tab.state.basePath
-      }
-    };
-
-    onOpenTerminal(terminalTab);
+        basePath: tab.state.basePath,
+        path: tab.state.path || "/",
+        title
+      })
+    );
   };
 
   return (
