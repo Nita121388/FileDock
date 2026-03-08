@@ -34,6 +34,13 @@ import {
 } from "./model/settings";
 import { makeTerminalTabFromPreset, terminalPresetFromPane } from "./model/terminalPresets";
 import {
+  classifyServiceError,
+  isSameSavedNodeConfig,
+  isSameSavedTerminalConfig,
+  parseServerConfigImport,
+  suggestTerminalPresetName
+} from "./model/presetUtils";
+import {
   basename,
   loadTransfers,
   saveTransfers,
@@ -73,56 +80,10 @@ import { isTauri } from "./util/tauriEnv";
 
 const QUEUE_KEY = "filedock.desktop.queue.v1";
 
-type ServerConfigImport = {
-  serverBaseUrl: string;
-  token?: string | null;
-  deviceId?: string | null;
-  deviceToken?: string | null;
-};
-
 type ServiceStatus = {
   kind: "checking" | "online" | "offline" | "error";
   message?: string;
   version?: string;
-};
-
-const parseServerConfigImport = (input: any): ServerConfigImport | null => {
-  if (!input || typeof input !== "object") return null;
-  if (typeof input.server_base_url !== "string") return null;
-  const serverBaseUrl = input.server_base_url.trim();
-  if (!serverBaseUrl) return null;
-  const token = typeof input.token === "string" ? input.token : null;
-  const deviceId = typeof input.device_id === "string" ? input.device_id : null;
-  const deviceToken = typeof input.device_token === "string" ? input.device_token : null;
-  return { serverBaseUrl, token, deviceId, deviceToken };
-};
-
-const isSameSavedNodeConfig = (
-  node: SavedNodePreset,
-  conn: Pick<Settings, "serverBaseUrl" | "token" | "deviceId" | "deviceToken">
-): boolean => {
-  return (
-    node.serverBaseUrl === conn.serverBaseUrl.trim() &&
-    node.token === conn.token &&
-    node.deviceId === conn.deviceId &&
-    node.deviceToken === conn.deviceToken
-  );
-};
-
-const isSameSavedTerminalConfig = (preset: SavedTerminalPreset, other: SavedTerminalPreset): boolean => {
-  return (
-    preset.mode === other.mode &&
-    preset.path === other.path &&
-    preset.host === other.host &&
-    preset.port === other.port &&
-    preset.user === other.user &&
-    preset.password === other.password &&
-    preset.keyPath === other.keyPath &&
-    preset.useAgent === other.useAgent &&
-    preset.knownHostsPolicy === other.knownHostsPolicy &&
-    preset.knownHostsPath === other.knownHostsPath &&
-    preset.basePath === other.basePath
-  );
 };
 
 export default function App() {
@@ -417,8 +378,7 @@ export default function App() {
       } catch (e: any) {
         if (cancelled || aborter.signal.aborted) return;
         const message = String(e?.message ?? e).trim();
-        const offline = /failed to fetch|networkerror|load failed|econnrefused|err_connection_refused|fetch failed/i.test(message);
-        setServiceStatus({ kind: offline ? "offline" : "error", message });
+        setServiceStatus({ kind: classifyServiceError(message), message });
       }
     };
 
@@ -897,18 +857,12 @@ export default function App() {
     notify("info", t(existingIndex >= 0 ? "app.conn.savedNodes.updated" : "app.conn.savedNodes.saved", { name }));
   }, [notify, settings, t]);
 
-  const suggestTerminalPresetName = useCallback(
-    (preset: SavedTerminalPreset) => {
-      if (preset.mode === "local") {
-        const trimmed = preset.path.replace(/[\\/]+$/, "");
-        const parts = trimmed.split(/[\\/]+/).filter(Boolean);
-        return parts[parts.length - 1] || t("app.conn.savedTerminals.localDefault");
-      }
-      const user = preset.user ? `${preset.user}@` : "";
-      const host = preset.host || t("tab.vps");
-      const path = preset.path && preset.path !== "/" ? ` ${preset.path}` : "";
-      return `${user}${host}${path}`.trim();
-    },
+  const suggestTerminalPresetNameForPrompt = useCallback(
+    (preset: SavedTerminalPreset) =>
+      suggestTerminalPresetName(preset, {
+        localDefault: t("app.conn.savedTerminals.localDefault"),
+        vps: t("tab.vps")
+      }),
     [t]
   );
 
@@ -931,7 +885,7 @@ export default function App() {
     const matched = settings.savedTerminals.find((item) => isSameSavedTerminalConfig(item, activeTerminalPreset));
     const nameRaw = window.prompt(
       t("app.conn.savedTerminals.savePrompt"),
-      matched?.name ?? suggestTerminalPresetName(activeTerminalPreset)
+      matched?.name ?? suggestTerminalPresetNameForPrompt(activeTerminalPreset)
     );
     if (nameRaw === null) return;
 
@@ -960,7 +914,7 @@ export default function App() {
       "info",
       t(existingIndex >= 0 ? "app.conn.savedTerminals.updated" : "app.conn.savedTerminals.saved", { name })
     );
-  }, [activeTerminalPreset, notify, settings.savedTerminals, suggestTerminalPresetName, t]);
+  }, [activeTerminalPreset, notify, settings.savedTerminals, suggestTerminalPresetNameForPrompt, t]);
 
   const runTransfers = async (mode: "queued" | "failed" | "all") => {
     if (runAllBusyRef.current) return;

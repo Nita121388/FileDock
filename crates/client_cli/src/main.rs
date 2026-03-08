@@ -574,14 +574,12 @@ async fn push_folder_impl(
         .send()
         .await
         .map_err(|e| format!("create snapshot request: {e}"))?;
-    let create_resp: SnapshotCreateResponse = ensure_success_response(
-        create_resp,
-        "create snapshot response",
-    )
-    .await?
-        .json()
-        .await
-        .map_err(|e| format!("create snapshot decode: {e}"))?;
+    let create_resp: SnapshotCreateResponse =
+        ensure_success_response(create_resp, "create snapshot response")
+            .await?
+            .json()
+            .await
+            .map_err(|e| format!("create snapshot decode: {e}"))?;
 
     let snapshot_id = create_resp.snapshot_id;
     println!("snapshot: {snapshot_id}");
@@ -2033,4 +2031,22 @@ fn chunk_file(data: &[u8]) -> Vec<ChunkRef> {
         offset = end;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summarize_http_body;
+
+    #[test]
+    fn summarize_http_body_compacts_whitespace() {
+        assert_eq!(summarize_http_body("  hello\n\tworld  "), "hello world");
+    }
+
+    #[test]
+    fn summarize_http_body_truncates_long_messages() {
+        let input = "x".repeat(300);
+        let output = summarize_http_body(&input);
+        assert_eq!(output.chars().count(), 241);
+        assert!(output.ends_with('…'));
+    }
 }

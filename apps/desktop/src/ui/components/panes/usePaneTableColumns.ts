@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 
-type WidthState = {
+export type WidthState = {
   type: number;
   size: number;
   actions: number;
@@ -26,32 +26,32 @@ export const DEFAULT_PANE_TABLE_WIDTHS: WidthState = {
   actions: 260
 };
 
-const COLUMN_MINS = [180, 72, 96, 220] as const;
+export const PANE_TABLE_COLUMN_MINS = [180, 72, 96, 220] as const;
 
-function clamp(value: number, min: number, max: number): number {
+export function clampPaneColumnWidth(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function normalizeWidth(value: unknown, fallback: number, min: number): number {
+export function normalizePaneColumnWidth(value: unknown, fallback: number, min: number): number {
   return Number.isFinite(value) ? Math.max(min, Math.round(Number(value))) : fallback;
 }
 
-function loadWidths(storageKey: string): WidthState {
+export function loadPaneTableWidths(storageKey: string): WidthState {
   try {
     const raw = localStorage.getItem(storageKey);
     if (!raw) return DEFAULT_PANE_TABLE_WIDTHS;
     const parsed = JSON.parse(raw) as Partial<WidthState>;
     return {
-      type: normalizeWidth(parsed.type, DEFAULT_PANE_TABLE_WIDTHS.type, COLUMN_MINS[1]),
-      size: normalizeWidth(parsed.size, DEFAULT_PANE_TABLE_WIDTHS.size, COLUMN_MINS[2]),
-      actions: normalizeWidth(parsed.actions, DEFAULT_PANE_TABLE_WIDTHS.actions, COLUMN_MINS[3])
+      type: normalizePaneColumnWidth(parsed.type, DEFAULT_PANE_TABLE_WIDTHS.type, PANE_TABLE_COLUMN_MINS[1]),
+      size: normalizePaneColumnWidth(parsed.size, DEFAULT_PANE_TABLE_WIDTHS.size, PANE_TABLE_COLUMN_MINS[2]),
+      actions: normalizePaneColumnWidth(parsed.actions, DEFAULT_PANE_TABLE_WIDTHS.actions, PANE_TABLE_COLUMN_MINS[3])
     };
   } catch {
     return DEFAULT_PANE_TABLE_WIDTHS;
   }
 }
 
-function saveWidths(storageKey: string, widths: WidthState) {
+export function savePaneTableWidths(storageKey: string, widths: WidthState) {
   try {
     localStorage.setItem(storageKey, JSON.stringify(widths));
   } catch {
@@ -60,7 +60,7 @@ function saveWidths(storageKey: string, widths: WidthState) {
 }
 
 export function usePaneTableColumns(storageKey: string) {
-  const [widths, setWidths] = useState<WidthState>(() => loadWidths(storageKey));
+  const [widths, setWidths] = useState<WidthState>(() => loadPaneTableWidths(storageKey));
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const headerRefs = useRef<Array<HTMLDivElement | null>>([]);
   const dragRef = useRef<DragState | null>(null);
@@ -72,7 +72,7 @@ export function usePaneTableColumns(storageKey: string) {
 
   useEffect(() => {
     if (draggingIndex !== null) return;
-    saveWidths(storageKey, widths);
+    savePaneTableWidths(storageKey, widths);
   }, [draggingIndex, storageKey, widths]);
 
   useEffect(() => {
@@ -107,9 +107,9 @@ export function usePaneTableColumns(storageKey: string) {
       const leftIndex = drag.index;
       const rightIndex = leftIndex + 1;
       const total = drag.startWidths[leftIndex] + drag.startWidths[rightIndex];
-      const minLeft = COLUMN_MINS[leftIndex];
-      const minRight = COLUMN_MINS[rightIndex];
-      const nextLeft = clamp(drag.startWidths[leftIndex] + (ev.clientX - drag.startX), minLeft, total - minRight);
+      const minLeft = PANE_TABLE_COLUMN_MINS[leftIndex];
+      const minRight = PANE_TABLE_COLUMN_MINS[rightIndex];
+      const nextLeft = clampPaneColumnWidth(drag.startWidths[leftIndex] + (ev.clientX - drag.startX), minLeft, total - minRight);
       const nextRight = Math.max(minRight, total - nextLeft);
 
       setWidths((prev) => {

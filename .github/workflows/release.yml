@@ -82,6 +82,7 @@ jobs:
         working-directory: apps/desktop
         run: |
           npm ci
+          npm test
           npm run tauri build
 
       - name: Prepare dist

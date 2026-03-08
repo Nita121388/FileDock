@@ -22,6 +22,7 @@ Recommended: package these into a tarball/zip per target OS.
 ```bash
 cd apps/desktop
 npm install
+npm test
 npm run tauri build
 ```
 

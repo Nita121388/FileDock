@@ -57,7 +57,7 @@ export const DEFAULT_SETTINGS: Settings = {
   }
 };
 
-function normalizeSavedNodePreset(input: unknown): SavedNodePreset | null {
+export function normalizeSavedNodePreset(input: unknown): SavedNodePreset | null {
   if (!input || typeof input !== "object") return null;
   const node = input as Partial<SavedNodePreset>;
   const name = typeof node.name === "string" ? node.name.trim() : "";
@@ -72,7 +72,7 @@ function normalizeSavedNodePreset(input: unknown): SavedNodePreset | null {
   };
 }
 
-function normalizeSavedNodes(input: unknown): SavedNodePreset[] {
+export function normalizeSavedNodes(input: unknown): SavedNodePreset[] {
   if (!Array.isArray(input)) return [];
   const out: SavedNodePreset[] = [];
   const seen = new Set<string>();
@@ -85,7 +85,7 @@ function normalizeSavedNodes(input: unknown): SavedNodePreset[] {
   return out;
 }
 
-function normalizeSavedTerminalPreset(input: unknown): SavedTerminalPreset | null {
+export function normalizeSavedTerminalPreset(input: unknown): SavedTerminalPreset | null {
   if (!input || typeof input !== "object") return null;
   const preset = input as Partial<SavedTerminalPreset>;
   const name = typeof preset.name === "string" ? preset.name.trim() : "";
@@ -115,7 +115,7 @@ function normalizeSavedTerminalPreset(input: unknown): SavedTerminalPreset | nul
   };
 }
 
-function normalizeSavedTerminals(input: unknown): SavedTerminalPreset[] {
+export function normalizeSavedTerminals(input: unknown): SavedTerminalPreset[] {
   if (!Array.isArray(input)) return [];
   const out: SavedTerminalPreset[] = [];
   const seen = new Set<string>();
