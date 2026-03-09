@@ -1,18 +1,19 @@
 use clap::{Parser, Subcommand};
 use filedock_protocol::{
     is_valid_chunk_hash, is_valid_rel_path, ChunkGcRequest, ChunkGcResponse, ChunkPresenceRequest,
-    ChunkPresenceResponse, ChunkRef, DeviceHeartbeatRequest, DeviceHeartbeatResponse,
-    HealthResponse, ManifestFileEntry, ServerConfigExport, SnapshotCreateRequest,
-    SnapshotCreateResponse, SnapshotDeleteResponse, SnapshotManifest, SnapshotMeta,
-    SnapshotPruneRequest, SnapshotPruneResponse, TreeResponse,
+    ChunkPresenceResponse, ChunkRef, DeviceHeartbeatRequest, DeviceHeartbeatResponse, DeviceInfo,
+    DeviceRegisterRequest, DeviceRegisterResponse, HealthResponse, ManifestFileEntry,
+    ServerConfigExport, SnapshotCreateRequest, SnapshotCreateResponse, SnapshotDeleteResponse,
+    SnapshotManifest, SnapshotMeta, SnapshotPruneRequest, SnapshotPruneResponse, TreeResponse,
 };
 use futures_util::stream::{self, StreamExt};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use qrcode::QrCode;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::{
     path::{Path, PathBuf},
+    process::Command as ProcessCommand,
     time::Duration,
 };
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
@@ -24,43 +25,64 @@ const TOKEN_HEADER: &str = "x-filedock-token";
 const DEVICE_ID_HEADER: &str = "x-filedock-device-id";
 const DEVICE_TOKEN_HEADER: &str = "x-filedock-device-token";
 
-fn build_client() -> Result<reqwest::Client, String> {
-    // If FILEDOCK_TOKEN is set, attach it to all requests.
-    let mut headers = reqwest::header::HeaderMap::new();
-    if let Ok(token) = std::env::var("FILEDOCK_TOKEN") {
-        let token = token.trim().to_string();
-        if !token.is_empty() {
-            let name = reqwest::header::HeaderName::from_static(TOKEN_HEADER);
-            let value = reqwest::header::HeaderValue::from_str(&token)
-                .map_err(|e| format!("invalid FILEDOCK_TOKEN: {e}"))?;
-            headers.insert(name, value);
+#[derive(Debug, Clone, Default)]
+struct AuthConfig {
+    token: Option<String>,
+    device_id: Option<String>,
+    device_token: Option<String>,
+}
+
+fn trim_nonempty(value: Option<String>) -> Option<String> {
+    value.and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
         }
+    })
+}
+
+fn current_auth_from_env() -> AuthConfig {
+    AuthConfig {
+        token: trim_nonempty(std::env::var("FILEDOCK_TOKEN").ok()),
+        device_id: trim_nonempty(std::env::var("FILEDOCK_DEVICE_ID").ok()),
+        device_token: trim_nonempty(std::env::var("FILEDOCK_DEVICE_TOKEN").ok()),
+    }
+}
+
+fn build_client_with_auth(auth: &AuthConfig) -> Result<reqwest::Client, String> {
+    let mut headers = reqwest::header::HeaderMap::new();
+
+    if let Some(token) = auth.token.as_deref() {
+        let name = reqwest::header::HeaderName::from_static(TOKEN_HEADER);
+        let value = reqwest::header::HeaderValue::from_str(token)
+            .map_err(|e| format!("invalid FILEDOCK_TOKEN: {e}"))?;
+        headers.insert(name, value);
     }
 
-    // Optional device auth.
-    if let Ok(device_id) = std::env::var("FILEDOCK_DEVICE_ID") {
-        let device_id = device_id.trim().to_string();
-        if !device_id.is_empty() {
-            let name = reqwest::header::HeaderName::from_static(DEVICE_ID_HEADER);
-            let value = reqwest::header::HeaderValue::from_str(&device_id)
-                .map_err(|e| format!("invalid FILEDOCK_DEVICE_ID: {e}"))?;
-            headers.insert(name, value);
-        }
+    if let Some(device_id) = auth.device_id.as_deref() {
+        let name = reqwest::header::HeaderName::from_static(DEVICE_ID_HEADER);
+        let value = reqwest::header::HeaderValue::from_str(device_id)
+            .map_err(|e| format!("invalid FILEDOCK_DEVICE_ID: {e}"))?;
+        headers.insert(name, value);
     }
-    if let Ok(device_token) = std::env::var("FILEDOCK_DEVICE_TOKEN") {
-        let device_token = device_token.trim().to_string();
-        if !device_token.is_empty() {
-            let name = reqwest::header::HeaderName::from_static(DEVICE_TOKEN_HEADER);
-            let value = reqwest::header::HeaderValue::from_str(&device_token)
-                .map_err(|e| format!("invalid FILEDOCK_DEVICE_TOKEN: {e}"))?;
-            headers.insert(name, value);
-        }
+
+    if let Some(device_token) = auth.device_token.as_deref() {
+        let name = reqwest::header::HeaderName::from_static(DEVICE_TOKEN_HEADER);
+        let value = reqwest::header::HeaderValue::from_str(device_token)
+            .map_err(|e| format!("invalid FILEDOCK_DEVICE_TOKEN: {e}"))?;
+        headers.insert(name, value);
     }
 
     reqwest::Client::builder()
         .default_headers(headers)
         .build()
         .map_err(|e| format!("build http client: {e}"))
+}
+
+fn build_client() -> Result<reqwest::Client, String> {
+    build_client_with_auth(&current_auth_from_env())
 }
 
 fn summarize_http_body(body: &str) -> String {
@@ -107,6 +129,325 @@ async fn fetch_server_config(
     resp.json()
         .await
         .map_err(|e| format!("config export decode: {e}"))
+}
+
+async fn fetch_devices(client: &reqwest::Client, server: &str) -> Result<Vec<DeviceInfo>, String> {
+    let url = format!("{}/v1/devices", server.trim_end_matches('/'));
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("devices request: {e}"))?;
+    let resp = ensure_success_response(resp, "devices response").await?;
+    resp.json()
+        .await
+        .map_err(|e| format!("devices decode: {e}"))
+}
+
+async fn fetch_snapshots(
+    client: &reqwest::Client,
+    server: &str,
+) -> Result<Vec<SnapshotMeta>, String> {
+    let url = format!("{}/v1/snapshots", server.trim_end_matches('/'));
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("snapshots request: {e}"))?;
+    let resp = ensure_success_response(resp, "snapshots response").await?;
+    resp.json()
+        .await
+        .map_err(|e| format!("snapshots decode: {e}"))
+}
+
+async fn register_device_impl(
+    client: &reqwest::Client,
+    server: &str,
+    device_name: &str,
+    os: &str,
+) -> Result<DeviceRegisterResponse, String> {
+    let url = format!("{}/v1/auth/device/register", server.trim_end_matches('/'));
+    let req = DeviceRegisterRequest {
+        device_name: device_name.to_string(),
+        os: os.to_string(),
+    };
+    let resp = client
+        .post(url)
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| format!("device register request: {e}"))?;
+    let resp = ensure_success_response(resp, "device register response").await?;
+    resp.json()
+        .await
+        .map_err(|e| format!("device register decode: {e}"))
+}
+
+async fn read_inline_or_file(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("empty input".to_string());
+    }
+    if trimmed.starts_with('{') {
+        return Ok(trimmed.to_string());
+    }
+
+    let path = PathBuf::from(trimmed);
+    if path.exists() {
+        return tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| format!("read {}: {e}", path.display()));
+    }
+
+    Ok(trimmed.to_string())
+}
+
+async fn load_server_config_input(raw: &str) -> Result<ServerConfigExport, String> {
+    let text = read_inline_or_file(raw).await?;
+    serde_json::from_str(&text).map_err(|e| format!("parse server config JSON: {e}"))
+}
+
+fn validate_profile_name(profile: &str) -> Result<(), String> {
+    if profile.is_empty() {
+        return Err("profile required".to_string());
+    }
+    if profile
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Ok(());
+    }
+    Err("profile may only contain ASCII letters, digits, '-', '_' and '.'".to_string())
+}
+
+fn current_platform_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
+}
+
+fn default_device_name() -> Option<String> {
+    trim_nonempty(std::env::var("FILEDOCK_DEVICE_NAME").ok())
+        .or_else(|| trim_nonempty(std::env::var("HOSTNAME").ok()))
+        .or_else(|| trim_nonempty(std::env::var("COMPUTERNAME").ok()))
+}
+
+fn home_dir_from_env(home: Option<String>, userprofile: Option<String>) -> Option<PathBuf> {
+    trim_nonempty(home)
+        .map(PathBuf::from)
+        .or_else(|| trim_nonempty(userprofile).map(PathBuf::from))
+}
+
+fn default_config_root_from_env(
+    os: &str,
+    home: Option<String>,
+    xdg_config_home: Option<String>,
+    appdata: Option<String>,
+    userprofile: Option<String>,
+) -> Result<PathBuf, String> {
+    match os {
+        "windows" => trim_nonempty(appdata)
+            .map(PathBuf::from)
+            .or_else(|| home_dir_from_env(home, userprofile).map(|p| p.join("AppData/Roaming")))
+            .map(|p| p.join("FileDock"))
+            .ok_or_else(|| {
+                "APPDATA or USERPROFILE required to resolve FileDock config dir".to_string()
+            }),
+        "macos" => home_dir_from_env(home, userprofile)
+            .map(|p| p.join("Library/Application Support/FileDock"))
+            .ok_or_else(|| "HOME required to resolve FileDock config dir".to_string()),
+        _ => Ok(trim_nonempty(xdg_config_home)
+            .map(PathBuf::from)
+            .or_else(|| home_dir_from_env(home, userprofile).map(|p| p.join(".config")))
+            .ok_or_else(|| {
+                "XDG_CONFIG_HOME or HOME required to resolve FileDock config dir".to_string()
+            })?
+            .join("filedock")),
+    }
+}
+
+fn default_state_root_from_env(
+    os: &str,
+    home: Option<String>,
+    xdg_state_home: Option<String>,
+    localappdata: Option<String>,
+    userprofile: Option<String>,
+) -> Result<PathBuf, String> {
+    match os {
+        "windows" => trim_nonempty(localappdata)
+            .map(PathBuf::from)
+            .or_else(|| home_dir_from_env(home, userprofile).map(|p| p.join("AppData/Local")))
+            .map(|p| p.join("FileDock"))
+            .ok_or_else(|| {
+                "LOCALAPPDATA or USERPROFILE required to resolve FileDock state dir".to_string()
+            }),
+        "macos" => home_dir_from_env(home, userprofile)
+            .map(|p| p.join("Library/Application Support/FileDock"))
+            .ok_or_else(|| "HOME required to resolve FileDock state dir".to_string()),
+        _ => Ok(trim_nonempty(xdg_state_home)
+            .map(PathBuf::from)
+            .or_else(|| home_dir_from_env(home, userprofile).map(|p| p.join(".local/state")))
+            .ok_or_else(|| {
+                "XDG_STATE_HOME or HOME required to resolve FileDock state dir".to_string()
+            })?
+            .join("filedock")),
+    }
+}
+
+fn default_config_root() -> Result<PathBuf, String> {
+    default_config_root_from_env(
+        current_platform_name(),
+        std::env::var("HOME").ok(),
+        std::env::var("XDG_CONFIG_HOME").ok(),
+        std::env::var("APPDATA").ok(),
+        std::env::var("USERPROFILE").ok(),
+    )
+}
+
+fn default_state_root() -> Result<PathBuf, String> {
+    default_state_root_from_env(
+        current_platform_name(),
+        std::env::var("HOME").ok(),
+        std::env::var("XDG_STATE_HOME").ok(),
+        std::env::var("LOCALAPPDATA").ok(),
+        std::env::var("USERPROFILE").ok(),
+    )
+}
+
+fn agent_profiles_dir() -> Result<PathBuf, String> {
+    Ok(default_config_root()?.join("agents"))
+}
+
+fn agent_profile_path(profile: &str) -> Result<PathBuf, String> {
+    validate_profile_name(profile)?;
+    Ok(agent_profiles_dir()?.join(format!("{profile}.toml")))
+}
+
+fn agent_state_path(profile: &str) -> Result<PathBuf, String> {
+    validate_profile_name(profile)?;
+    Ok(default_state_root()?
+        .join("agents")
+        .join(format!("{profile}.json")))
+}
+
+fn systemd_unit_name(profile: &str) -> String {
+    format!("filedock-agent-{profile}.service")
+}
+
+fn launchd_label(profile: &str) -> String {
+    format!("com.filedock.agent.{profile}")
+}
+
+fn windows_task_name(profile: &str) -> String {
+    format!("FileDock Agent {profile}")
+}
+
+fn linux_systemd_user_unit_path(profile: &str) -> Result<PathBuf, String> {
+    let base = trim_nonempty(std::env::var("XDG_CONFIG_HOME").ok())
+        .map(PathBuf::from)
+        .or_else(|| {
+            home_dir_from_env(
+                std::env::var("HOME").ok(),
+                std::env::var("USERPROFILE").ok(),
+            )
+            .map(|p| p.join(".config"))
+        })
+        .ok_or_else(|| {
+            "XDG_CONFIG_HOME or HOME required to resolve systemd user dir".to_string()
+        })?;
+    Ok(base.join("systemd/user").join(systemd_unit_name(profile)))
+}
+
+fn macos_launch_agent_path(profile: &str) -> Result<PathBuf, String> {
+    let home = home_dir_from_env(
+        std::env::var("HOME").ok(),
+        std::env::var("USERPROFILE").ok(),
+    )
+    .ok_or_else(|| "HOME required to resolve LaunchAgents dir".to_string())?;
+    Ok(home
+        .join("Library/LaunchAgents")
+        .join(format!("{}.plist", launchd_label(profile))))
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn render_systemd_user_unit(profile: &str, exe: &Path, config: &Path) -> String {
+    format!(
+        "[Unit]
+Description=FileDock agent ({profile})
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart={} agent --config {}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+",
+        exe.display(),
+        config.display(),
+    )
+}
+
+fn render_launchd_plist(profile: &str, exe: &Path, config: &Path) -> String {
+    let label = xml_escape(&launchd_label(profile));
+    let exe = xml_escape(&exe.display().to_string());
+    let config = xml_escape(&config.display().to_string());
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>{label}</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>{exe}</string>
+      <string>agent</string>
+      <string>--config</string>
+      <string>{config}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+  </dict>
+</plist>
+"#
+    )
+}
+
+#[derive(Debug, Serialize)]
+struct ProcessProbe {
+    ok: bool,
+    stdout: String,
+    stderr: String,
+}
+
+fn run_process(program: &str, args: &[&str]) -> Result<ProcessProbe, String> {
+    let output = ProcessCommand::new(program)
+        .args(args)
+        .output()
+        .map_err(|e| format!("run {program}: {e}"))?;
+    Ok(ProcessProbe {
+        ok: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+    })
 }
 
 #[derive(Parser, Debug)]
@@ -321,6 +662,12 @@ enum Command {
         max_delete: Option<u32>,
     },
 
+    /// Device lifecycle helpers.
+    Device {
+        #[command(subcommand)]
+        command: DeviceCommand,
+    },
+
     /// Send a device heartbeat (requires device auth when server runs with FILEDOCK_TOKEN).
     DeviceHeartbeat {
         /// Server base URL, e.g. http://127.0.0.1:8787
@@ -336,13 +683,14 @@ enum Command {
         status: Option<String>,
     },
 
-    /// Run a simple "device agent" from a config file (TOML).
-    ///
-    /// This runs periodic `push-folder` snapshots and (optionally) sends device heartbeats.
+    /// Run or manage the FileDock agent.
     Agent {
         /// Config file path.
         #[arg(long)]
-        config: PathBuf,
+        config: Option<PathBuf>,
+
+        #[command(subcommand)]
+        command: Option<AgentCommand>,
     },
 
     /// Check whether local files match a server snapshot (a lightweight "sync status").
@@ -403,6 +751,161 @@ enum ConfigCommand {
 }
 
 #[derive(Subcommand, Debug)]
+enum DeviceCommand {
+    /// Register a device and return device credentials.
+    Register {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
+
+        /// Device name to register.
+        #[arg(long)]
+        device_name: String,
+
+        /// Override the device OS sent to the server.
+        #[arg(long)]
+        os: Option<String>,
+
+        /// Optional bootstrap server token. If omitted, uses FILEDOCK_TOKEN.
+        #[arg(long)]
+        token: Option<String>,
+    },
+
+    /// Send a device heartbeat.
+    Heartbeat {
+        /// Server base URL, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        server: String,
+
+        /// Device id (if omitted, uses FILEDOCK_DEVICE_ID).
+        #[arg(long)]
+        device_id: Option<String>,
+
+        /// Optional device token override.
+        #[arg(long)]
+        device_token: Option<String>,
+
+        /// Optional status string.
+        #[arg(long)]
+        status: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum AgentCommand {
+    /// Run a simple device agent from a config file.
+    Run {
+        /// Config file path.
+        #[arg(long)]
+        config: PathBuf,
+    },
+
+    /// Create or update a named agent profile.
+    Init {
+        /// Profile name.
+        #[arg(long)]
+        profile: String,
+
+        /// Root folder to back up.
+        #[arg(long)]
+        folder: PathBuf,
+
+        /// Server base URL, e.g. http://127.0.0.1:8787.
+        #[arg(long)]
+        server: Option<String>,
+
+        /// Optional device name; defaults to FILEDOCK_DEVICE_NAME / HOSTNAME / COMPUTERNAME / profile.
+        #[arg(long)]
+        device_name: Option<String>,
+
+        /// Optional note stored in snapshot metadata.
+        #[arg(long)]
+        note: Option<String>,
+
+        /// Snapshot interval (seconds).
+        #[arg(long, default_value_t = 900)]
+        interval_secs: u64,
+
+        /// Upload concurrency (files in parallel).
+        #[arg(long, default_value_t = DEFAULT_CONCURRENCY)]
+        concurrency: usize,
+
+        /// Exclude glob patterns (matched against relative POSIX paths).
+        #[arg(long)]
+        exclude: Vec<String>,
+
+        /// Optional ignore file (one glob per line).
+        #[arg(long)]
+        ignore_file: Option<PathBuf>,
+
+        /// Heartbeat interval (seconds, 0 disables).
+        #[arg(long, default_value_t = 300)]
+        heartbeat_secs: u64,
+
+        /// Optional free-form heartbeat status string.
+        #[arg(long)]
+        heartbeat_status: Option<String>,
+
+        /// Optional imported server config JSON or a path to a JSON file.
+        #[arg(long)]
+        import_json: Option<String>,
+
+        /// Optional bootstrap server token override.
+        #[arg(long)]
+        token: Option<String>,
+
+        /// Optional device id override.
+        #[arg(long)]
+        device_id: Option<String>,
+
+        /// Optional device token override.
+        #[arg(long)]
+        device_token: Option<String>,
+
+        /// Override the device OS used during auto-registration.
+        #[arg(long)]
+        os: Option<String>,
+
+        /// Skip automatic device registration.
+        #[arg(long)]
+        no_register: bool,
+
+        /// Keep the bootstrap server token in the saved profile.
+        #[arg(long)]
+        keep_bootstrap_token: bool,
+    },
+
+    /// Install and start the current platform service for a profile.
+    Install {
+        /// Profile name.
+        #[arg(long)]
+        profile: String,
+
+        /// Render the service definition without writing or starting it.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Show local/service/server status for a profile.
+    Status {
+        /// Profile name.
+        #[arg(long)]
+        profile: String,
+    },
+
+    /// Uninstall the current platform service for a profile.
+    Uninstall {
+        /// Profile name.
+        #[arg(long)]
+        profile: String,
+
+        /// Also remove the saved profile TOML.
+        #[arg(long)]
+        delete_config: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum PluginCommand {
     /// List available plugins (best-effort discovery from PATH and optional plugin dirs).
     List,
@@ -427,7 +930,7 @@ enum PluginCommand {
     },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct AgentConfig {
     /// Server base URL, e.g. http://127.0.0.1:8787
     server: String,
@@ -508,32 +1011,174 @@ fn apply_agent_env(cfg: &AgentConfig) {
     }
 }
 
-async fn send_heartbeat_impl(server: &str, status: Option<String>) -> Result<(), String> {
-    let client = build_client()?;
-    let dev_id = std::env::var("FILEDOCK_DEVICE_ID").unwrap_or_default();
-    if dev_id.trim().is_empty() {
-        return Err("FILEDOCK_DEVICE_ID required for heartbeat".to_string());
+fn auth_from_agent_config(cfg: &AgentConfig) -> AuthConfig {
+    AuthConfig {
+        token: trim_nonempty(cfg.token.clone()),
+        device_id: trim_nonempty(cfg.device_id.clone()),
+        device_token: trim_nonempty(cfg.device_token.clone()),
     }
+}
+
+fn auth_mode_label(auth: &AuthConfig) -> &'static str {
+    if auth.device_id.is_some() && auth.device_token.is_some() {
+        "device"
+    } else if auth.token.is_some() {
+        "server_token"
+    } else {
+        "open"
+    }
+}
+
+async fn send_heartbeat_with_auth(
+    auth: &AuthConfig,
+    server: &str,
+    device_id: Option<String>,
+    status: Option<String>,
+) -> Result<DeviceHeartbeatResponse, String> {
+    let client = build_client_with_auth(auth)?;
+    let dev_id = trim_nonempty(device_id).or_else(|| auth.device_id.clone());
+    let dev_id =
+        dev_id.ok_or_else(|| "device_id required (or set FILEDOCK_DEVICE_ID)".to_string())?;
     let url = format!(
         "{}/v1/devices/{}/heartbeat",
         server.trim_end_matches('/'),
-        dev_id.trim()
+        dev_id
     );
     let req = DeviceHeartbeatRequest {
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
         status,
     };
-    let _resp: DeviceHeartbeatResponse = client
+    let resp = client
         .post(url)
         .json(&req)
         .send()
         .await
-        .map_err(|e| format!("heartbeat request: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("heartbeat response: {e}"))?
-        .json()
+        .map_err(|e| format!("heartbeat request: {e}"))?;
+    let resp = ensure_success_response(resp, "heartbeat response").await?;
+    resp.json()
         .await
-        .map_err(|e| format!("heartbeat decode: {e}"))?;
+        .map_err(|e| format!("heartbeat decode: {e}"))
+}
+
+async fn send_heartbeat_impl(server: &str, status: Option<String>) -> Result<(), String> {
+    send_heartbeat_with_auth(&current_auth_from_env(), server, None, status)
+        .await
+        .map(|_| ())
+}
+
+async fn load_agent_config(config: &Path) -> Result<AgentConfig, String> {
+    let raw = tokio::fs::read_to_string(config)
+        .await
+        .map_err(|e| format!("read config {}: {e}", config.display()))?;
+    toml::from_str(&raw).map_err(|e| format!("parse config {}: {e}", config.display()))
+}
+
+async fn run_agent_from_config_path(config: &Path) -> Result<(), String> {
+    let cfg = load_agent_config(config).await?;
+
+    apply_agent_env(&cfg);
+
+    eprintln!(
+        "agent: server={} device_name={} folder={} interval={}s concurrency={} heartbeat={}s",
+        cfg.server,
+        cfg.device_name,
+        cfg.folder.display(),
+        cfg.interval_secs,
+        cfg.concurrency,
+        cfg.heartbeat_secs
+    );
+
+    let heartbeat_enabled = cfg.heartbeat_secs > 0;
+    let mut last_snapshot_id: Option<String> = None;
+
+    if heartbeat_enabled {
+        let st = cfg
+            .heartbeat_status
+            .clone()
+            .or_else(|| Some("online".to_string()));
+        if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
+            eprintln!("heartbeat: {e}");
+        }
+    }
+
+    if cfg.interval_secs == 0 {
+        let snap = push_folder_impl(
+            cfg.server.clone(),
+            cfg.device_name.clone(),
+            cfg.folder.clone(),
+            cfg.note.clone(),
+            cfg.concurrency,
+            cfg.exclude.clone(),
+            cfg.ignore_file.clone(),
+        )
+        .await?;
+        eprintln!("agent: completed snapshot: {snap}");
+        if heartbeat_enabled {
+            let st = cfg
+                .heartbeat_status
+                .clone()
+                .or_else(|| Some(format!("snapshot {snap}")));
+            if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
+                eprintln!("heartbeat: {e}");
+            }
+        }
+        return Ok(());
+    }
+
+    let mut snap_iv = tokio::time::interval(Duration::from_secs(cfg.interval_secs));
+    snap_iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut hb_iv = tokio::time::interval(Duration::from_secs(cfg.heartbeat_secs.max(1)));
+    hb_iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!("agent: stopped");
+                break;
+            }
+
+            _ = hb_iv.tick(), if heartbeat_enabled => {
+                let st = cfg.heartbeat_status.clone()
+                    .or_else(|| last_snapshot_id.clone().map(|s| format!("last snapshot {s}")))
+                    .or_else(|| Some("online".to_string()));
+                if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
+                    eprintln!("heartbeat: {e}");
+                }
+            }
+
+            _ = snap_iv.tick() => {
+                let snap = tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {
+                        eprintln!("agent: stopped");
+                        break;
+                    }
+                    r = push_folder_impl(
+                        cfg.server.clone(),
+                        cfg.device_name.clone(),
+                        cfg.folder.clone(),
+                        cfg.note.clone(),
+                        cfg.concurrency,
+                        cfg.exclude.clone(),
+                        cfg.ignore_file.clone(),
+                    ) => r?
+                };
+
+                eprintln!("agent: completed snapshot: {snap}");
+                last_snapshot_id = Some(snap.clone());
+
+                if heartbeat_enabled {
+                    let st = cfg
+                        .heartbeat_status
+                        .clone()
+                        .or_else(|| Some(format!("snapshot {snap}")));
+                    if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
+                        eprintln!("heartbeat: {e}");
+                    }
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -778,6 +1423,565 @@ async fn push_folder_impl(
     println!("manifest uploaded: {snapshot_id}");
 
     Ok(snapshot_id)
+}
+
+#[derive(Debug, Serialize)]
+struct AgentInitSummary {
+    profile: String,
+    config_path: String,
+    state_path: String,
+    server: String,
+    device_name: String,
+    folder: String,
+    auth_mode: String,
+    device_registered: bool,
+    device_id: Option<String>,
+    kept_bootstrap_token: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentInstallSummary {
+    profile: String,
+    config_path: String,
+    service_manager: String,
+    service_name: String,
+    service_path: Option<String>,
+    dry_run: bool,
+    installed: bool,
+    enabled: Option<bool>,
+    running: Option<bool>,
+    note: Option<String>,
+    preview: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentServiceStatus {
+    manager: String,
+    name: String,
+    path: Option<String>,
+    installed: bool,
+    enabled: Option<bool>,
+    running: Option<bool>,
+    note: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentServerStatus {
+    ok: bool,
+    auth_mode: String,
+    device_id: Option<String>,
+    last_seen_unix: Option<i64>,
+    snapshot_count: Option<usize>,
+    latest_snapshot_id: Option<String>,
+    latest_snapshot_created_unix: Option<i64>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentStatusSummary {
+    profile: String,
+    config_path: String,
+    config_exists: bool,
+    state_path: String,
+    state_exists: bool,
+    server: Option<String>,
+    folder: Option<String>,
+    device_name: Option<String>,
+    auth_mode: Option<String>,
+    service: AgentServiceStatus,
+    server_status: Option<AgentServerStatus>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentUninstallSummary {
+    profile: String,
+    config_path: String,
+    service_manager: String,
+    service_name: String,
+    service_path: Option<String>,
+    removed_service: bool,
+    removed_config: bool,
+    note: Option<String>,
+}
+
+fn describe_probe_error(label: &str, probe: &ProcessProbe) -> String {
+    let detail = if !probe.stderr.is_empty() {
+        probe.stderr.clone()
+    } else if !probe.stdout.is_empty() {
+        probe.stdout.clone()
+    } else {
+        "command failed".to_string()
+    };
+    format!("{label}: {detail}")
+}
+
+async fn install_agent_service(
+    profile: &str,
+    dry_run: bool,
+) -> Result<AgentInstallSummary, String> {
+    validate_profile_name(profile)?;
+    let config_path = agent_profile_path(profile)?;
+    if !config_path.exists() {
+        return Err(format!("missing agent profile: {}", config_path.display()));
+    }
+
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    let platform = current_platform_name();
+    match platform {
+        "macos" => {
+            let plist_path = macos_launch_agent_path(profile)?;
+            let content = render_launchd_plist(profile, &exe, &config_path);
+            if dry_run {
+                return Ok(AgentInstallSummary {
+                    profile: profile.to_string(),
+                    config_path: config_path.display().to_string(),
+                    service_manager: "launchd".to_string(),
+                    service_name: launchd_label(profile),
+                    service_path: Some(plist_path.display().to_string()),
+                    dry_run: true,
+                    installed: false,
+                    enabled: None,
+                    running: None,
+                    note: Some("Dry run only; no files were written.".to_string()),
+                    preview: Some(content),
+                });
+            }
+            if let Some(parent) = plist_path.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+            }
+            tokio::fs::write(&plist_path, content)
+                .await
+                .map_err(|e| format!("write {}: {e}", plist_path.display()))?;
+            let _ = run_process(
+                "launchctl",
+                &["unload", plist_path.to_string_lossy().as_ref()],
+            );
+            let load = run_process(
+                "launchctl",
+                &["load", "-w", plist_path.to_string_lossy().as_ref()],
+            )?;
+            if !load.ok {
+                return Err(describe_probe_error("launchctl load", &load));
+            }
+            let listed = run_process("launchctl", &["list", launchd_label(profile).as_str()]).ok();
+            Ok(AgentInstallSummary {
+                profile: profile.to_string(),
+                config_path: config_path.display().to_string(),
+                service_manager: "launchd".to_string(),
+                service_name: launchd_label(profile),
+                service_path: Some(plist_path.display().to_string()),
+                dry_run: false,
+                installed: true,
+                enabled: Some(true),
+                running: listed.as_ref().map(|p| p.ok),
+                note: None,
+                preview: None,
+            })
+        }
+        "windows" => {
+            let task_name = windows_task_name(profile);
+            let command = format!(
+                "\"{}\" agent --config \"{}\"",
+                exe.display(),
+                config_path.display()
+            );
+            let preview = format!(
+                "schtasks /Create /F /SC ONLOGON /TN \"{}\" /TR {}",
+                task_name, command
+            );
+            if dry_run {
+                return Ok(AgentInstallSummary {
+                    profile: profile.to_string(),
+                    config_path: config_path.display().to_string(),
+                    service_manager: "task_scheduler".to_string(),
+                    service_name: task_name,
+                    service_path: None,
+                    dry_run: true,
+                    installed: false,
+                    enabled: None,
+                    running: None,
+                    note: Some("Dry run only; no scheduled task was created.".to_string()),
+                    preview: Some(preview),
+                });
+            }
+            let create = run_process(
+                "schtasks",
+                &[
+                    "/Create", "/F", "/SC", "ONLOGON", "/TN", &task_name, "/TR", &command,
+                ],
+            )?;
+            if !create.ok {
+                return Err(describe_probe_error("schtasks /Create", &create));
+            }
+            Ok(AgentInstallSummary {
+                profile: profile.to_string(),
+                config_path: config_path.display().to_string(),
+                service_manager: "task_scheduler".to_string(),
+                service_name: task_name,
+                service_path: None,
+                dry_run: false,
+                installed: true,
+                enabled: Some(true),
+                running: None,
+                note: Some("The task starts the long-running agent at user logon; backup cadence stays in the profile TOML.".to_string()),
+                preview: None,
+            })
+        }
+        _ => {
+            let unit_path = linux_systemd_user_unit_path(profile)?;
+            let unit_name = systemd_unit_name(profile);
+            let content = render_systemd_user_unit(profile, &exe, &config_path);
+            if dry_run {
+                return Ok(AgentInstallSummary {
+                    profile: profile.to_string(),
+                    config_path: config_path.display().to_string(),
+                    service_manager: "systemd-user".to_string(),
+                    service_name: unit_name,
+                    service_path: Some(unit_path.display().to_string()),
+                    dry_run: true,
+                    installed: false,
+                    enabled: None,
+                    running: None,
+                    note: Some("Dry run only; no unit file was written.".to_string()),
+                    preview: Some(content),
+                });
+            }
+            if let Some(parent) = unit_path.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+            }
+            tokio::fs::write(&unit_path, content)
+                .await
+                .map_err(|e| format!("write {}: {e}", unit_path.display()))?;
+            let reload = run_process("systemctl", &["--user", "daemon-reload"])?;
+            if !reload.ok {
+                return Err(describe_probe_error(
+                    "systemctl --user daemon-reload",
+                    &reload,
+                ));
+            }
+            let enable = run_process("systemctl", &["--user", "enable", "--now", &unit_name])?;
+            if !enable.ok {
+                return Err(describe_probe_error(
+                    "systemctl --user enable --now",
+                    &enable,
+                ));
+            }
+            let enabled = run_process("systemctl", &["--user", "is-enabled", &unit_name]).ok();
+            let active = run_process("systemctl", &["--user", "is-active", &unit_name]).ok();
+            Ok(AgentInstallSummary {
+                profile: profile.to_string(),
+                config_path: config_path.display().to_string(),
+                service_manager: "systemd-user".to_string(),
+                service_name: unit_name,
+                service_path: Some(unit_path.display().to_string()),
+                dry_run: false,
+                installed: true,
+                enabled: enabled.as_ref().map(|p| p.ok && p.stdout == "enabled"),
+                running: active.as_ref().map(|p| p.ok && p.stdout == "active"),
+                note: None,
+                preview: None,
+            })
+        }
+    }
+}
+
+async fn uninstall_agent_service(
+    profile: &str,
+    delete_config: bool,
+) -> Result<AgentUninstallSummary, String> {
+    validate_profile_name(profile)?;
+    let config_path = agent_profile_path(profile)?;
+    let platform = current_platform_name();
+    let mut note_parts: Vec<String> = Vec::new();
+    let mut removed_service = false;
+    let (service_manager, service_name, service_path) = match platform {
+        "macos" => {
+            let path = macos_launch_agent_path(profile)?;
+            let path_string = path.display().to_string();
+            let _ = run_process("launchctl", &["unload", path_string.as_str()]);
+            if path.exists() {
+                tokio::fs::remove_file(&path)
+                    .await
+                    .map_err(|e| format!("remove {}: {e}", path.display()))?;
+                removed_service = true;
+            } else {
+                note_parts.push("launchd plist not found".to_string());
+            }
+            (
+                "launchd".to_string(),
+                launchd_label(profile),
+                Some(path_string),
+            )
+        }
+        "windows" => {
+            let task_name = windows_task_name(profile);
+            match run_process("schtasks", &["/Delete", "/TN", &task_name, "/F"]) {
+                Ok(probe) if probe.ok => removed_service = true,
+                Ok(probe) => note_parts.push(describe_probe_error("schtasks /Delete", &probe)),
+                Err(e) => note_parts.push(e),
+            }
+            ("task_scheduler".to_string(), task_name, None)
+        }
+        _ => {
+            let unit_name = systemd_unit_name(profile);
+            let unit_path = linux_systemd_user_unit_path(profile)?;
+            let _ = run_process("systemctl", &["--user", "disable", "--now", &unit_name]);
+            if unit_path.exists() {
+                tokio::fs::remove_file(&unit_path)
+                    .await
+                    .map_err(|e| format!("remove {}: {e}", unit_path.display()))?;
+                removed_service = true;
+            } else {
+                note_parts.push("systemd unit not found".to_string());
+            }
+            let _ = run_process("systemctl", &["--user", "daemon-reload"]);
+            (
+                "systemd-user".to_string(),
+                unit_name,
+                Some(unit_path.display().to_string()),
+            )
+        }
+    };
+
+    let removed_config = if delete_config && config_path.exists() {
+        tokio::fs::remove_file(&config_path)
+            .await
+            .map_err(|e| format!("remove {}: {e}", config_path.display()))?;
+        true
+    } else {
+        false
+    };
+
+    Ok(AgentUninstallSummary {
+        profile: profile.to_string(),
+        config_path: config_path.display().to_string(),
+        service_manager,
+        service_name,
+        service_path,
+        removed_service,
+        removed_config,
+        note: if note_parts.is_empty() {
+            None
+        } else {
+            Some(note_parts.join("; "))
+        },
+    })
+}
+
+fn probe_agent_service(profile: &str) -> Result<AgentServiceStatus, String> {
+    validate_profile_name(profile)?;
+    match current_platform_name() {
+        "macos" => {
+            let plist_path = macos_launch_agent_path(profile)?;
+            let installed = plist_path.exists();
+            let mut note = None;
+            let running = if installed {
+                match run_process("launchctl", &["list", launchd_label(profile).as_str()]) {
+                    Ok(probe) => {
+                        if !probe.ok && !probe.stderr.is_empty() {
+                            note = Some(probe.stderr);
+                        }
+                        Some(probe.ok)
+                    }
+                    Err(e) => {
+                        note = Some(e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            Ok(AgentServiceStatus {
+                manager: "launchd".to_string(),
+                name: launchd_label(profile),
+                path: Some(plist_path.display().to_string()),
+                installed,
+                enabled: Some(installed),
+                running,
+                note,
+            })
+        }
+        "windows" => {
+            let task_name = windows_task_name(profile);
+            let query = run_process(
+                "schtasks",
+                &["/Query", "/TN", &task_name, "/FO", "LIST", "/V"],
+            );
+            let (installed, note) = match query {
+                Ok(probe) if probe.ok => (true, None),
+                Ok(probe) => (false, Some(describe_probe_error("schtasks /Query", &probe))),
+                Err(e) => (false, Some(e)),
+            };
+            Ok(AgentServiceStatus {
+                manager: "task_scheduler".to_string(),
+                name: task_name,
+                path: None,
+                installed,
+                enabled: Some(installed),
+                running: None,
+                note,
+            })
+        }
+        _ => {
+            let unit_name = systemd_unit_name(profile);
+            let unit_path = linux_systemd_user_unit_path(profile)?;
+            let installed = unit_path.exists();
+            let mut note = None;
+            let enabled = if installed {
+                match run_process("systemctl", &["--user", "is-enabled", &unit_name]) {
+                    Ok(probe) => {
+                        if !probe.ok && note.is_none() {
+                            note =
+                                Some(describe_probe_error("systemctl --user is-enabled", &probe));
+                        }
+                        Some(probe.ok && probe.stdout == "enabled")
+                    }
+                    Err(e) => {
+                        note = Some(e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            let running = if installed {
+                match run_process("systemctl", &["--user", "is-active", &unit_name]) {
+                    Ok(probe) => {
+                        if !probe.ok && note.is_none() && !probe.stderr.is_empty() {
+                            note = Some(probe.stderr.clone());
+                        }
+                        Some(probe.ok && probe.stdout == "active")
+                    }
+                    Err(e) => {
+                        if note.is_none() {
+                            note = Some(e);
+                        }
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            Ok(AgentServiceStatus {
+                manager: "systemd-user".to_string(),
+                name: unit_name,
+                path: Some(unit_path.display().to_string()),
+                installed,
+                enabled,
+                running,
+                note,
+            })
+        }
+    }
+}
+
+async fn probe_agent_status(profile: &str) -> Result<AgentStatusSummary, String> {
+    validate_profile_name(profile)?;
+    let config_path = agent_profile_path(profile)?;
+    let state_path = agent_state_path(profile)?;
+    let config_exists = config_path.exists();
+    let state_exists = state_path.exists();
+    let service = probe_agent_service(profile)?;
+
+    if !config_exists {
+        return Ok(AgentStatusSummary {
+            profile: profile.to_string(),
+            config_path: config_path.display().to_string(),
+            config_exists,
+            state_path: state_path.display().to_string(),
+            state_exists,
+            server: None,
+            folder: None,
+            device_name: None,
+            auth_mode: None,
+            service,
+            server_status: None,
+        });
+    }
+
+    let cfg = load_agent_config(&config_path).await?;
+    let auth = auth_from_agent_config(&cfg);
+    let server_status = match build_client_with_auth(&auth) {
+        Ok(client) => {
+            let devices = fetch_devices(&client, &cfg.server).await;
+            let snapshots = fetch_snapshots(&client, &cfg.server).await;
+            match (devices, snapshots) {
+                (Ok(devices), Ok(snapshots)) => {
+                    let matched_device = auth
+                        .device_id
+                        .as_ref()
+                        .and_then(|id| devices.iter().find(|d| d.id == *id))
+                        .or_else(|| devices.iter().find(|d| d.name == cfg.device_name));
+                    let matching_snapshots: Vec<&SnapshotMeta> = snapshots
+                        .iter()
+                        .filter(|s| {
+                            if let Some(device_id) = auth.device_id.as_ref() {
+                                s.device_id.as_deref() == Some(device_id.as_str())
+                                    || s.device_name == cfg.device_name
+                            } else {
+                                s.device_name == cfg.device_name
+                            }
+                        })
+                        .collect();
+                    let latest = matching_snapshots
+                        .iter()
+                        .max_by_key(|s| s.created_unix)
+                        .copied();
+                    Some(AgentServerStatus {
+                        ok: true,
+                        auth_mode: auth_mode_label(&auth).to_string(),
+                        device_id: auth
+                            .device_id
+                            .clone()
+                            .or_else(|| matched_device.map(|d| d.id.clone())),
+                        last_seen_unix: matched_device.and_then(|d| d.last_seen_unix),
+                        snapshot_count: Some(matching_snapshots.len()),
+                        latest_snapshot_id: latest.map(|s| s.snapshot_id.clone()),
+                        latest_snapshot_created_unix: latest.map(|s| s.created_unix),
+                        error: None,
+                    })
+                }
+                (Err(e), _) | (_, Err(e)) => Some(AgentServerStatus {
+                    ok: false,
+                    auth_mode: auth_mode_label(&auth).to_string(),
+                    device_id: auth.device_id.clone(),
+                    last_seen_unix: None,
+                    snapshot_count: None,
+                    latest_snapshot_id: None,
+                    latest_snapshot_created_unix: None,
+                    error: Some(e),
+                }),
+            }
+        }
+        Err(e) => Some(AgentServerStatus {
+            ok: false,
+            auth_mode: auth_mode_label(&auth).to_string(),
+            device_id: auth.device_id.clone(),
+            last_seen_unix: None,
+            snapshot_count: None,
+            latest_snapshot_id: None,
+            latest_snapshot_created_unix: None,
+            error: Some(e),
+        }),
+    };
+
+    Ok(AgentStatusSummary {
+        profile: profile.to_string(),
+        config_path: config_path.display().to_string(),
+        config_exists,
+        state_path: state_path.display().to_string(),
+        state_exists,
+        server: Some(cfg.server.clone()),
+        folder: Some(cfg.folder.display().to_string()),
+        device_name: Some(cfg.device_name.clone()),
+        auth_mode: Some(auth_mode_label(&auth).to_string()),
+        service,
+        server_status,
+    })
 }
 
 #[tokio::main]
@@ -1138,159 +2342,232 @@ async fn main() -> Result<(), String> {
             );
         }
 
+        Command::Device { command } => match command {
+            DeviceCommand::Register {
+                server,
+                device_name,
+                os,
+                token,
+            } => {
+                let env_auth = current_auth_from_env();
+                let auth = AuthConfig {
+                    token: trim_nonempty(token).or(env_auth.token),
+                    device_id: None,
+                    device_token: None,
+                };
+                let client = build_client_with_auth(&auth)?;
+                let resp = register_device_impl(
+                    &client,
+                    &server,
+                    &device_name,
+                    os.as_deref().unwrap_or(current_platform_name()),
+                )
+                .await?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?
+                );
+            }
+            DeviceCommand::Heartbeat {
+                server,
+                device_id,
+                device_token,
+                status,
+            } => {
+                let mut auth = current_auth_from_env();
+                auth.device_token = trim_nonempty(device_token).or(auth.device_token);
+                let resp = send_heartbeat_with_auth(&auth, &server, device_id, status).await?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?
+                );
+            }
+        },
+
         Command::DeviceHeartbeat {
             server,
             device_id,
             status,
         } => {
-            let client = build_client()?;
-            let dev_id = device_id
-                .or_else(|| std::env::var("FILEDOCK_DEVICE_ID").ok())
-                .unwrap_or_default();
-            if dev_id.trim().is_empty() {
-                return Err("device_id required (or set FILEDOCK_DEVICE_ID)".to_string());
-            }
-
-            let url = format!(
-                "{}/v1/devices/{}/heartbeat",
-                server.trim_end_matches('/'),
-                dev_id.trim()
-            );
-            let req = DeviceHeartbeatRequest {
-                agent_version: env!("CARGO_PKG_VERSION").to_string(),
-                status,
-            };
-            let resp: DeviceHeartbeatResponse = client
-                .post(url)
-                .json(&req)
-                .send()
-                .await
-                .map_err(|e| format!("heartbeat request: {e}"))?
-                .error_for_status()
-                .map_err(|e| format!("heartbeat response: {e}"))?
-                .json()
-                .await
-                .map_err(|e| format!("heartbeat decode: {e}"))?;
+            let resp =
+                send_heartbeat_with_auth(&current_auth_from_env(), &server, device_id, status)
+                    .await?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?
             );
         }
 
-        Command::Agent { config } => {
-            let raw = tokio::fs::read_to_string(&config)
-                .await
-                .map_err(|e| format!("read config {}: {e}", config.display()))?;
-            let cfg: AgentConfig = toml::from_str(&raw)
-                .map_err(|e| format!("parse config {}: {e}", config.display()))?;
-
-            apply_agent_env(&cfg);
-
-            eprintln!(
-                "agent: server={} device_name={} folder={} interval={}s concurrency={} heartbeat={}s",
-                cfg.server,
-                cfg.device_name,
-                cfg.folder.display(),
-                cfg.interval_secs,
-                cfg.concurrency,
-                cfg.heartbeat_secs
-            );
-
-            let heartbeat_enabled = cfg.heartbeat_secs > 0;
-            let mut last_snapshot_id: Option<String> = None;
-
-            // Best-effort initial heartbeat (independent of snapshot loop).
-            if heartbeat_enabled {
-                let st = cfg
-                    .heartbeat_status
-                    .clone()
-                    .or_else(|| Some("online".to_string()));
-                if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
-                    eprintln!("heartbeat: {e}");
-                }
+        Command::Agent { config, command } => {
+            if config.is_some() && command.is_some() {
+                return Err(
+                    "use either `filedock agent --config ...` or `filedock agent <subcommand>`"
+                        .to_string(),
+                );
             }
 
-            // Single-run mode.
-            if cfg.interval_secs == 0 {
-                let snap = push_folder_impl(
-                    cfg.server.clone(),
-                    cfg.device_name.clone(),
-                    cfg.folder.clone(),
-                    cfg.note.clone(),
-                    cfg.concurrency,
-                    cfg.exclude.clone(),
-                    cfg.ignore_file.clone(),
-                )
-                .await?;
-                eprintln!("agent: completed snapshot: {snap}");
-                if heartbeat_enabled {
-                    let st = cfg
-                        .heartbeat_status
-                        .clone()
-                        .or_else(|| Some(format!("snapshot {snap}")));
-                    if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
-                        eprintln!("heartbeat: {e}");
-                    }
+            match command {
+                Some(AgentCommand::Run { config }) => {
+                    run_agent_from_config_path(&config).await?;
                 }
+                Some(AgentCommand::Init {
+                    profile,
+                    folder,
+                    server,
+                    device_name,
+                    note,
+                    interval_secs,
+                    concurrency,
+                    exclude,
+                    ignore_file,
+                    heartbeat_secs,
+                    heartbeat_status,
+                    import_json,
+                    token,
+                    device_id,
+                    device_token,
+                    os,
+                    no_register,
+                    keep_bootstrap_token,
+                }) => {
+                    validate_profile_name(&profile)?;
+                    let imported = if let Some(raw) = import_json {
+                        Some(load_server_config_input(&raw).await?)
+                    } else {
+                        None
+                    };
 
-                return Ok(());
-            }
+                    let server = trim_nonempty(server)
+                        .or_else(|| imported.as_ref().map(|cfg| cfg.server_base_url.clone()))
+                        .ok_or_else(|| {
+                            "--server required (or provide --import-json)".to_string()
+                        })?;
+                    let server = server.trim().trim_end_matches('/').to_string();
+                    let folder = folder
+                        .canonicalize()
+                        .map_err(|e| format!("canonicalize folder: {e}"))?;
+                    let device_name = trim_nonempty(device_name)
+                        .or_else(default_device_name)
+                        .unwrap_or_else(|| profile.clone());
 
-            // Repeating mode:
-            // - snapshots every `interval_secs`
-            // - heartbeats every `heartbeat_secs` (independent)
-            let mut snap_iv = tokio::time::interval(Duration::from_secs(cfg.interval_secs));
-            snap_iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            let mut hb_iv = tokio::time::interval(Duration::from_secs(cfg.heartbeat_secs.max(1)));
-            hb_iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                    let mut auth = AuthConfig {
+                        token: trim_nonempty(token)
+                            .or_else(|| imported.as_ref().and_then(|cfg| cfg.token.clone())),
+                        device_id: trim_nonempty(device_id)
+                            .or_else(|| imported.as_ref().and_then(|cfg| cfg.device_id.clone())),
+                        device_token: trim_nonempty(device_token)
+                            .or_else(|| imported.as_ref().and_then(|cfg| cfg.device_token.clone())),
+                    };
 
-            loop {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {
-                        eprintln!("agent: stopped");
-                        break;
+                    if auth.device_id.is_some() ^ auth.device_token.is_some() {
+                        return Err(
+                            "device_id and device_token must be provided together".to_string()
+                        );
                     }
 
-                    _ = hb_iv.tick(), if heartbeat_enabled => {
-                        let st = cfg.heartbeat_status.clone()
-                            .or_else(|| last_snapshot_id.clone().map(|s| format!("last snapshot {s}")))
-                            .or_else(|| Some("online".to_string()));
-                        if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
-                            eprintln!("heartbeat: {e}");
-                        }
-                    }
-
-                    _ = snap_iv.tick() => {
-                        // Allow Ctrl-C to stop starting a new snapshot.
-                        let snap = tokio::select! {
-                            _ = tokio::signal::ctrl_c() => {
-                                eprintln!("agent: stopped");
-                                break;
-                            }
-                            r = push_folder_impl(
-                                cfg.server.clone(),
-                                cfg.device_name.clone(),
-                                cfg.folder.clone(),
-                                cfg.note.clone(),
-                                cfg.concurrency,
-                                cfg.exclude.clone(),
-                                cfg.ignore_file.clone(),
-                            ) => r?
+                    let mut device_registered = false;
+                    if auth.device_id.is_none() && auth.device_token.is_none() && !no_register {
+                        let register_auth = AuthConfig {
+                            token: auth.token.clone(),
+                            device_id: None,
+                            device_token: None,
                         };
-
-                        eprintln!("agent: completed snapshot: {snap}");
-                        last_snapshot_id = Some(snap.clone());
-
-                        if heartbeat_enabled {
-                            let st = cfg
-                                .heartbeat_status
-                                .clone()
-                                .or_else(|| Some(format!("snapshot {snap}")));
-                            if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
-                                eprintln!("heartbeat: {e}");
-                            }
-                        }
+                        let client = build_client_with_auth(&register_auth)?;
+                        let resp = register_device_impl(
+                            &client,
+                            &server,
+                            &device_name,
+                            os.as_deref().unwrap_or(current_platform_name()),
+                        )
+                        .await?;
+                        auth.device_id = Some(resp.device_id);
+                        auth.device_token = Some(resp.device_token);
+                        device_registered = true;
                     }
+
+                    if auth.device_id.is_some()
+                        && auth.device_token.is_some()
+                        && !keep_bootstrap_token
+                    {
+                        auth.token = None;
+                    }
+
+                    let cfg = AgentConfig {
+                        server: server.clone(),
+                        device_name: device_name.clone(),
+                        folder: folder.clone(),
+                        note,
+                        interval_secs,
+                        concurrency,
+                        exclude,
+                        ignore_file,
+                        token: auth.token.clone(),
+                        device_id: auth.device_id.clone(),
+                        device_token: auth.device_token.clone(),
+                        heartbeat_secs,
+                        heartbeat_status,
+                    };
+
+                    let config_path = agent_profile_path(&profile)?;
+                    if let Some(parent) = config_path.parent() {
+                        tokio::fs::create_dir_all(parent)
+                            .await
+                            .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+                    }
+                    let rendered = toml::to_string_pretty(&cfg)
+                        .map_err(|e| format!("render agent config: {e}"))?;
+                    tokio::fs::write(&config_path, rendered)
+                        .await
+                        .map_err(|e| format!("write {}: {e}", config_path.display()))?;
+
+                    let state_path = agent_state_path(&profile)?;
+                    let summary = AgentInitSummary {
+                        profile,
+                        config_path: config_path.display().to_string(),
+                        state_path: state_path.display().to_string(),
+                        server,
+                        device_name,
+                        folder: folder.display().to_string(),
+                        auth_mode: auth_mode_label(&auth).to_string(),
+                        device_registered,
+                        device_id: auth.device_id,
+                        kept_bootstrap_token: keep_bootstrap_token && cfg.token.is_some(),
+                    };
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?
+                    );
+                }
+                Some(AgentCommand::Install { profile, dry_run }) => {
+                    let summary = install_agent_service(&profile, dry_run).await?;
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?
+                    );
+                }
+                Some(AgentCommand::Status { profile }) => {
+                    let summary = probe_agent_status(&profile).await?;
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?
+                    );
+                }
+                Some(AgentCommand::Uninstall {
+                    profile,
+                    delete_config,
+                }) => {
+                    let summary = uninstall_agent_service(&profile, delete_config).await?;
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?
+                    );
+                }
+                None => {
+                    let config = config.ok_or_else(|| {
+                        "use `filedock agent --config <path>` or `filedock agent <subcommand>`"
+                            .to_string()
+                    })?;
+                    run_agent_from_config_path(&config).await?;
                 }
             }
         }
@@ -2035,11 +3312,21 @@ fn chunk_file(data: &[u8]) -> Vec<ChunkRef> {
 
 #[cfg(test)]
 mod tests {
-    use super::summarize_http_body;
+    use super::{
+        default_config_root_from_env, render_systemd_user_unit, summarize_http_body,
+        validate_profile_name,
+    };
+    use std::path::Path;
 
     #[test]
     fn summarize_http_body_compacts_whitespace() {
-        assert_eq!(summarize_http_body("  hello\n\tworld  "), "hello world");
+        assert_eq!(
+            summarize_http_body(
+                "  hello
+	world  "
+            ),
+            "hello world"
+        );
     }
 
     #[test]
@@ -2048,5 +3335,54 @@ mod tests {
         let output = summarize_http_body(&input);
         assert_eq!(output.chars().count(), 241);
         assert!(output.ends_with('…'));
+    }
+
+    #[test]
+    fn validate_profile_name_rejects_path_separators() {
+        assert!(validate_profile_name("good-name_01").is_ok());
+        assert!(validate_profile_name("bad/name").is_err());
+    }
+
+    #[test]
+    fn linux_config_root_uses_xdg_config_home() {
+        let root = default_config_root_from_env(
+            "linux",
+            Some("/home/nita".to_string()),
+            Some("/tmp/xdg-config".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(root, Path::new("/tmp/xdg-config/filedock"));
+    }
+
+    #[test]
+    fn windows_config_root_uses_appdata() {
+        let root = default_config_root_from_env(
+            "windows",
+            None,
+            None,
+            Some(r"C:\Users\Nita\AppData\Roaming".to_string()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            root,
+            Path::new(r"C:\Users\Nita\AppData\Roaming").join("FileDock")
+        );
+    }
+
+    #[test]
+    fn render_systemd_unit_mentions_profile_and_config() {
+        let unit = render_systemd_user_unit(
+            "laptop",
+            Path::new("/usr/local/bin/filedock"),
+            Path::new("/home/nita/.config/filedock/agents/laptop.toml"),
+        );
+        assert!(unit.contains("FileDock agent (laptop)"));
+        assert!(unit.contains(
+            "ExecStart=/usr/local/bin/filedock agent --config /home/nita/.config/filedock/agents/laptop.toml"
+        ));
+        assert!(unit.contains("WantedBy=default.target"));
     }
 }

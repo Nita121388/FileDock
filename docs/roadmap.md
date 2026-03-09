@@ -10,15 +10,15 @@ Implemented (see `progress/` for exact commits):
 - TUI: snapshot browser (read-only).
 - Desktop: tabbed workspaces, split panes with draggable docking + pane tabs, live snapshot browsing, transfer queue, cross-server copy (file/folder), upload local file, concurrency/bandwidth limits, resume-friendly copy, service health indicator, saved node presets, one-click local backup, icon+tooltip actions, resizable browser columns, dedicated add-terminal action, terminal presets / quick-launch flows.
 - Scripts/docs: `scripts/` helpers, quickstart, deploy notes, smoke tests, CI checks, acceptance checklist.
+- Onboarding baseline: server config export (JSON + QR), CLI export helpers, desktop config import, and platform agent templates.
 
 ## Next (near-term)
 
-- Agent/daemon: run on devices, schedule backups, store credentials/config locally.
+- Guided agent onboarding: register device, save local agent profiles, install/start background services, and verify status from one flow.
 - Snapshot retention policies: keep last N / keep daily/weekly, prune old snapshots safely.
 - Encryption at rest (optional): per-device key, client-side encryption before upload.
 - Better ignore rules: `.gitignore`-style files, default excludes (node_modules, .git, etc).
-- Restore UX: desktop \"restore folder\" workflow (not only per-file download).
-- Onboarding config export: copyable JSON + QR code + CLI export for server configs.
+- Restore UX: desktop "restore folder" workflow (not only per-file download).
 
 ## Later
 

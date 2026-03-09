@@ -1,8 +1,8 @@
 # Device Agent / Scheduling
 
-FileDock's Rust CLI (`filedock`) can run as a simple "agent" by using `push-folder-loop`.
+FileDock's Rust CLI (`filedock`) can run as a simple config-file agent and now also exposes CLI helpers for device registration, profile creation, service install, and status checks.
 
-This document shows practical ways to schedule it on common platforms.
+This document shows the current agent workflow and the lower-level scheduling templates behind it.
 
 ## Config-file agent mode (recommended)
 
@@ -13,6 +13,41 @@ filedock agent --config ./agent.toml
 ```
 
 Example config: `deploy/agent-config.example.toml`.
+
+## Guided CLI workflow
+
+Create or update a named profile in the platform-default config directory:
+
+```bash
+filedock agent init \
+  --profile laptop \
+  --server http://127.0.0.1:8787 \
+  --folder /home/you/Documents
+```
+
+Notes:
+- `agent init` auto-registers a device when it can and stores `device_id` / `device_token` in the saved profile.
+- If you bootstrap from exported server JSON, you can pass it directly with `--import-json '<json>'` or point `--import-json` at a file path.
+- By default, the bootstrap server token is dropped once device credentials exist; use `--keep-bootstrap-token` only for advanced/manual cases.
+
+Preview or install the current-platform background service for that profile:
+
+```bash
+filedock agent install --profile laptop --dry-run
+filedock agent install --profile laptop
+```
+
+Check local/service/server-visible status:
+
+```bash
+filedock agent status --profile laptop
+```
+
+If you only want device credentials without writing a profile first:
+
+```bash
+filedock device register --server http://127.0.0.1:8787 --device-name laptop
+```
 
 ## CLI mode (works everywhere)
 
@@ -56,7 +91,7 @@ Devices can send a heartbeat to update their "last seen" timestamp:
 ```bash
 export FILEDOCK_DEVICE_ID="..."
 export FILEDOCK_DEVICE_TOKEN="..."
-filedock device-heartbeat --server http://127.0.0.1:8787 --status "online"
+filedock device heartbeat --server http://127.0.0.1:8787 --status "online"
 ```
 
 In config-file agent mode (`filedock agent --config ...`), heartbeats run on their own timer (`heartbeat_secs`),
@@ -72,7 +107,8 @@ You can also run the config-file agent via systemd using:
 - `deploy/systemd/filedock-agent@.service`
 
 Recommended pattern:
-- Create `/etc/filedock/<name>.env` to hold env vars (tokens).
+- For day-to-day usage, prefer `filedock agent init` + `filedock agent install`; on Linux this writes a user-level systemd unit for the saved profile.
+- Create `/etc/filedock/<name>.env` only if you are managing the low-level templates manually.
 - If you use `filedock-backup@.timer`, the schedule is owned by systemd and `--interval-secs` should be `0`.
 - If you use `filedock-agent@.service`, the schedule is owned by `agent.toml` (`interval_secs`).
 

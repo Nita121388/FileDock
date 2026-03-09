@@ -29,15 +29,37 @@ cargo run -p filedock -- push-folder \
 
 ### 2b) Run as an agent (recommended)
 
-Copy the example config:
+Create a named agent profile in the default config directory:
+
+```bash
+cargo run -p filedock -- agent init \
+  --profile laptop \
+  --server http://127.0.0.1:8787 \
+  --folder /home/you/Documents
+```
+
+What this does:
+- saves `~/.config/filedock/agents/laptop.toml` on Linux (platform-default location on macOS/Windows)
+- auto-registers a device when the server allows it
+- stores device credentials in the profile so the long-running agent does not need raw env vars
+
+Preview the generated service wiring, then install it:
+
+```bash
+cargo run -p filedock -- agent install --profile laptop --dry-run
+cargo run -p filedock -- agent install --profile laptop
+```
+
+Check status:
+
+```bash
+cargo run -p filedock -- agent status --profile laptop
+```
+
+If you want the older/manual flow, you can still run directly from a TOML file:
 
 ```bash
 cp deploy/agent-config.example.toml ./agent.toml
-```
-
-Edit `agent.toml` (folder path, device name, auth), then run:
-
-```bash
 cargo run -p filedock -- agent --config ./agent.toml
 ```
 
