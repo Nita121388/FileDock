@@ -60,6 +60,7 @@ export default function AgentOnboardingModal(props: Props) {
   const [heartbeatMinutes, setHeartbeatMinutes] = useState(DEFAULT_HEARTBEAT_MINUTES);
   const [installMode, setInstallMode] = useState<AgentInstallMode>("daemon");
   const [useDefaultExcludes, setUseDefaultExcludes] = useState(true);
+  const [respectGitignore, setRespectGitignore] = useState(false);
   const [keepBootstrapToken, setKeepBootstrapToken] = useState(false);
   const [deleteConfigOnUninstall, setDeleteConfigOnUninstall] = useState(false);
   const [profileTouched, setProfileTouched] = useState(false);
@@ -82,6 +83,7 @@ export default function AgentOnboardingModal(props: Props) {
     setHeartbeatMinutes(DEFAULT_HEARTBEAT_MINUTES);
     setInstallMode("daemon");
     setUseDefaultExcludes(true);
+    setRespectGitignore(false);
     setKeepBootstrapToken(false);
     setDeleteConfigOnUninstall(false);
     setProfileTouched(false);
@@ -201,6 +203,7 @@ export default function AgentOnboardingModal(props: Props) {
         heartbeat_secs: minutesToSeconds(heartbeatMinutes, 5, 0),
         keep_bootstrap_token: keepBootstrapToken,
         no_default_excludes: useDefaultExcludes ? undefined : true,
+        respect_gitignore: respectGitignore ? true : undefined,
         token: bootstrap.token?.trim() || undefined,
         device_id: bootstrap.deviceId?.trim() || undefined,
         device_token: bootstrap.deviceToken?.trim() || undefined
@@ -474,6 +477,17 @@ export default function AgentOnboardingModal(props: Props) {
               <label className="agent-checkbox wide">
                 <input
                   type="checkbox"
+                  checked={respectGitignore}
+                  onChange={(e) => setRespectGitignore(e.target.checked)}
+                />
+                <span>
+                  <strong>{t("app.agentSetup.respectGitignoreTitle")}</strong>
+                  <span>{t("app.agentSetup.respectGitignoreDesc")}</span>
+                </span>
+              </label>
+              <label className="agent-checkbox wide">
+                <input
+                  type="checkbox"
                   checked={keepBootstrapToken}
                   onChange={(e) => setKeepBootstrapToken(e.target.checked)}
                 />
@@ -555,6 +569,10 @@ export default function AgentOnboardingModal(props: Props) {
                     <SummaryRow
                       label={t("app.agentSetup.resultIgnoreFile")}
                       value={initSummary.ignore_file || t("app.agentSetup.notAvailable")}
+                    />
+                    <SummaryRow
+                      label={t("app.agentSetup.resultRespectGitignore")}
+                      value={initSummary.respect_gitignore ? t("common.yes") : t("common.no")}
                     />
                     <SummaryRow
                       label={t("app.agentSetup.resultExcludeCount")}

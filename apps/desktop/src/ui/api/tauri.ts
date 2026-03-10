@@ -241,6 +241,7 @@ export type AgentInitRequest = {
   heartbeat_secs?: number;
   keep_bootstrap_token?: boolean;
   no_default_excludes?: boolean;
+  respect_gitignore?: boolean;
   token?: string;
   device_id?: string;
   device_token?: string;
@@ -255,6 +256,7 @@ export type AgentInitSummary = {
   folder: string;
   exclude?: string[];
   ignore_file?: string | null;
+  respect_gitignore?: boolean;
   default_excludes_applied?: boolean;
   auth_mode: string;
   device_registered: boolean;

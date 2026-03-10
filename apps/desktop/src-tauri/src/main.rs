@@ -180,6 +180,8 @@ struct AgentInitRequest {
     #[serde(default)]
     no_default_excludes: bool,
     #[serde(default)]
+    respect_gitignore: bool,
+    #[serde(default)]
     token: Option<String>,
     #[serde(default)]
     device_id: Option<String>,
@@ -222,6 +224,8 @@ struct AgentInitSummary {
     exclude: Vec<String>,
     #[serde(default)]
     ignore_file: Option<String>,
+    #[serde(default)]
+    respect_gitignore: bool,
     #[serde(default)]
     default_excludes_applied: bool,
     auth_mode: String,
@@ -2526,6 +2530,9 @@ async fn agent_init(req: AgentInitRequest) -> Result<AgentInitSummary, String> {
     }
     if req.no_default_excludes {
         args.push("--no-default-excludes".to_string());
+    }
+    if req.respect_gitignore {
+        args.push("--respect-gitignore".to_string());
     }
 
     run_filedock_json(args).await
