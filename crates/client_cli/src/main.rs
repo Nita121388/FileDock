@@ -8,6 +8,7 @@ use filedock_protocol::{
 };
 use futures_util::stream::{self, StreamExt};
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -590,6 +591,10 @@ enum Command {
         /// folder is used when present.
         #[arg(long)]
         ignore_file: Option<PathBuf>,
+
+        /// If set, also respect `.gitignore` (gitignore-style) patterns in the folder root.
+        #[arg(long)]
+        respect_gitignore: bool,
     },
 
     /// Periodically upload a folder as snapshots (simple scheduler).
@@ -623,6 +628,10 @@ enum Command {
         /// folder is used when present.
         #[arg(long)]
         ignore_file: Option<PathBuf>,
+
+        /// If set, also respect `.gitignore` (gitignore-style) patterns in the folder root.
+        #[arg(long)]
+        respect_gitignore: bool,
 
         /// Seconds between runs. Use 0 to run once.
         #[arg(long, default_value_t = 900)]
@@ -820,6 +829,10 @@ enum Command {
         #[arg(long)]
         ignore_file: Option<PathBuf>,
 
+        /// If set, also respect `.gitignore` (gitignore-style) patterns in the folder root.
+        #[arg(long)]
+        respect_gitignore: bool,
+
         /// If set, include ignored paths in the JSON output.
         #[arg(long)]
         include_ignored: bool,
@@ -960,6 +973,10 @@ enum AgentCommand {
         #[arg(long)]
         ignore_file: Option<PathBuf>,
 
+        /// If set, also respect `.gitignore` (gitignore-style) patterns in the folder root.
+        #[arg(long)]
+        respect_gitignore: bool,
+
         /// If set, do not seed the default exclude list (e.g. `.git`, `node_modules`) when no ignore rules are provided.
         #[arg(long)]
         no_default_excludes: bool,
@@ -1088,6 +1105,10 @@ struct AgentConfig {
     /// Optional ignore file (one glob per line). If omitted, `.filedockignore` in the folder root is used if present.
     #[serde(default)]
     ignore_file: Option<PathBuf>,
+
+    /// If true, also respect `.gitignore` (gitignore-style) patterns in the folder root.
+    #[serde(default)]
+    respect_gitignore: bool,
 
     /// Optional token auth (maps to FILEDOCK_TOKEN).
     #[serde(default)]
@@ -1258,6 +1279,7 @@ async fn run_agent_once_from_config_path(config: &Path) -> Result<(), String> {
         cfg.concurrency,
         cfg.exclude.clone(),
         cfg.ignore_file.clone(),
+        cfg.respect_gitignore,
     )
     .await?;
 
@@ -1314,6 +1336,7 @@ async fn run_agent_from_config_path(config: &Path) -> Result<(), String> {
             cfg.concurrency,
             cfg.exclude.clone(),
             cfg.ignore_file.clone(),
+            cfg.respect_gitignore,
         )
         .await?;
         eprintln!("agent: completed snapshot: {snap}");
@@ -1364,6 +1387,7 @@ async fn run_agent_from_config_path(config: &Path) -> Result<(), String> {
                         cfg.concurrency,
                         cfg.exclude.clone(),
                         cfg.ignore_file.clone(),
+                        cfg.respect_gitignore,
                     ) => r?
                 };
 
@@ -1394,6 +1418,7 @@ async fn push_folder_impl(
     concurrency: usize,
     exclude: Vec<String>,
     ignore_file: Option<PathBuf>,
+    respect_gitignore: bool,
 ) -> Result<String, String> {
     let client = build_client()?;
 
@@ -1405,6 +1430,7 @@ async fn push_folder_impl(
     exclude_patterns.extend(load_ignore_patterns(&root, ignore_file)?);
     exclude_patterns.extend(exclude);
     let exclude_set = build_excludes(&exclude_patterns)?;
+    let gitignore = load_root_gitignore(&root, respect_gitignore)?;
 
     // Create snapshot id
     let create_url = format!("{}/v1/snapshots", server.trim_end_matches('/'));
@@ -1468,12 +1494,9 @@ async fn push_folder_impl(
         }
 
         if ft.is_dir() {
-            // Prune ignored directories so we don't spend time walking huge trees that won't be uploaded
-            // anyway (node_modules/.git/etc). Probe a synthetic child so patterns like
-            // `**/node_modules/**` work as expected.
-            let probe = format!("{rel_str}/_");
-            let ignore_dir = exclude_set.is_match(&rel_str) || exclude_set.is_match(&probe);
-            if ignore_dir {
+            // Prune ignored directories so we don't spend time walking huge trees that won't be
+            // uploaded anyway (node_modules/.git/etc).
+            if is_ignored_path(&exclude_set, gitignore.as_ref(), rel, &rel_str, true) {
                 it.skip_current_dir();
             }
             continue;
@@ -1483,7 +1506,7 @@ async fn push_folder_impl(
             continue;
         }
 
-        if exclude_set.is_match(&rel_str) {
+        if is_ignored_path(&exclude_set, gitignore.as_ref(), rel, &rel_str, false) {
             continue;
         }
 
@@ -1658,6 +1681,7 @@ struct AgentInitSummary {
     folder: String,
     exclude: Vec<String>,
     ignore_file: Option<String>,
+    respect_gitignore: bool,
     default_excludes_applied: bool,
     auth_mode: String,
     device_registered: bool,
@@ -2594,6 +2618,7 @@ async fn main() -> Result<(), String> {
             concurrency,
             exclude,
             ignore_file,
+            respect_gitignore,
         } => {
             let _ = push_folder_impl(
                 server,
@@ -2603,6 +2628,7 @@ async fn main() -> Result<(), String> {
                 concurrency,
                 exclude,
                 ignore_file,
+                respect_gitignore,
             )
             .await?;
         }
@@ -2615,6 +2641,7 @@ async fn main() -> Result<(), String> {
             concurrency,
             exclude,
             ignore_file,
+            respect_gitignore,
             interval_secs,
         } => loop {
             let snap = push_folder_impl(
@@ -2625,6 +2652,7 @@ async fn main() -> Result<(), String> {
                 concurrency,
                 exclude.clone(),
                 ignore_file.clone(),
+                respect_gitignore,
             )
             .await?;
             eprintln!("completed snapshot: {snap}");
@@ -2965,6 +2993,7 @@ async fn main() -> Result<(), String> {
                     concurrency,
                     exclude,
                     ignore_file,
+                    respect_gitignore,
                     no_default_excludes,
                     heartbeat_secs,
                     heartbeat_status,
@@ -3047,6 +3076,7 @@ async fn main() -> Result<(), String> {
                         concurrency,
                         exclude,
                         ignore_file,
+                        respect_gitignore,
                         token: auth.token.clone(),
                         device_id: auth.device_id.clone(),
                         device_token: auth.device_token.clone(),
@@ -3081,6 +3111,7 @@ async fn main() -> Result<(), String> {
                         folder: folder.display().to_string(),
                         exclude: cfg.exclude.clone(),
                         ignore_file: cfg.ignore_file.as_ref().map(|p| p.display().to_string()),
+                        respect_gitignore: cfg.respect_gitignore,
                         default_excludes_applied,
                         auth_mode: auth_mode_label(&auth).to_string(),
                         device_registered,
@@ -3138,6 +3169,7 @@ async fn main() -> Result<(), String> {
             folder,
             exclude,
             ignore_file,
+            respect_gitignore,
             include_ignored,
             path,
             verify,
@@ -3168,6 +3200,7 @@ async fn main() -> Result<(), String> {
             exclude_patterns.extend(load_ignore_patterns(&root, ignore_file)?);
             exclude_patterns.extend(exclude);
             let exclude_set = build_excludes(&exclude_patterns)?;
+            let gitignore = load_root_gitignore(&root, respect_gitignore)?;
 
             let snapshot_id = if latest {
                 let url = format!("{}/v1/snapshots", server_base);
@@ -3366,7 +3399,8 @@ async fn main() -> Result<(), String> {
                         "invalid --path (expected relative POSIX path like a/b.txt)".to_string()
                     );
                 }
-                if exclude_set.is_match(&p) {
+                let rel = Path::new(&p);
+                if is_ignored_path(&exclude_set, gitignore.as_ref(), rel, &p, false) {
                     items.push(StatusItem {
                         path: p,
                         status: "ignored".to_string(),
@@ -3403,11 +3437,9 @@ async fn main() -> Result<(), String> {
 
                     if ft.is_dir() {
                         // Prune ignored directories to keep status checks fast on large trees
-                        // (node_modules/.git/etc). For directory matches, probe a synthetic child so
-                        // patterns like `**/node_modules/**` work as expected.
-                        let probe = format!("{rel_str}/_");
+                        // (node_modules/.git/etc).
                         let ignore_dir =
-                            exclude_set.is_match(&rel_str) || exclude_set.is_match(&probe);
+                            is_ignored_path(&exclude_set, gitignore.as_ref(), rel, &rel_str, true);
                         if ignore_dir {
                             if include_ignored {
                                 items.push(StatusItem {
@@ -3429,7 +3461,7 @@ async fn main() -> Result<(), String> {
                         continue;
                     }
 
-                    if exclude_set.is_match(&rel_str) {
+                    if is_ignored_path(&exclude_set, gitignore.as_ref(), rel, &rel_str, false) {
                         if include_ignored {
                             items.push(StatusItem {
                                 path: rel_str,
@@ -3449,7 +3481,8 @@ async fn main() -> Result<(), String> {
 
                 // Also report files that exist in the snapshot but are missing locally.
                 for rel_path in by_path.keys() {
-                    if exclude_set.is_match(rel_path) {
+                    let rel = Path::new(rel_path);
+                    if is_ignored_path(&exclude_set, gitignore.as_ref(), rel, rel_path, false) {
                         continue;
                     }
                     let abs = root.join(PathBuf::from(rel_path));
@@ -3734,6 +3767,61 @@ fn build_excludes(patterns: &[String]) -> Result<GlobSet, String> {
         .map_err(|e| format!("failed to build exclude set: {e}"))
 }
 
+fn load_root_gitignore(root: &Path, enabled: bool) -> Result<Option<Gitignore>, String> {
+    if !enabled {
+        return Ok(None);
+    }
+
+    let p = root.join(".gitignore");
+    match std::fs::metadata(&p) {
+        Ok(m) => {
+            if !m.is_file() {
+                return Ok(None);
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("stat gitignore {}: {e}", p.display())),
+    }
+
+    let mut b = GitignoreBuilder::new(root);
+    b.add(p);
+    b.build()
+        .map(Some)
+        .map_err(|e| format!("parse .gitignore: {e}"))
+}
+
+fn is_ignored_by_globs(exclude_set: &GlobSet, rel_str: &str, is_dir: bool) -> bool {
+    if exclude_set.is_match(rel_str) {
+        return true;
+    }
+    if is_dir {
+        // Probe a synthetic child so patterns like `**/node_modules/**` match directories too.
+        let probe = format!("{rel_str}/_");
+        if exclude_set.is_match(&probe) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_ignored_path(
+    exclude_set: &GlobSet,
+    gitignore: Option<&Gitignore>,
+    rel: &Path,
+    rel_str: &str,
+    is_dir: bool,
+) -> bool {
+    if is_ignored_by_globs(exclude_set, rel_str, is_dir) {
+        return true;
+    }
+
+    let Some(gi) = gitignore else {
+        return false;
+    };
+
+    gi.matched_path_or_any_parents(rel, is_dir).is_ignore()
+}
+
 fn load_ignore_patterns(root: &Path, ignore_file: Option<PathBuf>) -> Result<Vec<String>, String> {
     let p = match ignore_file {
         Some(p) => {
@@ -3921,10 +4009,10 @@ fn chunk_file(data: &[u8]) -> Vec<ChunkRef> {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_default_excludes_if_needed, default_config_root_from_env,
-        render_launchd_plist_scheduled, render_systemd_user_oneshot_unit,
-        render_systemd_user_timer, render_systemd_user_unit, summarize_http_body,
-        validate_profile_name,
+        apply_default_excludes_if_needed, build_excludes, default_config_root_from_env,
+        is_ignored_path, load_root_gitignore, render_launchd_plist_scheduled,
+        render_systemd_user_oneshot_unit, render_systemd_user_timer, render_systemd_user_unit,
+        summarize_http_body, validate_profile_name,
     };
     use std::path::{Path, PathBuf};
 
@@ -4063,5 +4151,65 @@ mod tests {
         let applied = apply_default_excludes_if_needed(&mut exclude, &ignore_file, false);
         assert!(!applied);
         assert!(exclude.is_empty());
+    }
+
+    fn mk_tmp_dir(prefix: &str) -> PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "filedock_test_{}_{}",
+            prefix,
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn load_root_gitignore_is_none_when_disabled_or_missing() {
+        let root = mk_tmp_dir("gitignore_missing");
+        assert!(load_root_gitignore(&root, false).unwrap().is_none());
+        assert!(load_root_gitignore(&root, true).unwrap().is_none());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn gitignore_ignores_directories_and_files() {
+        let root = mk_tmp_dir("gitignore_rules");
+        std::fs::write(root.join(".gitignore"), "target/\n*.log\n!keep.log\n").unwrap();
+
+        let gi = load_root_gitignore(&root, true).unwrap().unwrap();
+        let exclude_set = build_excludes(&Vec::<String>::new()).unwrap();
+
+        assert!(is_ignored_path(
+            &exclude_set,
+            Some(&gi),
+            Path::new("target"),
+            "target",
+            true
+        ));
+        assert!(is_ignored_path(
+            &exclude_set,
+            Some(&gi),
+            Path::new("target/app.bin"),
+            "target/app.bin",
+            false
+        ));
+
+        assert!(is_ignored_path(
+            &exclude_set,
+            Some(&gi),
+            Path::new("debug.log"),
+            "debug.log",
+            false
+        ));
+        assert!(!is_ignored_path(
+            &exclude_set,
+            Some(&gi),
+            Path::new("keep.log"),
+            "keep.log",
+            false
+        ));
+
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

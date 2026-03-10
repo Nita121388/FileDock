@@ -73,6 +73,18 @@ Optional: add a `.filedockignore` file in the root folder (one glob per line, `#
 **/node_modules/**
 ```
 
+Optional: also respect a root `.gitignore` (gitignore-style patterns) by passing `--respect-gitignore`:
+
+```bash
+cargo run -p filedock -- push-folder \
+  --server http://127.0.0.1:8787 \
+  --device "laptop" \
+  --folder /home/you/Documents \
+  --respect-gitignore
+```
+
+Current scope: only the root `.gitignore` is read (nested `.gitignore` files are not yet supported).
+
 Optional: run a simple periodic backup loop (runs `push-folder`, sleeps, repeats):
 
 ```bash
