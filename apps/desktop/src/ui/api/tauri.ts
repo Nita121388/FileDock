@@ -260,6 +260,7 @@ export type AgentInitSummary = {
 export type AgentInstallRequest = {
   profile: string;
   dry_run?: boolean;
+  mode?: "daemon" | "scheduled";
 };
 
 export type AgentInstallSummary = {

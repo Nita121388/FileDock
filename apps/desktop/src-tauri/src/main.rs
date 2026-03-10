@@ -186,10 +186,19 @@ struct AgentInitRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AgentInstallMode {
+    Daemon,
+    Scheduled,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct AgentInstallRequest {
     profile: String,
     #[serde(default)]
     dry_run: bool,
+    #[serde(default)]
+    mode: Option<AgentInstallMode>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2429,6 +2438,11 @@ async fn agent_install(req: AgentInstallRequest) -> Result<AgentInstallSummary, 
     ];
     if req.dry_run {
         args.push("--dry-run".to_string());
+    }
+    if matches!(req.mode, Some(AgentInstallMode::Scheduled)) {
+        // Only pass `--mode scheduled` so older CLI builds keep working in default (daemon) mode.
+        args.push("--mode".to_string());
+        args.push("scheduled".to_string());
     }
 
     run_filedock_json(args).await

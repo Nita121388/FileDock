@@ -31,6 +31,7 @@ type Props = {
 };
 
 type BusyAction = "save" | "preview" | "install" | "uninstall" | "status" | null;
+type AgentInstallMode = "daemon" | "scheduled";
 
 const DEFAULT_PROFILE = "backup";
 const DEFAULT_INTERVAL_MINUTES = "15";
@@ -57,6 +58,7 @@ export default function AgentOnboardingModal(props: Props) {
   const [folder, setFolder] = useState("");
   const [intervalMinutes, setIntervalMinutes] = useState(DEFAULT_INTERVAL_MINUTES);
   const [heartbeatMinutes, setHeartbeatMinutes] = useState(DEFAULT_HEARTBEAT_MINUTES);
+  const [installMode, setInstallMode] = useState<AgentInstallMode>("daemon");
   const [keepBootstrapToken, setKeepBootstrapToken] = useState(false);
   const [deleteConfigOnUninstall, setDeleteConfigOnUninstall] = useState(false);
   const [profileTouched, setProfileTouched] = useState(false);
@@ -77,6 +79,7 @@ export default function AgentOnboardingModal(props: Props) {
     setFolder("");
     setIntervalMinutes(DEFAULT_INTERVAL_MINUTES);
     setHeartbeatMinutes(DEFAULT_HEARTBEAT_MINUTES);
+    setInstallMode("daemon");
     setKeepBootstrapToken(false);
     setDeleteConfigOnUninstall(false);
     setProfileTouched(false);
@@ -158,7 +161,7 @@ export default function AgentOnboardingModal(props: Props) {
   };
 
   const previewInstall = async (targetProfile = effectiveProfile) => {
-    const summary = await agentInstall({ profile: targetProfile, dry_run: true });
+    const summary = await agentInstall({ profile: targetProfile, dry_run: true, mode: installMode });
     setInstallPreview(summary);
     return summary;
   };
@@ -237,7 +240,7 @@ export default function AgentOnboardingModal(props: Props) {
     if (!validateBeforeRun()) return;
     setBusyAction("install");
     try {
-      const summary = await agentInstall({ profile: effectiveProfile, dry_run: false });
+      const summary = await agentInstall({ profile: effectiveProfile, dry_run: false, mode: installMode });
       setInstallSummary(summary);
       setUninstallSummary(null);
       onNotify("info", t("app.agentSetup.notice.installed", { service: summary.service_name }));
@@ -439,6 +442,21 @@ export default function AgentOnboardingModal(props: Props) {
                   onChange={(e) => setHeartbeatMinutes(e.target.value)}
                 />
               </label>
+              <label className="agent-field wide">
+                <span>{t("app.agentSetup.modeLabel")}</span>
+                <select
+                  className="agent-input"
+                  value={installMode}
+                  onChange={(e) => setInstallMode(e.target.value as AgentInstallMode)}
+                  disabled={!canRunSetup}
+                >
+                  <option value="daemon">{t("app.agentSetup.modeDaemon")}</option>
+                  <option value="scheduled">{t("app.agentSetup.modeScheduled")}</option>
+                </select>
+              </label>
+              <div className="agent-inline-note wide">
+                {installMode === "scheduled" ? t("app.agentSetup.modeScheduledDesc") : t("app.agentSetup.modeDaemonDesc")}
+              </div>
               <label className="agent-checkbox wide">
                 <input
                   type="checkbox"
@@ -500,6 +518,10 @@ export default function AgentOnboardingModal(props: Props) {
                   <SummaryRow label={t("app.agentSetup.previewDevice")} value={effectiveDeviceName || t("app.agentSetup.missing")} />
                   <SummaryRow label={t("app.agentSetup.previewFolder")} value={folder.trim() || t("app.agentSetup.missing")} />
                   <SummaryRow label={t("app.agentSetup.previewAuth")} value={t(authPreviewLabelKey(authPreview.kind))} />
+                  <SummaryRow
+                    label={t("app.agentSetup.previewMode")}
+                    value={installMode === "scheduled" ? t("app.agentSetup.modeScheduled") : t("app.agentSetup.modeDaemon")}
+                  />
                 </dl>
               </div>
 
