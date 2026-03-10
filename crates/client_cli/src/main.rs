@@ -642,6 +642,14 @@ enum Command {
         #[arg(long)]
         keep_days: Option<u32>,
 
+        /// Keep the newest snapshot from each of the newest N UTC calendar days.
+        #[arg(long)]
+        keep_daily: Option<u32>,
+
+        /// Keep the newest snapshot from each of the newest N ISO weeks in UTC.
+        #[arg(long)]
+        keep_weekly: Option<u32>,
+
         /// Compute what would be deleted, but don't delete anything.
         #[arg(long)]
         dry_run: bool,
@@ -2286,6 +2294,8 @@ async fn main() -> Result<(), String> {
             device_name,
             keep_last,
             keep_days,
+            keep_daily,
+            keep_weekly,
             dry_run,
         } => {
             let client = build_client()?;
@@ -2295,6 +2305,8 @@ async fn main() -> Result<(), String> {
                 device_name,
                 keep_last,
                 keep_days,
+                keep_daily,
+                keep_weekly,
                 dry_run,
             };
             let resp: SnapshotPruneResponse = client

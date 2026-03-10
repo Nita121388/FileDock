@@ -156,6 +156,10 @@ pub struct SnapshotPruneRequest {
     pub keep_last: Option<u32>,
     /// Keep snapshots newer than N days (per device group).
     pub keep_days: Option<u32>,
+    /// Keep the newest snapshot from each of the newest N UTC calendar days (per device group).
+    pub keep_daily: Option<u32>,
+    /// Keep the newest snapshot from each of the newest N ISO weeks in UTC (per device group).
+    pub keep_weekly: Option<u32>,
 
     /// If true, compute what would be deleted but do not delete anything.
     #[serde(default)]

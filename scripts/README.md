@@ -15,7 +15,7 @@ Common:
 - `scripts/release.sh` - build and collect local release artifacts into `dist/`
 - `scripts/smoke.sh` - end-to-end server+CLI smoke test (push-folder + pull-folder + hash compare)
 - `scripts/check.sh` - local "CI-like" checks (fmt/clippy/test + desktop build + smoke)
-- `scripts/prune.sh` - snapshot retention helper (calls `filedock prune-snapshots`)
+- `scripts/prune.sh` - snapshot retention helper (calls `filedock prune-snapshots`, including daily/weekly keep rules)
 - `scripts/gc.sh` - chunk garbage-collection helper (calls `filedock gc-chunks`)
 - `scripts/agent.sh` - run the agent via cargo using a TOML config file
 - `scripts/docker-up.sh` - start server via docker compose

@@ -18,6 +18,7 @@ use filedock_protocol::{
 };
 use filedock_storage::{DiskStorage, PutOpts, S3Storage, S3StorageConfig, Storage};
 use std::{net::SocketAddr, sync::Arc};
+use time::OffsetDateTime;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
@@ -529,21 +530,99 @@ async fn delete_snapshot(
     }))
 }
 
+fn has_snapshot_keep_rule(req: &SnapshotPruneRequest) -> bool {
+    req.keep_last.is_some()
+        || req.keep_days.is_some()
+        || req.keep_daily.is_some()
+        || req.keep_weekly.is_some()
+}
+
+fn snapshot_day_bucket(created_unix: i64) -> i64 {
+    created_unix.div_euclid(86_400)
+}
+
+fn snapshot_iso_week_bucket(created_unix: i64) -> Result<(i32, u8), String> {
+    let created = OffsetDateTime::from_unix_timestamp(created_unix)
+        .map_err(|e| format!("invalid snapshot timestamp {created_unix}: {e}"))?;
+    let (year, week, _weekday) = created.to_iso_week_date();
+    Ok((year, week))
+}
+
+fn select_snapshot_ids_to_keep(
+    groups: &mut std::collections::BTreeMap<String, Vec<SnapshotMeta>>,
+    req: &SnapshotPruneRequest,
+    now_unix: i64,
+) -> Result<std::collections::HashSet<String>, String> {
+    let cutoff_unix = req
+        .keep_days
+        .map(|days| now_unix.saturating_sub((days as i64).saturating_mul(86_400)));
+    let mut keep = std::collections::HashSet::<String>::new();
+
+    for metas in groups.values_mut() {
+        metas.sort_by(|a, b| {
+            b.created_unix
+                .cmp(&a.created_unix)
+                .then_with(|| b.snapshot_id.cmp(&a.snapshot_id))
+        });
+
+        if let Some(keep_last) = req.keep_last {
+            for meta in metas.iter().take(keep_last as usize) {
+                keep.insert(meta.snapshot_id.clone());
+            }
+        }
+
+        if let Some(cutoff) = cutoff_unix {
+            for meta in metas.iter() {
+                if meta.created_unix >= cutoff {
+                    keep.insert(meta.snapshot_id.clone());
+                }
+            }
+        }
+
+        if let Some(keep_daily) = req.keep_daily {
+            if keep_daily > 0 {
+                let mut kept_days = std::collections::HashSet::<i64>::new();
+                for meta in metas.iter() {
+                    let bucket = snapshot_day_bucket(meta.created_unix);
+                    if kept_days.insert(bucket) {
+                        keep.insert(meta.snapshot_id.clone());
+                        if kept_days.len() >= keep_daily as usize {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(keep_weekly) = req.keep_weekly {
+            if keep_weekly > 0 {
+                let mut kept_weeks = std::collections::HashSet::<(i32, u8)>::new();
+                for meta in metas.iter() {
+                    let bucket = snapshot_iso_week_bucket(meta.created_unix)?;
+                    if kept_weeks.insert(bucket) {
+                        keep.insert(meta.snapshot_id.clone());
+                        if kept_weeks.len() >= keep_weekly as usize {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(keep)
+}
+
 async fn prune_snapshots(
     State(state): State<AppState>,
     Json(req): Json<SnapshotPruneRequest>,
 ) -> Result<Json<SnapshotPruneResponse>, (StatusCode, String)> {
-    if req.keep_last.is_none() && req.keep_days.is_none() {
+    if !has_snapshot_keep_rule(&req) {
         return Err((
             StatusCode::BAD_REQUEST,
-            "keep_last or keep_days required".to_string(),
+            "keep_last, keep_days, keep_daily, or keep_weekly required".to_string(),
         ));
     }
-
-    let now = now_unix();
-    let cutoff_unix = req
-        .keep_days
-        .map(|d| now.saturating_sub((d as i64).saturating_mul(86400)));
 
     let all = load_snapshot_metas(&state).await?;
     let examined = all.len() as u64;
@@ -570,43 +649,26 @@ async fn prune_snapshots(
     // Group snapshots by a stable device key: prefer device_id when present, else device_name.
     let mut groups: std::collections::BTreeMap<String, Vec<SnapshotMeta>> =
         std::collections::BTreeMap::new();
-    for m in matched {
-        let key = m
+    for meta in matched {
+        let key = meta
             .device_id
             .clone()
-            .unwrap_or_else(|| format!("name:{}", m.device_name));
-        groups.entry(key).or_default().push(m);
+            .unwrap_or_else(|| format!("name:{}", meta.device_name));
+        groups.entry(key).or_default().push(meta);
     }
 
-    let mut keep = std::collections::HashSet::<String>::new();
-    for (_k, metas) in groups.iter_mut() {
-        metas.sort_by(|a, b| b.created_unix.cmp(&a.created_unix));
-
-        if let Some(keep_last) = req.keep_last {
-            let keep_last = keep_last as usize;
-            for m in metas.iter().take(keep_last) {
-                keep.insert(m.snapshot_id.clone());
-            }
-        }
-
-        if let Some(cutoff) = cutoff_unix {
-            for m in metas.iter() {
-                if m.created_unix >= cutoff {
-                    keep.insert(m.snapshot_id.clone());
-                }
-            }
-        }
-    }
+    let keep = select_snapshot_ids_to_keep(&mut groups, &req, now_unix())
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     let mut deleted_snapshot_ids = Vec::<String>::new();
     if !req.dry_run {
-        for (_k, metas) in groups.iter() {
-            for m in metas {
-                if keep.contains(&m.snapshot_id) {
+        for metas in groups.values() {
+            for meta in metas {
+                if keep.contains(&meta.snapshot_id) {
                     continue;
                 }
-                let meta_key = format!("snapshots/{}.json", m.snapshot_id);
-                let manifest_key = format!("manifests/{}.json", m.snapshot_id);
+                let meta_key = format!("snapshots/{}.json", meta.snapshot_id);
+                let manifest_key = format!("manifests/{}.json", meta.snapshot_id);
                 let _ = state
                     .storage
                     .delete(&manifest_key)
@@ -617,16 +679,16 @@ async fn prune_snapshots(
                     .delete(&meta_key)
                     .await
                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-                deleted_snapshot_ids.push(m.snapshot_id.clone());
+                deleted_snapshot_ids.push(meta.snapshot_id.clone());
             }
         }
     } else {
-        for (_k, metas) in groups.iter() {
-            for m in metas {
-                if keep.contains(&m.snapshot_id) {
+        for metas in groups.values() {
+            for meta in metas {
+                if keep.contains(&meta.snapshot_id) {
                     continue;
                 }
-                deleted_snapshot_ids.push(m.snapshot_id.clone());
+                deleted_snapshot_ids.push(meta.snapshot_id.clone());
             }
         }
     }
@@ -1049,4 +1111,164 @@ fn now_unix() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        has_snapshot_keep_rule, select_snapshot_ids_to_keep, SnapshotMeta, SnapshotPruneRequest,
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+    use time::{Date, Month, PrimitiveDateTime, Time, UtcOffset};
+
+    fn unix_ts(year: i32, month: Month, day: u8, hour: u8) -> i64 {
+        PrimitiveDateTime::new(
+            Date::from_calendar_date(year, month, day).unwrap(),
+            Time::from_hms(hour, 0, 0).unwrap(),
+        )
+        .assume_offset(UtcOffset::UTC)
+        .unix_timestamp()
+    }
+
+    fn meta(snapshot_id: &str, created_unix: i64) -> SnapshotMeta {
+        SnapshotMeta {
+            snapshot_id: snapshot_id.to_string(),
+            device_name: "laptop".to_string(),
+            device_id: Some("dev-1".to_string()),
+            root_path: "/data".to_string(),
+            created_unix,
+            note: None,
+        }
+    }
+
+    fn grouped(metas: Vec<SnapshotMeta>) -> BTreeMap<String, Vec<SnapshotMeta>> {
+        BTreeMap::from([("dev-1".to_string(), metas)])
+    }
+
+    fn keep_ids(req: SnapshotPruneRequest, metas: Vec<SnapshotMeta>) -> BTreeSet<String> {
+        select_snapshot_ids_to_keep(
+            &mut grouped(metas),
+            &req,
+            unix_ts(2026, Month::March, 10, 12),
+        )
+        .unwrap()
+        .into_iter()
+        .collect()
+    }
+
+    #[test]
+    fn keep_rule_validation_accepts_daily_and_weekly_only() {
+        assert!(!has_snapshot_keep_rule(&SnapshotPruneRequest {
+            device_id: None,
+            device_name: None,
+            keep_last: None,
+            keep_days: None,
+            keep_daily: None,
+            keep_weekly: None,
+            dry_run: true,
+        }));
+        assert!(has_snapshot_keep_rule(&SnapshotPruneRequest {
+            device_id: None,
+            device_name: None,
+            keep_last: None,
+            keep_days: None,
+            keep_daily: Some(7),
+            keep_weekly: None,
+            dry_run: true,
+        }));
+        assert!(has_snapshot_keep_rule(&SnapshotPruneRequest {
+            device_id: None,
+            device_name: None,
+            keep_last: None,
+            keep_days: None,
+            keep_daily: None,
+            keep_weekly: Some(8),
+            dry_run: true,
+        }));
+    }
+
+    #[test]
+    fn keep_daily_keeps_newest_snapshot_per_recent_day() {
+        let req = SnapshotPruneRequest {
+            device_id: None,
+            device_name: None,
+            keep_last: None,
+            keep_days: None,
+            keep_daily: Some(3),
+            keep_weekly: None,
+            dry_run: true,
+        };
+        let keep = keep_ids(
+            req,
+            vec![
+                meta("d0-new", unix_ts(2026, Month::March, 10, 11)),
+                meta("d0-old", unix_ts(2026, Month::March, 10, 8)),
+                meta("d1", unix_ts(2026, Month::March, 9, 12)),
+                meta("d2-new", unix_ts(2026, Month::March, 8, 17)),
+                meta("d2-old", unix_ts(2026, Month::March, 8, 6)),
+                meta("d3", unix_ts(2026, Month::March, 7, 10)),
+            ],
+        );
+        assert_eq!(
+            keep,
+            BTreeSet::from(["d0-new".to_string(), "d1".to_string(), "d2-new".to_string(),])
+        );
+    }
+
+    #[test]
+    fn keep_weekly_keeps_newest_snapshot_per_recent_iso_week() {
+        let req = SnapshotPruneRequest {
+            device_id: None,
+            device_name: None,
+            keep_last: None,
+            keep_days: None,
+            keep_daily: None,
+            keep_weekly: Some(2),
+            dry_run: true,
+        };
+        let keep = keep_ids(
+            req,
+            vec![
+                meta("w0-new", unix_ts(2026, Month::March, 10, 11)),
+                meta("w0-old", unix_ts(2026, Month::March, 9, 8)),
+                meta("w1-new", unix_ts(2026, Month::March, 3, 15)),
+                meta("w1-old", unix_ts(2026, Month::March, 2, 9)),
+                meta("w2", unix_ts(2026, Month::February, 24, 12)),
+            ],
+        );
+        assert_eq!(
+            keep,
+            BTreeSet::from(["w0-new".to_string(), "w1-new".to_string(),])
+        );
+    }
+
+    #[test]
+    fn keep_rules_are_combined_by_union() {
+        let req = SnapshotPruneRequest {
+            device_id: None,
+            device_name: None,
+            keep_last: Some(1),
+            keep_days: None,
+            keep_daily: Some(3),
+            keep_weekly: None,
+            dry_run: true,
+        };
+        let keep = keep_ids(
+            req,
+            vec![
+                meta("latest", unix_ts(2026, Month::March, 10, 11)),
+                meta("same-day-old", unix_ts(2026, Month::March, 10, 8)),
+                meta("day-1", unix_ts(2026, Month::March, 9, 12)),
+                meta("day-2", unix_ts(2026, Month::March, 8, 7)),
+            ],
+        );
+        assert_eq!(
+            keep,
+            BTreeSet::from([
+                "latest".to_string(),
+                "day-1".to_string(),
+                "day-2".to_string(),
+            ])
+        );
+    }
 }

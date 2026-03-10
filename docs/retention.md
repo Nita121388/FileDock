@@ -1,6 +1,6 @@
 # Snapshot Retention (Prune)
 
-Snapshots grow over time. FileDock provides a minimal retention/prune mechanism that deletes:
+Snapshots grow over time. FileDock provides a retention/prune mechanism that deletes:
 - snapshot metadata (`snapshots/<id>.json`)
 - snapshot manifests (`manifests/<id>.json`)
 
@@ -15,7 +15,8 @@ Dry-run (show what would be deleted):
 filedock prune-snapshots \
   --server http://127.0.0.1:8787 \
   --keep-last 20 \
-  --keep-days 30 \
+  --keep-daily 7 \
+  --keep-weekly 8 \
   --dry-run
 ```
 
@@ -25,7 +26,9 @@ Apply:
 filedock prune-snapshots \
   --server http://127.0.0.1:8787 \
   --keep-last 20 \
-  --keep-days 30
+  --keep-days 30 \
+  --keep-daily 7 \
+  --keep-weekly 8
 ```
 
 Prune a single device only:
@@ -53,6 +56,8 @@ filedock delete-snapshot \
 ## Notes / Safety
 
 - Prune is per device-group (prefers `device_id` when present, else uses `device_name`).
-- `keep-last` and `keep-days` are combined (union): a snapshot is kept if it matches either rule.
+- All keep rules are combined as a union: a snapshot is kept if it matches any of `keep-last`, `keep-days`, `keep-daily`, or `keep-weekly`.
+- `keep-daily` keeps the newest snapshot from each of the newest N UTC calendar days for that device group.
+- `keep-weekly` keeps the newest snapshot from each of the newest N ISO weeks (UTC) for that device group.
 - Use `--dry-run` first.
 
