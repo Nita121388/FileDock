@@ -28,6 +28,7 @@ export type RestoreSnapshotRequest = {
   snapshot_id: string;
   dest_dir: string;
   concurrency?: number;
+  conflict_policy?: "overwrite" | "skip" | "rename";
 };
 
 export type RestoreSnapshotProgress = {

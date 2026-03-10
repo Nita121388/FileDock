@@ -147,6 +147,7 @@ filedock config qr --server http://127.0.0.1:8787
 In the Device Browser pane:
 - select a snapshot
 - set restore concurrency (small number input next to `RST`, default 4)
+- choose conflict policy (dropdown next to concurrency): overwrite / skip / rename (default: rename)
 - click `RST` and pick a destination folder
 - if needed, click `Cancel` (stops scheduling new files; in-flight downloads finish)
 

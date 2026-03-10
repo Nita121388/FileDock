@@ -332,6 +332,18 @@ struct SftpListResponse {
     entries: Vec<SftpListEntry>,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RestoreConflictPolicy {
+    Overwrite,
+    Skip,
+    Rename,
+}
+
+fn default_restore_conflict_policy() -> RestoreConflictPolicy {
+    RestoreConflictPolicy::Overwrite
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct RestoreSnapshotRequest {
     server_base_url: String,
@@ -342,6 +354,8 @@ struct RestoreSnapshotRequest {
     dest_dir: String,
     #[serde(default = "default_concurrency")]
     concurrency: usize,
+    #[serde(default = "default_restore_conflict_policy")]
+    conflict_policy: RestoreConflictPolicy,
 }
 
 fn default_concurrency() -> usize {
@@ -491,6 +505,56 @@ async fn download_to_file_with_retry(
         let jitter: u64 = rand::random::<u8>() as u64;
         tokio::time::sleep(Duration::from_millis(base_ms + jitter)).await;
     }
+}
+
+async fn path_exists(path: &Path) -> Result<bool, String> {
+    match tokio::fs::metadata(path).await {
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!("stat {}: {e}", path.display())),
+    }
+}
+
+async fn unique_restore_path(original: &Path, snapshot_id: &str) -> Result<PathBuf, String> {
+    let parent = original
+        .parent()
+        .ok_or_else(|| "dest path must have a parent".to_string())?;
+    let file_name = original
+        .file_name()
+        .ok_or_else(|| "dest path must have a file name".to_string())?
+        .to_string_lossy()
+        .to_string();
+
+    let snap: String = snapshot_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(8)
+        .collect();
+    let snap = if snap.is_empty() {
+        "snap"
+    } else {
+        snap.as_str()
+    };
+
+    let dot = file_name.rfind('.');
+    let (stem, ext) = match dot {
+        Some(i) if i > 0 => (&file_name[..i], &file_name[i..]),
+        _ => (file_name.as_str(), ""),
+    };
+
+    for i in 1..1000u32 {
+        let suffix = if i == 1 {
+            format!(" (restore {snap})")
+        } else {
+            format!(" (restore {snap}-{i})")
+        };
+        let cand = parent.join(format!("{stem}{suffix}{ext}"));
+        if !path_exists(&cand).await? {
+            return Ok(cand);
+        }
+    }
+
+    Err("unable to pick a unique restore destination (too many conflicts)".to_string())
 }
 
 async fn chunk_file(path: &Path) -> Result<Vec<ChunkRef>, String> {
@@ -1052,6 +1116,7 @@ async fn restore_snapshot_to_folder(
 
     let files = Arc::new(manifest.files);
     let next = Arc::new(AtomicUsize::new(0));
+    let conflict_policy = req.conflict_policy;
     let (tx, mut rx) =
         tokio::sync::mpsc::channel::<Result<(String, u64), String>>(req.concurrency.max(1) * 2);
     let mut handles = Vec::new();
@@ -1063,6 +1128,7 @@ async fn restore_snapshot_to_folder(
         let dest_root = dest_root.clone();
         let files = files.clone();
         let next = next.clone();
+        let conflict_policy = conflict_policy;
         let tx = tx.clone();
         let cancel = cancel_flag.clone();
 
@@ -1076,7 +1142,7 @@ async fn restore_snapshot_to_folder(
                     return;
                 }
                 let f = &files[i];
-                let out_path = match rel_posix_to_platform_path(&dest_root, &f.path) {
+                let mut out_path = match rel_posix_to_platform_path(&dest_root, &f.path) {
                     Ok(p) => p,
                     Err(e) => {
                         let _ = tx.send(Err(e)).await;
@@ -1086,6 +1152,37 @@ async fn restore_snapshot_to_folder(
 
                 if cancel.load(Ordering::Relaxed) {
                     return;
+                }
+
+                match conflict_policy {
+                    RestoreConflictPolicy::Overwrite => {}
+                    RestoreConflictPolicy::Skip => match path_exists(&out_path).await {
+                        Ok(true) => {
+                            if tx.send(Ok((f.path.clone(), f.size))).await.is_err() {
+                                return;
+                            }
+                            continue;
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            let _ = tx.send(Err(e)).await;
+                            return;
+                        }
+                    },
+                    RestoreConflictPolicy::Rename => match path_exists(&out_path).await {
+                        Ok(true) => match unique_restore_path(&out_path, &snapshot_id).await {
+                            Ok(p) => out_path = p,
+                            Err(e) => {
+                                let _ = tx.send(Err(e)).await;
+                                return;
+                            }
+                        },
+                        Ok(false) => {}
+                        Err(e) => {
+                            let _ = tx.send(Err(e)).await;
+                            return;
+                        }
+                    },
                 }
 
                 let url = format!(

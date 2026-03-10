@@ -28,22 +28,44 @@ import { useTranslation } from "react-i18next";
 
 const RESTORE_KEY = "filedock.desktop.restore.v1";
 
-function loadRestoreConcurrency(): number {
+type RestoreConflictPolicy = "overwrite" | "skip" | "rename";
+
+type RestorePrefs = {
+  concurrency: number;
+  conflictPolicy: RestoreConflictPolicy;
+};
+
+const DEFAULT_RESTORE_PREFS: RestorePrefs = {
+  concurrency: 4,
+  // Safer default: avoid clobbering existing files if the user picks a non-empty folder.
+  conflictPolicy: "rename"
+};
+
+function loadRestorePrefs(): RestorePrefs {
   try {
     const raw = localStorage.getItem(RESTORE_KEY);
-    if (!raw) return 4;
+    if (!raw) return DEFAULT_RESTORE_PREFS;
     const parsed = JSON.parse(raw) as any;
+
     const c = Number(parsed?.concurrency);
-    if (!Number.isFinite(c) || c < 1) return 4;
-    return Math.min(16, Math.floor(c));
+    const concurrency =
+      !Number.isFinite(c) || c < 1 ? DEFAULT_RESTORE_PREFS.concurrency : Math.min(16, Math.floor(c));
+
+    const rawPolicy = String(parsed?.conflictPolicy ?? parsed?.conflict_policy ?? "").trim();
+    const conflictPolicy: RestoreConflictPolicy =
+      rawPolicy === "overwrite" || rawPolicy === "skip" || rawPolicy === "rename"
+        ? rawPolicy
+        : DEFAULT_RESTORE_PREFS.conflictPolicy;
+
+    return { concurrency, conflictPolicy };
   } catch {
-    return 4;
+    return DEFAULT_RESTORE_PREFS;
   }
 }
 
-function saveRestoreConcurrency(concurrency: number) {
+function saveRestorePrefs(prefs: RestorePrefs) {
   try {
-    localStorage.setItem(RESTORE_KEY, JSON.stringify({ concurrency }));
+    localStorage.setItem(RESTORE_KEY, JSON.stringify(prefs));
   } catch {
     // ignore
   }
@@ -142,7 +164,10 @@ export default function DeviceBrowserPane(props: {
   const [selected, setSelected] = useState<string[]>([]);
   const [lastSelIndex, setLastSelIndex] = useState<number | null>(null);
   const [restorePct, setRestorePct] = useState<number | null>(null);
-  const [restoreConcurrency, setRestoreConcurrency] = useState<number>(() => loadRestoreConcurrency());
+  const [restoreConcurrency, setRestoreConcurrency] = useState<number>(() => loadRestorePrefs().concurrency);
+  const [restoreConflictPolicy, setRestoreConflictPolicy] = useState<RestoreConflictPolicy>(
+    () => loadRestorePrefs().conflictPolicy
+  );
 
   const showHistory = tab.state.showHistory;
   const viewMode = tab.state.viewMode;
@@ -150,8 +175,8 @@ export default function DeviceBrowserPane(props: {
   const prevDeviceNameRef = useRef<string | null>(null);
 
   useEffect(() => {
-    saveRestoreConcurrency(restoreConcurrency);
-  }, [restoreConcurrency]);
+    saveRestorePrefs({ concurrency: restoreConcurrency, conflictPolicy: restoreConflictPolicy });
+  }, [restoreConcurrency, restoreConflictPolicy]);
 
   const deviceName = tab.state.deviceName;
   const snapshotId = tab.state.snapshotId;
@@ -702,7 +727,8 @@ export default function DeviceBrowserPane(props: {
           device_token: devTok,
           snapshot_id: snapshotId,
           dest_dir: picked,
-          concurrency: restoreConcurrency
+          concurrency: restoreConcurrency,
+          conflict_policy: restoreConflictPolicy
         },
         (p: RestoreSnapshotProgress) => {
           const pct = p.total_bytes > 0 ? Math.floor((p.done_bytes / p.total_bytes) * 100) : 100;
@@ -718,7 +744,7 @@ export default function DeviceBrowserPane(props: {
     } finally {
       setLoading(false);
     }
-  }, [effSettings, restoreConcurrency, snapshotId, t]);
+  }, [effSettings, restoreConcurrency, restoreConflictPolicy, snapshotId, t]);
 
   const cancelRestore = useCallback(async () => {
     if (!snapshotId) return;
@@ -901,6 +927,18 @@ export default function DeviceBrowserPane(props: {
               onChange={(e) => setRestoreConcurrency(Math.max(1, Math.min(16, Number(e.target.value) || 1)))}
               title={t("device.restore.concurrencyTitle")}
             />
+            <select
+              className="pane-select"
+              style={{ width: 92 }}
+              disabled={loading}
+              value={restoreConflictPolicy}
+              onChange={(e) => setRestoreConflictPolicy(e.target.value as RestoreConflictPolicy)}
+              title={t("queue.conflict.title")}
+            >
+              <option value="overwrite">{t("queue.conflict.overwrite")}</option>
+              <option value="skip">{t("queue.conflict.skip")}</option>
+              <option value="rename">{t("queue.conflict.rename")}</option>
+            </select>
             <button
               className="db-mini"
               disabled={!snapshotId || loading}
