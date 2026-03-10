@@ -231,6 +231,122 @@ export async function importSftpFileToSnapshot(
   }
 }
 
+export type AgentInitRequest = {
+  profile: string;
+  folder: string;
+  server_base_url: string;
+  device_name?: string;
+  interval_secs?: number;
+  heartbeat_secs?: number;
+  keep_bootstrap_token?: boolean;
+  token?: string;
+  device_id?: string;
+  device_token?: string;
+};
+
+export type AgentInitSummary = {
+  profile: string;
+  config_path: string;
+  state_path: string;
+  server: string;
+  device_name: string;
+  folder: string;
+  auth_mode: string;
+  device_registered: boolean;
+  device_id?: string | null;
+  kept_bootstrap_token: boolean;
+};
+
+export type AgentInstallRequest = {
+  profile: string;
+  dry_run?: boolean;
+};
+
+export type AgentInstallSummary = {
+  profile: string;
+  config_path: string;
+  service_manager: string;
+  service_name: string;
+  service_path?: string | null;
+  dry_run: boolean;
+  installed: boolean;
+  enabled?: boolean | null;
+  running?: boolean | null;
+  note?: string | null;
+  preview?: string | null;
+};
+
+export type AgentUninstallRequest = {
+  profile: string;
+  delete_config?: boolean;
+};
+
+export type AgentUninstallSummary = {
+  profile: string;
+  config_path: string;
+  service_manager: string;
+  service_name: string;
+  service_path?: string | null;
+  removed_service: boolean;
+  removed_config: boolean;
+  note?: string | null;
+};
+
+export type AgentServiceStatus = {
+  manager: string;
+  name: string;
+  path?: string | null;
+  installed: boolean;
+  enabled?: boolean | null;
+  running?: boolean | null;
+  note?: string | null;
+};
+
+export type AgentServerStatus = {
+  ok: boolean;
+  auth_mode: string;
+  device_id?: string | null;
+  last_seen_unix?: number | null;
+  snapshot_count?: number | null;
+  latest_snapshot_id?: string | null;
+  latest_snapshot_created_unix?: number | null;
+  error?: string | null;
+};
+
+export type AgentStatusSummary = {
+  profile: string;
+  config_path: string;
+  config_exists: boolean;
+  state_path: string;
+  state_exists: boolean;
+  server?: string | null;
+  folder?: string | null;
+  device_name?: string | null;
+  auth_mode?: string | null;
+  service: AgentServiceStatus;
+  server_status?: AgentServerStatus | null;
+};
+
+export async function agentInit(req: AgentInitRequest): Promise<AgentInitSummary> {
+  const invoke = await getInvoke();
+  return await invoke<AgentInitSummary>("agent_init", { req });
+}
+
+export async function agentInstall(req: AgentInstallRequest): Promise<AgentInstallSummary> {
+  const invoke = await getInvoke();
+  return await invoke<AgentInstallSummary>("agent_install", { req });
+}
+
+export async function agentStatus(profile: string): Promise<AgentStatusSummary> {
+  const invoke = await getInvoke();
+  return await invoke<AgentStatusSummary>("agent_status", { profile });
+}
+
+export async function agentUninstall(req: AgentUninstallRequest): Promise<AgentUninstallSummary> {
+  const invoke = await getInvoke();
+  return await invoke<AgentUninstallSummary>("agent_uninstall", { req });
+}
+
 export type TerminalStartRequest = {
   kind: "local" | "ssh";
   cols?: number;

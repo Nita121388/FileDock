@@ -2,6 +2,25 @@
 
 The desktop app (Tauri) provides a multi-pane UI for browsing snapshots and (via plugins) remote filesystems like SFTP.
 
+## Guided agent setup
+
+The desktop app now has a dedicated **Set up agent** entry point in the top toolbar and Preferences.
+
+Current flow:
+
+1. paste a server config JSON / QR payload or reuse the current toolbar connection,
+2. choose profile name, device name, and backup folder,
+3. set snapshot + heartbeat intervals,
+4. create/update the saved agent profile via `filedock agent init`,
+5. preview or install the platform background service via `filedock agent install`,
+6. optionally remove the service (and the saved profile) via `filedock agent uninstall`,
+7. refresh verification status via `filedock agent status`.
+
+Notes:
+- The desktop app is the setup wizard; the persistent background worker is still the Rust CLI agent.
+- Web preview can render the UI, but only the packaged Tauri desktop app can pick local folders and call the local `filedock` binary.
+- The wizard previews whether setup will keep only device credentials or also retain the bootstrap token.
+
 ## Server config import
 
 You can paste a server config JSON into Preferences → Import JSON. Supported fields:

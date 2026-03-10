@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { WorkspaceView } from "./components/WorkspaceView";
 import NoticeCenter, { type NoticeLevel, type NoticeItem } from "./components/NoticeCenter";
+import AgentOnboardingModal from "./components/AgentOnboardingModal";
 import {
   DEFAULT_APP_STATE,
   type AppState,
@@ -94,6 +95,7 @@ export default function App() {
   const [showPrefs, setShowPrefs] = useState(false);
   const [showCommand, setShowCommand] = useState(false);
   const [showQrImport, setShowQrImport] = useState(false);
+  const [showAgentSetup, setShowAgentSetup] = useState(false);
   const [qrPayload, setQrPayload] = useState("");
   const [showConnHelp, setShowConnHelp] = useState(false);
   const [activeLeafByTab, setActiveLeafByTab] = useState<Record<string, string>>(() => loadActiveLeafByTab());
@@ -622,9 +624,10 @@ export default function App() {
         setShowPrefs(false);
         setShowCommand(false);
         setShowQrImport(false);
+        setShowAgentSetup(false);
       }
 
-      if (showCommand || showPrefs || showQrImport) return;
+      if (showCommand || showPrefs || showQrImport || showAgentSetup) return;
 
       if (isTypingTarget) return;
 
@@ -738,7 +741,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activePane, goToNextWorkspace, setActiveLeafPane, showCommand, showPrefs, showQrImport]);
+  }, [activePane, goToNextWorkspace, setActiveLeafPane, showAgentSetup, showCommand, showPrefs, showQrImport]);
 
   const onNewTab = () => {
     setState((s) => {
@@ -760,6 +763,12 @@ export default function App() {
 
   const openPrefs = () => {
     setShowPrefs(true);
+    setShowCommand(false);
+  };
+
+  const openAgentSetup = () => {
+    setShowAgentSetup(true);
+    setShowPrefs(false);
     setShowCommand(false);
   };
 
@@ -972,6 +981,13 @@ export default function App() {
         hint: t("command.prefs.hint"),
         shortcut: "Ctrl/⌘ + ,",
         run: openPrefs
+      },
+      {
+        id: "agent-setup",
+        title: t("command.onboarding.title"),
+        hint: t("command.onboarding.hint"),
+        keywords: t("command.keywords.onboarding"),
+        run: openAgentSetup
       },
       {
         id: "new-tab",
@@ -2699,6 +2715,15 @@ export default function App() {
               </span>
             ) : null}
           </div>
+          <button
+            className="btn agent-setup-trigger"
+            title={t("app.agentSetup.openTitle")}
+            aria-label={t("app.agentSetup.openTitle")}
+            onClick={openAgentSetup}
+          >
+            <Icon name="backup" />
+            <span>{t("app.agentSetup.open")}</span>
+          </button>
         </div>
 
         <div className="tabs" role="tablist" aria-label={t("app.workspaces.label")}>
@@ -2895,6 +2920,10 @@ export default function App() {
                 {t("app.prefs.export")}
               </button>
 
+              <button className="btn" title={t("app.agentSetup.openTitle")} onClick={openAgentSetup}>
+                {t("app.agentSetup.open")}
+              </button>
+
               <button className="btn" title={t("app.qrImport.openTitle")} onClick={openQrImport}>
                 {t("app.qrImport.open")}
               </button>
@@ -2915,6 +2944,14 @@ export default function App() {
           <button className="modal-backdrop" aria-label={t("common.actions.close")} onClick={() => setShowPrefs(false)} />
         </div>
       ) : null}
+
+      <AgentOnboardingModal
+        open={showAgentSetup}
+        onClose={() => setShowAgentSetup(false)}
+        onNotify={notify}
+        settings={settings}
+        webPreview={webPreview}
+      />
 
       {showQrImport ? (
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-label={t("app.qrImport.title")}>

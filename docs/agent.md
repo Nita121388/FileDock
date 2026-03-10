@@ -4,6 +4,19 @@ FileDock's Rust CLI (`filedock`) can run as a simple config-file agent and now a
 
 This document shows the current agent workflow and the lower-level scheduling templates behind it.
 
+## Desktop guided flow
+
+If you are using the Tauri desktop app, open **Set up agent** from the toolbar or Preferences.
+The desktop flow wraps the CLI lifecycle commands below:
+
+- import server JSON / QR payload,
+- choose profile + folder + schedule,
+- create/update the saved agent profile,
+- preview/install or remove the platform service,
+- verify local/service/server-visible status.
+
+The desktop app stays the wizard only; the long-running background worker is still `filedock agent`.
+
 ## Config-file agent mode (recommended)
 
 Instead of wiring many env vars/flags into schedulers, you can run the agent from a config file:
@@ -41,6 +54,13 @@ Check local/service/server-visible status:
 
 ```bash
 filedock agent status --profile laptop
+```
+
+Remove the platform service later if needed, and optionally delete the saved profile too:
+
+```bash
+filedock agent uninstall --profile laptop
+filedock agent uninstall --profile laptop --delete-config
 ```
 
 If you only want device credentials without writing a profile first:

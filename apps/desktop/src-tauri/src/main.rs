@@ -7,7 +7,7 @@ use filedock_protocol::{
 };
 use futures_util::StreamExt;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::HashMap,
     io::{Read, Write},
@@ -162,6 +162,120 @@ struct PushFolderSnapshotResponse {
     snapshot_id: Option<String>,
     stdout: String,
     stderr: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AgentInitRequest {
+    profile: String,
+    folder: String,
+    server_base_url: String,
+    #[serde(default)]
+    device_name: Option<String>,
+    #[serde(default)]
+    interval_secs: Option<u64>,
+    #[serde(default)]
+    heartbeat_secs: Option<u64>,
+    #[serde(default)]
+    keep_bootstrap_token: bool,
+    #[serde(default)]
+    token: Option<String>,
+    #[serde(default)]
+    device_id: Option<String>,
+    #[serde(default)]
+    device_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AgentInstallRequest {
+    profile: String,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AgentUninstallRequest {
+    profile: String,
+    #[serde(default)]
+    delete_config: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AgentInitSummary {
+    profile: String,
+    config_path: String,
+    state_path: String,
+    server: String,
+    device_name: String,
+    folder: String,
+    auth_mode: String,
+    device_registered: bool,
+    device_id: Option<String>,
+    kept_bootstrap_token: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AgentInstallSummary {
+    profile: String,
+    config_path: String,
+    service_manager: String,
+    service_name: String,
+    service_path: Option<String>,
+    dry_run: bool,
+    installed: bool,
+    enabled: Option<bool>,
+    running: Option<bool>,
+    note: Option<String>,
+    preview: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AgentServiceStatus {
+    manager: String,
+    name: String,
+    path: Option<String>,
+    installed: bool,
+    enabled: Option<bool>,
+    running: Option<bool>,
+    note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AgentServerStatus {
+    ok: bool,
+    auth_mode: String,
+    device_id: Option<String>,
+    last_seen_unix: Option<i64>,
+    snapshot_count: Option<usize>,
+    latest_snapshot_id: Option<String>,
+    latest_snapshot_created_unix: Option<i64>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AgentStatusSummary {
+    profile: String,
+    config_path: String,
+    config_exists: bool,
+    state_path: String,
+    state_exists: bool,
+    server: Option<String>,
+    folder: Option<String>,
+    device_name: Option<String>,
+    auth_mode: Option<String>,
+    service: AgentServiceStatus,
+    server_status: Option<AgentServerStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AgentUninstallSummary {
+    profile: String,
+    config_path: String,
+    service_manager: String,
+    service_name: String,
+    service_path: Option<String>,
+    removed_service: bool,
+    removed_config: bool,
+    note: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1069,6 +1183,10 @@ fn main() {
             terminal_write,
             terminal_resize,
             terminal_close,
+            agent_init,
+            agent_install,
+            agent_uninstall,
+            agent_status,
             run_filedock_plugin,
             cancel_filedock_plugin_run,
             copy_snapshot_file_to_sftp,
@@ -2197,6 +2315,159 @@ async fn import_sftp_file_to_snapshot(
 
     emit_import(&app, &run_id, "done", None, None, Some(100));
     Ok(())
+}
+
+fn trim_option(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|s| !s.is_empty())
+}
+
+async fn run_filedock_json<T: DeserializeOwned>(args: Vec<String>) -> Result<T, String> {
+    let (filedock, _) = resolve_filedock_path(None);
+    let mut cmd = tokio::process::Command::new(filedock);
+    apply_no_window(&mut cmd);
+    cmd.args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("run filedock: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() {
+        let detail = stderr.trim();
+        let detail = if detail.is_empty() {
+            stdout.trim()
+        } else {
+            detail
+        };
+        return Err(format!(
+            "filedock command failed: {}{}{}",
+            output.status,
+            if detail.is_empty() { "" } else { " - " },
+            detail
+        ));
+    }
+
+    serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("decode filedock JSON: {e}; stdout={}", stdout.trim()))
+}
+
+#[tauri::command]
+async fn agent_init(req: AgentInitRequest) -> Result<AgentInitSummary, String> {
+    let profile = req.profile.trim();
+    if profile.is_empty() {
+        return Err("profile required".to_string());
+    }
+    let folder = req.folder.trim();
+    if folder.is_empty() {
+        return Err("folder required".to_string());
+    }
+    let server = req.server_base_url.trim();
+    if server.is_empty() {
+        return Err("server_base_url required".to_string());
+    }
+
+    let device_id = trim_option(req.device_id.as_deref());
+    let device_token = trim_option(req.device_token.as_deref());
+    if device_id.is_some() ^ device_token.is_some() {
+        return Err("device_id and device_token must be provided together".to_string());
+    }
+
+    let mut args = vec![
+        "agent".to_string(),
+        "init".to_string(),
+        "--profile".to_string(),
+        profile.to_string(),
+        "--folder".to_string(),
+        folder.to_string(),
+        "--server".to_string(),
+        server.to_string(),
+        "--interval-secs".to_string(),
+        req.interval_secs.unwrap_or(900).max(1).to_string(),
+        "--heartbeat-secs".to_string(),
+        req.heartbeat_secs.unwrap_or(300).to_string(),
+    ];
+
+    if let Some(device_name) = trim_option(req.device_name.as_deref()) {
+        args.push("--device-name".to_string());
+        args.push(device_name.to_string());
+    }
+    if let Some(token) = trim_option(req.token.as_deref()) {
+        args.push("--token".to_string());
+        args.push(token.to_string());
+    }
+    if let Some(id) = device_id {
+        args.push("--device-id".to_string());
+        args.push(id.to_string());
+    }
+    if let Some(token) = device_token {
+        args.push("--device-token".to_string());
+        args.push(token.to_string());
+    }
+    if req.keep_bootstrap_token {
+        args.push("--keep-bootstrap-token".to_string());
+    }
+
+    run_filedock_json(args).await
+}
+
+#[tauri::command]
+async fn agent_install(req: AgentInstallRequest) -> Result<AgentInstallSummary, String> {
+    let profile = req.profile.trim();
+    if profile.is_empty() {
+        return Err("profile required".to_string());
+    }
+
+    let mut args = vec![
+        "agent".to_string(),
+        "install".to_string(),
+        "--profile".to_string(),
+        profile.to_string(),
+    ];
+    if req.dry_run {
+        args.push("--dry-run".to_string());
+    }
+
+    run_filedock_json(args).await
+}
+
+#[tauri::command]
+async fn agent_status(profile: String) -> Result<AgentStatusSummary, String> {
+    let profile = profile.trim();
+    if profile.is_empty() {
+        return Err("profile required".to_string());
+    }
+
+    run_filedock_json(vec![
+        "agent".to_string(),
+        "status".to_string(),
+        "--profile".to_string(),
+        profile.to_string(),
+    ])
+    .await
+}
+
+#[tauri::command]
+async fn agent_uninstall(req: AgentUninstallRequest) -> Result<AgentUninstallSummary, String> {
+    let profile = req.profile.trim();
+    if profile.is_empty() {
+        return Err("profile required".to_string());
+    }
+
+    let mut args = vec![
+        "agent".to_string(),
+        "uninstall".to_string(),
+        "--profile".to_string(),
+        profile.to_string(),
+    ];
+    if req.delete_config {
+        args.push("--delete-config".to_string());
+    }
+
+    run_filedock_json(args).await
 }
 
 #[tauri::command]
