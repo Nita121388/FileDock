@@ -15,6 +15,7 @@ Implemented (see `progress/` for exact commits):
 ## Next (near-term)
 
 - Guided agent onboarding polish: richer verification UX, config/service previews, setup cleanup/remove-service flow, and cross-platform validation for the new desktop setup flow.
+- Agent scheduling (optional): add a `run-once` agent mode plus `agent install --mode scheduled` so platforms can use native timers (systemd timers / launchd StartInterval / Windows periodic tasks) instead of keeping a long-running loop alive.
 - Encryption at rest (optional): per-device key, client-side encryption before upload.
 - Better ignore rules: `.gitignore`-style files, default excludes (node_modules, .git, etc).
 - Restore UX: desktop "restore folder" workflow (not only per-file download).
