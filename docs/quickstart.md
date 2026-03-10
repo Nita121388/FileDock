@@ -130,6 +130,22 @@ If you enabled `FILEDOCK_TOKEN` on the server:
 export FILEDOCK_TOKEN="change-me"
 ```
 
+## 2c) Restore a snapshot to a local folder (CLI)
+
+```bash
+cargo run -p filedock -- pull-folder \
+  --server http://127.0.0.1:8787 \
+  --snapshot <snapshot-id> \
+  --out /tmp/filedock-restore \
+  --concurrency 4
+```
+
+If the destination already contains files, choose a conflict policy:
+
+- `--conflict-policy overwrite` (default): overwrite existing files
+- `--conflict-policy skip`: keep existing files (do not overwrite)
+- `--conflict-policy rename`: write to a unique `(... restore <snap>)` destination name
+
 ## 3) Browse snapshots (TUI)
 
 ```bash

@@ -695,6 +695,10 @@ enum Command {
         /// Number of files to download in parallel.
         #[arg(long, default_value_t = DEFAULT_CONCURRENCY)]
         concurrency: usize,
+
+        /// Conflict policy when a destination path already exists.
+        #[arg(long, value_enum, default_value_t = RestoreConflictPolicy::Overwrite)]
+        conflict_policy: RestoreConflictPolicy,
     },
 
     /// List snapshots known to the server.
@@ -851,6 +855,16 @@ enum Command {
         #[command(subcommand)]
         command: PluginCommand,
     },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum RestoreConflictPolicy {
+    /// Overwrite existing files (default).
+    Overwrite,
+    /// Skip files that already exist in the destination.
+    Skip,
+    /// Rename destination files when they already exist.
+    Rename,
 }
 
 #[derive(Subcommand, Debug)]
@@ -2738,6 +2752,7 @@ async fn main() -> Result<(), String> {
             snapshot,
             out,
             concurrency,
+            conflict_policy,
         } => {
             let client = build_client()?;
 
@@ -2763,6 +2778,7 @@ async fn main() -> Result<(), String> {
             let server_base = server.trim_end_matches('/').to_string();
             let snapshot_id = snapshot.clone();
             let out_root = out.clone();
+            let conflict_policy = conflict_policy;
 
             let results: Vec<Result<(), String>> = stream::iter(manifest.files.into_iter())
                 .map(|f| {
@@ -2771,6 +2787,7 @@ async fn main() -> Result<(), String> {
                     let server_base = server_base.clone();
                     let snapshot_id = snapshot_id.clone();
                     let out_root = out_root.clone();
+                    let conflict_policy = conflict_policy;
                     async move {
                         let rel_path = f.path;
                         let out_path =
@@ -2779,6 +2796,20 @@ async fn main() -> Result<(), String> {
                         let bytes =
                             get_bytes_with_retry(&client, &url, &[("path", rel_path.as_str())])
                                 .await?;
+
+                        let out_path =
+                            resolve_restore_conflict_path(&out_path, conflict_policy, &snapshot_id)
+                                .await?;
+                        let Some(out_path) = out_path else {
+                            // Skip existing file while keeping the progress accounting stable.
+                            let done = downloaded_files
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                + 1;
+                            if done.is_multiple_of(25) || done == total_files {
+                                eprintln!("downloaded files: {done}/{total_files}");
+                            }
+                            return Ok(());
+                        };
 
                         if let Some(parent) = out_path.parent() {
                             tokio::fs::create_dir_all(parent)
@@ -4028,6 +4059,73 @@ async fn get_bytes_with_retry(
     }
 }
 
+fn snapshot_id_short(snapshot_id: &str) -> String {
+    snapshot_id.chars().take(8).collect::<String>()
+}
+
+fn restore_rename_candidate(
+    out_path: &Path,
+    snap_short: &str,
+    attempt: usize,
+) -> Result<PathBuf, String> {
+    let file_name = out_path
+        .file_name()
+        .ok_or_else(|| format!("invalid output path: {}", out_path.display()))?;
+    let stem = out_path.file_stem().unwrap_or(file_name).to_string_lossy();
+    let ext = out_path.extension().map(|s| s.to_string_lossy());
+    let suffix = if attempt == 0 {
+        format!(" (restore {snap_short})")
+    } else {
+        format!(" (restore {snap_short}) ({})", attempt + 1)
+    };
+
+    let name = match ext {
+        Some(ext) => format!("{stem}{suffix}.{ext}"),
+        None => format!("{stem}{suffix}"),
+    };
+
+    Ok(out_path.with_file_name(name))
+}
+
+async fn resolve_restore_conflict_path(
+    out_path: &Path,
+    policy: RestoreConflictPolicy,
+    snapshot_id: &str,
+) -> Result<Option<PathBuf>, String> {
+    let exists = match tokio::fs::metadata(out_path).await {
+        Ok(_) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(format!("stat {}: {e}", out_path.display())),
+    };
+
+    if !exists {
+        return Ok(Some(out_path.to_path_buf()));
+    }
+
+    match policy {
+        RestoreConflictPolicy::Overwrite => Ok(Some(out_path.to_path_buf())),
+        RestoreConflictPolicy::Skip => Ok(None),
+        RestoreConflictPolicy::Rename => {
+            let snap_short = snapshot_id_short(snapshot_id);
+            for attempt in 0usize..=1000usize {
+                let cand = restore_rename_candidate(out_path, &snap_short, attempt)?;
+                let exists = match tokio::fs::metadata(&cand).await {
+                    Ok(_) => true,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(e) => return Err(format!("stat {}: {e}", cand.display())),
+                };
+                if !exists {
+                    return Ok(Some(cand));
+                }
+            }
+            Err(format!(
+                "too many name conflicts when restoring {}",
+                out_path.display()
+            ))
+        }
+    }
+}
+
 const DEFAULT_CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
 async fn compute_chunks_for_file(path: &PathBuf) -> Result<Vec<ChunkRef>, String> {
@@ -4087,7 +4185,8 @@ mod tests {
         apply_default_excludes_if_needed, build_excludes, default_config_root_from_env,
         is_ignored_path, load_root_gitignore, render_launchd_plist_scheduled,
         render_systemd_user_oneshot_unit, render_systemd_user_timer, render_systemd_user_unit,
-        summarize_http_body, validate_profile_name,
+        resolve_restore_conflict_path, summarize_http_body, validate_profile_name,
+        RestoreConflictPolicy,
     };
     use std::path::{Path, PathBuf};
 
@@ -4284,6 +4383,53 @@ mod tests {
             "keep.log",
             false
         ));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn resolve_restore_conflict_path_skips_existing_file() {
+        let root = mk_tmp_dir("restore_skip");
+        let out = root.join("file.txt");
+        tokio::fs::write(&out, "hello").await.unwrap();
+
+        let resolved =
+            resolve_restore_conflict_path(&out, RestoreConflictPolicy::Skip, "12345678abcdef")
+                .await
+                .unwrap();
+        assert!(resolved.is_none());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn resolve_restore_conflict_path_renames_when_needed() {
+        let root = mk_tmp_dir("restore_rename");
+        let out = root.join("report.txt");
+        tokio::fs::write(&out, "hello").await.unwrap();
+
+        let snapshot_id = "12345678-dead-beef";
+
+        let first = resolve_restore_conflict_path(&out, RestoreConflictPolicy::Rename, snapshot_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            first.file_name().unwrap().to_string_lossy(),
+            "report (restore 12345678).txt"
+        );
+
+        tokio::fs::write(&first, "exists").await.unwrap();
+
+        let second =
+            resolve_restore_conflict_path(&out, RestoreConflictPolicy::Rename, snapshot_id)
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            second.file_name().unwrap().to_string_lossy(),
+            "report (restore 12345678) (2).txt"
+        );
 
         std::fs::remove_dir_all(&root).unwrap();
     }
