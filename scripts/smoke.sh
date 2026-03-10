@@ -50,14 +50,23 @@ run_server() {
 }
 
 run_cli() {
-  if [ -x "$ROOT/target/release/filedock" ]; then
-    FILEDOCK_TOKEN="$TOKEN" "$ROOT/target/release/filedock" "$@"
-  elif [ -x "$ROOT/target/debug/filedock" ]; then
-    FILEDOCK_TOKEN="$TOKEN" "$ROOT/target/debug/filedock" "$@"
-  else
+  if [ -n "${CLI_MODE:-}" ] && [ "$CLI_MODE" = "cargo" ]; then
     need cargo
     (cd "$ROOT" && FILEDOCK_TOKEN="$TOKEN" cargo run -p filedock -- "$@")
+    return
   fi
+
+  if [ -x "$ROOT/target/release/filedock" ]; then
+    FILEDOCK_TOKEN="$TOKEN" "$ROOT/target/release/filedock" "$@"
+    return
+  fi
+  if [ -x "$ROOT/target/debug/filedock" ]; then
+    FILEDOCK_TOKEN="$TOKEN" "$ROOT/target/debug/filedock" "$@"
+    return
+  fi
+
+  need cargo
+  (cd "$ROOT" && FILEDOCK_TOKEN="$TOKEN" cargo run -p filedock -- "$@")
 }
 
 cleanup() {
@@ -69,6 +78,41 @@ cleanup() {
   rm -rf "$TMP"
 }
 trap cleanup EXIT
+
+echo "[smoke] selecting CLI mode..."
+
+# Prefer using a built CLI binary if it looks compatible. Otherwise fall back to
+# `cargo run` so the smoke test doesn't silently exercise a stale debug binary.
+CLI_MODE="${CLI_MODE:-bin}"
+if [ "$CLI_MODE" = "bin" ]; then
+  CLI_BIN=""
+  if [ -x "$ROOT/target/release/filedock" ]; then
+    CLI_BIN="$ROOT/target/release/filedock"
+  elif [ -x "$ROOT/target/debug/filedock" ]; then
+    CLI_BIN="$ROOT/target/debug/filedock"
+  fi
+
+  if [ -n "$CLI_BIN" ]; then
+    if ! "$CLI_BIN" status --help 2>/dev/null | grep -q -- '--include-ignored'; then
+      if command -v cargo >/dev/null 2>&1; then
+        CLI_MODE="cargo"
+      else
+        echo "[smoke] filedock binary missing --include-ignored; rebuild or install a newer CLI" >&2
+        exit 1
+      fi
+    fi
+    if ! "$CLI_BIN" push-folder --help 2>/dev/null | grep -q -- '--respect-gitignore'; then
+      if command -v cargo >/dev/null 2>&1; then
+        CLI_MODE="cargo"
+      else
+        echo "[smoke] filedock binary missing --respect-gitignore; rebuild or install a newer CLI" >&2
+        exit 1
+      fi
+    fi
+  fi
+fi
+
+echo "[smoke] CLI mode: $CLI_MODE"
 
 echo "[smoke] starting server..."
 run_server >/dev/null 2>&1 &
@@ -134,9 +178,62 @@ run_cli pull-folder --server "$BASE" --snapshot "$SNAPSHOT_ID2" --out "$OUT2" --
 test -f "$OUT2/keep.txt"
 test ! -f "$OUT2/skip.bin"
 
+echo "[smoke] status reasons (ignore_file)..."
+STATUS2="$(run_cli status --server "$BASE" --snapshot "$SNAPSHOT_ID2" --folder "$SRC2" --include-ignored)"
+python3 - <<PY
+import json
+items=json.loads("""$STATUS2""")
+skip=[x for x in items if x.get("path")=="skip.bin"]
+assert skip, items
+assert skip[0].get("status")=="ignored", skip[0]
+reason=(skip[0].get("reason") or "")
+assert "ignore_file" in reason, reason
+PY
+
+echo "[smoke] testing .gitignore (--respect-gitignore)..."
+SRC3="$TMP/src3"
+OUT3="$TMP/out3"
+mkdir -p "$SRC3" "$OUT3"
+echo "keep" > "$SRC3/keep.txt"
+echo "keep" > "$SRC3/keep.log"
+echo "skip" > "$SRC3/skip.log"
+dd if=/dev/urandom of="$SRC3/skip.bin" bs=1024 count=4 status=none
+cat > "$SRC3/.gitignore" <<'EOF'
+# ignore binary
+skip.bin
+# ignore logs but keep one
+*.log
+!keep.log
+EOF
+
+PUSH_OUT3="$(run_cli push-folder --server "$BASE" --device smoke --folder "$SRC3" --respect-gitignore)"
+SNAPSHOT_ID3="$(echo "$PUSH_OUT3" | sed -n 's/^snapshot:[[:space:]]*//p' | head -n1)"
+if [ -z "$SNAPSHOT_ID3" ]; then
+  echo "[smoke] could not parse snapshot id (gitignore test)" >&2
+  exit 1
+fi
+run_cli pull-folder --server "$BASE" --snapshot "$SNAPSHOT_ID3" --out "$OUT3" --concurrency 4 >/dev/null
+test -f "$OUT3/keep.txt"
+test -f "$OUT3/keep.log"
+test ! -f "$OUT3/skip.log"
+test ! -f "$OUT3/skip.bin"
+
+echo "[smoke] status reasons (.gitignore)..."
+STATUS3="$(run_cli status --server "$BASE" --snapshot "$SNAPSHOT_ID3" --folder "$SRC3" --include-ignored --respect-gitignore)"
+python3 - <<PY
+import json
+items=json.loads("""$STATUS3""")
+skip_bin=[x for x in items if x.get("path")=="skip.bin"]
+assert skip_bin, items
+assert skip_bin[0].get("status")=="ignored", skip_bin[0]
+reason=(skip_bin[0].get("reason") or "")
+assert ".gitignore" in reason, reason
+PY
+
 echo "[smoke] testing delete + GC..."
 run_cli delete-snapshot --server "$BASE" --snapshot "$SNAPSHOT_ID" >/dev/null
 run_cli delete-snapshot --server "$BASE" --snapshot "$SNAPSHOT_ID2" >/dev/null
+run_cli delete-snapshot --server "$BASE" --snapshot "$SNAPSHOT_ID3" >/dev/null
 
 GC_DRY="$(run_cli gc-chunks --server "$BASE" --dry-run)"
 python3 - <<PY

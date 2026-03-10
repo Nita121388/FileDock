@@ -27,6 +27,8 @@ This script:
 - restores it to a new folder
 - compares file hashes
 - exercises `.filedockignore`
+- exercises `.gitignore` via `--respect-gitignore`
+- exercises `filedock status --include-ignored` reasons (ignore source/pattern)
 - exercises snapshot delete + chunk GC
 
 If it exits with code 0, the basic end-to-end flow works.
