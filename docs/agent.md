@@ -27,6 +27,12 @@ filedock agent --config ./agent.toml
 
 Example config: `deploy/agent-config.example.toml`.
 
+If you want a scheduler-friendly command that runs exactly one snapshot and exits:
+
+```bash
+filedock agent run-once --config ./agent.toml
+```
+
 ## Guided CLI workflow
 
 Create or update a named profile in the platform-default config directory:
@@ -48,6 +54,19 @@ Preview or install the current-platform background service for that profile:
 ```bash
 filedock agent install --profile laptop --dry-run
 filedock agent install --profile laptop
+```
+
+Install modes:
+
+- Default (`--mode daemon`): keep a long-running agent alive; cadence is owned by `interval_secs` in the saved profile.
+- Optional (`--mode scheduled`): use OS-native schedulers to run `agent run-once` periodically (cadence is still sourced
+  from `interval_secs` in the saved profile, but the scheduler owns the timer).
+
+Example:
+
+```bash
+filedock agent install --profile laptop --mode scheduled --dry-run
+filedock agent install --profile laptop --mode scheduled
 ```
 
 Check local/service/server-visible status:

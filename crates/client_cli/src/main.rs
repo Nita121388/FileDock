@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use filedock_protocol::{
     is_valid_chunk_hash, is_valid_rel_path, ChunkGcRequest, ChunkGcResponse, ChunkPresenceRequest,
     ChunkPresenceResponse, ChunkRef, DeviceHeartbeatRequest, DeviceHeartbeatResponse, DeviceInfo,
@@ -338,6 +338,10 @@ fn systemd_unit_name(profile: &str) -> String {
     format!("filedock-agent-{profile}.service")
 }
 
+fn systemd_timer_name(profile: &str) -> String {
+    format!("filedock-agent-{profile}.timer")
+}
+
 fn launchd_label(profile: &str) -> String {
     format!("com.filedock.agent.{profile}")
 }
@@ -360,6 +364,22 @@ fn linux_systemd_user_unit_path(profile: &str) -> Result<PathBuf, String> {
             "XDG_CONFIG_HOME or HOME required to resolve systemd user dir".to_string()
         })?;
     Ok(base.join("systemd/user").join(systemd_unit_name(profile)))
+}
+
+fn linux_systemd_user_timer_path(profile: &str) -> Result<PathBuf, String> {
+    let base = trim_nonempty(std::env::var("XDG_CONFIG_HOME").ok())
+        .map(PathBuf::from)
+        .or_else(|| {
+            home_dir_from_env(
+                std::env::var("HOME").ok(),
+                std::env::var("USERPROFILE").ok(),
+            )
+            .map(|p| p.join(".config"))
+        })
+        .ok_or_else(|| {
+            "XDG_CONFIG_HOME or HOME required to resolve systemd user dir".to_string()
+        })?;
+    Ok(base.join("systemd/user").join(systemd_timer_name(profile)))
 }
 
 fn macos_launch_agent_path(profile: &str) -> Result<PathBuf, String> {
@@ -403,6 +423,38 @@ WantedBy=default.target
     )
 }
 
+fn render_systemd_user_oneshot_unit(profile: &str, exe: &Path, config: &Path) -> String {
+    format!(
+        "[Unit]
+Description=FileDock agent run-once ({profile})
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={} agent run-once --config {}
+",
+        exe.display(),
+        config.display(),
+    )
+}
+
+fn render_systemd_user_timer(profile: &str, interval_secs: u64) -> String {
+    format!(
+        "[Unit]
+Description=FileDock agent timer ({profile})
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec={interval_secs}s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"
+    )
+}
+
 fn render_launchd_plist(profile: &str, exe: &Path, config: &Path) -> String {
     let label = xml_escape(&launchd_label(profile));
     let exe = xml_escape(&exe.display().to_string());
@@ -425,6 +477,40 @@ fn render_launchd_plist(profile: &str, exe: &Path, config: &Path) -> String {
     <true/>
     <key>KeepAlive</key>
     <true/>
+  </dict>
+</plist>
+"#
+    )
+}
+
+fn render_launchd_plist_scheduled(
+    profile: &str,
+    exe: &Path,
+    config: &Path,
+    interval_secs: u64,
+) -> String {
+    let label = xml_escape(&launchd_label(profile));
+    let exe = xml_escape(&exe.display().to_string());
+    let config = xml_escape(&config.display().to_string());
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>{label}</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>{exe}</string>
+      <string>agent</string>
+      <string>run-once</string>
+      <string>--config</string>
+      <string>{config}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>{interval_secs}</integer>
   </dict>
 </plist>
 "#
@@ -799,10 +885,25 @@ enum DeviceCommand {
     },
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum AgentInstallMode {
+    /// Keep a long-running agent process alive (schedule is owned by `interval_secs` in the profile).
+    Daemon,
+    /// Use OS-native schedulers to periodically run `filedock agent run-once ...` and exit.
+    Scheduled,
+}
+
 #[derive(Subcommand, Debug)]
 enum AgentCommand {
     /// Run a simple device agent from a config file.
     Run {
+        /// Config file path.
+        #[arg(long)]
+        config: PathBuf,
+    },
+
+    /// Run exactly one snapshot from a config file and exit.
+    RunOnce {
         /// Config file path.
         #[arg(long)]
         config: PathBuf,
@@ -892,6 +993,10 @@ enum AgentCommand {
         /// Render the service definition without writing or starting it.
         #[arg(long)]
         dry_run: bool,
+
+        /// Installation mode (`daemon` keeps a long-running process alive; `scheduled` uses OS timers).
+        #[arg(long, value_enum, default_value_t = AgentInstallMode::Daemon)]
+        mode: AgentInstallMode,
     },
 
     /// Show local/service/server status for a profile.
@@ -1079,6 +1184,59 @@ async fn load_agent_config(config: &Path) -> Result<AgentConfig, String> {
         .await
         .map_err(|e| format!("read config {}: {e}", config.display()))?;
     toml::from_str(&raw).map_err(|e| format!("parse config {}: {e}", config.display()))
+}
+
+async fn run_agent_once_from_config_path(config: &Path) -> Result<(), String> {
+    let cfg = load_agent_config(config).await?;
+
+    apply_agent_env(&cfg);
+
+    eprintln!(
+        "agent(run-once): server={} device_name={} folder={} concurrency={} heartbeat={}s",
+        cfg.server,
+        cfg.device_name,
+        cfg.folder.display(),
+        cfg.concurrency,
+        cfg.heartbeat_secs
+    );
+
+    let heartbeat_enabled = cfg.heartbeat_secs > 0;
+
+    if heartbeat_enabled {
+        let st = cfg
+            .heartbeat_status
+            .clone()
+            .or_else(|| Some("online".to_string()));
+        if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
+            eprintln!("heartbeat: {e}");
+        }
+    }
+
+    let snap = push_folder_impl(
+        cfg.server.clone(),
+        cfg.device_name.clone(),
+        cfg.folder.clone(),
+        cfg.note.clone(),
+        cfg.concurrency,
+        cfg.exclude.clone(),
+        cfg.ignore_file.clone(),
+    )
+    .await?;
+
+    eprintln!("agent(run-once): completed snapshot: {snap}");
+
+    if heartbeat_enabled {
+        let st = cfg
+            .heartbeat_status
+            .clone()
+            .map(|s| format!("{s} (snapshot {snap})"));
+        let st = st.or_else(|| Some(format!("snapshot {snap}")));
+        if let Err(e) = send_heartbeat_impl(&cfg.server, st).await {
+            eprintln!("heartbeat: {e}");
+        }
+    }
+
+    Ok(())
 }
 
 async fn run_agent_from_config_path(config: &Path) -> Result<(), String> {
@@ -1526,6 +1684,7 @@ fn describe_probe_error(label: &str, probe: &ProcessProbe) -> String {
 async fn install_agent_service(
     profile: &str,
     dry_run: bool,
+    mode: AgentInstallMode,
 ) -> Result<AgentInstallSummary, String> {
     validate_profile_name(profile)?;
     let config_path = agent_profile_path(profile)?;
@@ -1534,12 +1693,37 @@ async fn install_agent_service(
     }
 
     let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    let scheduled_interval_secs = if matches!(mode, AgentInstallMode::Scheduled) {
+        let cfg = load_agent_config(&config_path).await?;
+        if cfg.interval_secs == 0 {
+            return Err(
+                "scheduled mode requires interval_secs > 0 in the saved profile".to_string(),
+            );
+        }
+        Some(cfg.interval_secs)
+    } else {
+        None
+    };
     let platform = current_platform_name();
     match platform {
         "macos" => {
             let plist_path = macos_launch_agent_path(profile)?;
-            let content = render_launchd_plist(profile, &exe, &config_path);
+            let mut note_parts: Vec<String> = Vec::new();
+            let content = match mode {
+                AgentInstallMode::Daemon => render_launchd_plist(profile, &exe, &config_path),
+                AgentInstallMode::Scheduled => {
+                    let interval_secs = scheduled_interval_secs.ok_or_else(|| {
+                        "internal error: missing scheduled interval for scheduled install"
+                            .to_string()
+                    })?;
+                    note_parts.push(format!(
+                        "Scheduled mode: launchd runs `agent run-once` every {interval_secs}s."
+                    ));
+                    render_launchd_plist_scheduled(profile, &exe, &config_path, interval_secs)
+                }
+            };
             if dry_run {
+                note_parts.push("Dry run only; no files were written.".to_string());
                 return Ok(AgentInstallSummary {
                     profile: profile.to_string(),
                     config_path: config_path.display().to_string(),
@@ -1550,7 +1734,7 @@ async fn install_agent_service(
                     installed: false,
                     enabled: None,
                     running: None,
-                    note: Some("Dry run only; no files were written.".to_string()),
+                    note: Some(note_parts.join(" ")),
                     preview: Some(content),
                 });
             }
@@ -1584,115 +1768,303 @@ async fn install_agent_service(
                 installed: true,
                 enabled: Some(true),
                 running: listed.as_ref().map(|p| p.ok),
-                note: None,
+                note: if note_parts.is_empty() {
+                    None
+                } else {
+                    Some(note_parts.join(" "))
+                },
                 preview: None,
             })
         }
         "windows" => {
             let task_name = windows_task_name(profile);
-            let command = format!(
-                "\"{}\" agent --config \"{}\"",
-                exe.display(),
-                config_path.display()
-            );
-            let preview = format!(
-                "schtasks /Create /F /SC ONLOGON /TN \"{}\" /TR {}",
-                task_name, command
-            );
-            if dry_run {
-                return Ok(AgentInstallSummary {
-                    profile: profile.to_string(),
-                    config_path: config_path.display().to_string(),
-                    service_manager: "task_scheduler".to_string(),
-                    service_name: task_name,
-                    service_path: None,
-                    dry_run: true,
-                    installed: false,
-                    enabled: None,
-                    running: None,
-                    note: Some("Dry run only; no scheduled task was created.".to_string()),
-                    preview: Some(preview),
-                });
+            let mut note_parts: Vec<String> = Vec::new();
+
+            match mode {
+                AgentInstallMode::Daemon => {
+                    let command = format!(
+                        "\"{}\" agent --config \"{}\"",
+                        exe.display(),
+                        config_path.display()
+                    );
+                    let preview = format!(
+                        "schtasks /Create /F /SC ONLOGON /TN \"{}\" /TR {}",
+                        task_name, command
+                    );
+                    if dry_run {
+                        return Ok(AgentInstallSummary {
+                            profile: profile.to_string(),
+                            config_path: config_path.display().to_string(),
+                            service_manager: "task_scheduler".to_string(),
+                            service_name: task_name,
+                            service_path: None,
+                            dry_run: true,
+                            installed: false,
+                            enabled: None,
+                            running: None,
+                            note: Some("Dry run only; no scheduled task was created.".to_string()),
+                            preview: Some(preview),
+                        });
+                    }
+
+                    let create = run_process(
+                        "schtasks",
+                        &[
+                            "/Create", "/F", "/SC", "ONLOGON", "/TN", &task_name, "/TR", &command,
+                        ],
+                    )?;
+                    if !create.ok {
+                        return Err(describe_probe_error("schtasks /Create", &create));
+                    }
+                    Ok(AgentInstallSummary {
+                        profile: profile.to_string(),
+                        config_path: config_path.display().to_string(),
+                        service_manager: "task_scheduler".to_string(),
+                        service_name: task_name,
+                        service_path: None,
+                        dry_run: false,
+                        installed: true,
+                        enabled: Some(true),
+                        running: None,
+                        note: Some("The task starts the long-running agent at user logon; backup cadence stays in the profile TOML.".to_string()),
+                        preview: None,
+                    })
+                }
+                AgentInstallMode::Scheduled => {
+                    let interval_secs = scheduled_interval_secs.ok_or_else(|| {
+                        "internal error: missing scheduled interval for scheduled install"
+                            .to_string()
+                    })?;
+                    let interval_minutes = (interval_secs / 60).max(1);
+                    if interval_minutes > 1439 {
+                        return Err(format!(
+                            "Windows scheduled mode supports up to 1439 minutes; profile interval_secs={interval_secs} maps to {interval_minutes} minutes"
+                        ));
+                    }
+                    if interval_secs % 60 != 0 {
+                        note_parts.push(format!(
+                            "Windows Task Scheduler uses whole minutes; interval_secs={interval_secs} is rounded down to {interval_minutes} minutes."
+                        ));
+                    }
+
+                    let mo = interval_minutes.to_string();
+                    let command = format!(
+                        "\"{}\" agent run-once --config \"{}\"",
+                        exe.display(),
+                        config_path.display()
+                    );
+                    let preview = format!(
+                        "schtasks /Create /F /SC MINUTE /MO {} /ST 00:00 /TN \"{}\" /TR {}",
+                        interval_minutes, task_name, command
+                    );
+                    if dry_run {
+                        note_parts.push("Dry run only; no scheduled task was created.".to_string());
+                        return Ok(AgentInstallSummary {
+                            profile: profile.to_string(),
+                            config_path: config_path.display().to_string(),
+                            service_manager: "task_scheduler".to_string(),
+                            service_name: task_name,
+                            service_path: None,
+                            dry_run: true,
+                            installed: false,
+                            enabled: None,
+                            running: None,
+                            note: Some(note_parts.join(" ")),
+                            preview: Some(preview),
+                        });
+                    }
+
+                    let args: Vec<&str> = vec![
+                        "/Create", "/F", "/SC", "MINUTE", "/MO", &mo, "/ST", "00:00", "/TN",
+                        &task_name, "/TR", &command,
+                    ];
+                    let create = run_process("schtasks", &args)?;
+                    if !create.ok {
+                        return Err(describe_probe_error("schtasks /Create", &create));
+                    }
+                    note_parts.push(format!(
+                        "Scheduled mode: the task runs `agent run-once` every {interval_minutes} minutes (profile interval_secs={interval_secs})."
+                    ));
+                    note_parts.push(
+                        "Note: without additional credentials, tasks typically run only when the user is logged on."
+                            .to_string(),
+                    );
+                    Ok(AgentInstallSummary {
+                        profile: profile.to_string(),
+                        config_path: config_path.display().to_string(),
+                        service_manager: "task_scheduler".to_string(),
+                        service_name: task_name,
+                        service_path: None,
+                        dry_run: false,
+                        installed: true,
+                        enabled: Some(true),
+                        running: None,
+                        note: Some(note_parts.join(" ")),
+                        preview: None,
+                    })
+                }
             }
-            let create = run_process(
-                "schtasks",
-                &[
-                    "/Create", "/F", "/SC", "ONLOGON", "/TN", &task_name, "/TR", &command,
-                ],
-            )?;
-            if !create.ok {
-                return Err(describe_probe_error("schtasks /Create", &create));
-            }
-            Ok(AgentInstallSummary {
-                profile: profile.to_string(),
-                config_path: config_path.display().to_string(),
-                service_manager: "task_scheduler".to_string(),
-                service_name: task_name,
-                service_path: None,
-                dry_run: false,
-                installed: true,
-                enabled: Some(true),
-                running: None,
-                note: Some("The task starts the long-running agent at user logon; backup cadence stays in the profile TOML.".to_string()),
-                preview: None,
-            })
         }
         _ => {
-            let unit_path = linux_systemd_user_unit_path(profile)?;
             let unit_name = systemd_unit_name(profile);
-            let content = render_systemd_user_unit(profile, &exe, &config_path);
-            if dry_run {
-                return Ok(AgentInstallSummary {
-                    profile: profile.to_string(),
-                    config_path: config_path.display().to_string(),
-                    service_manager: "systemd-user".to_string(),
-                    service_name: unit_name,
-                    service_path: Some(unit_path.display().to_string()),
-                    dry_run: true,
-                    installed: false,
-                    enabled: None,
-                    running: None,
-                    note: Some("Dry run only; no unit file was written.".to_string()),
-                    preview: Some(content),
-                });
+            let unit_path = linux_systemd_user_unit_path(profile)?;
+            let timer_name = systemd_timer_name(profile);
+            let timer_path = linux_systemd_user_timer_path(profile)?;
+
+            match mode {
+                AgentInstallMode::Daemon => {
+                    let content = render_systemd_user_unit(profile, &exe, &config_path);
+                    if dry_run {
+                        return Ok(AgentInstallSummary {
+                            profile: profile.to_string(),
+                            config_path: config_path.display().to_string(),
+                            service_manager: "systemd-user".to_string(),
+                            service_name: unit_name,
+                            service_path: Some(unit_path.display().to_string()),
+                            dry_run: true,
+                            installed: false,
+                            enabled: None,
+                            running: None,
+                            note: Some("Dry run only; no unit file was written.".to_string()),
+                            preview: Some(content),
+                        });
+                    }
+
+                    // Switching from scheduled mode: disable + remove the timer if present.
+                    let _ = run_process("systemctl", &["--user", "disable", "--now", &timer_name]);
+                    if timer_path.exists() {
+                        tokio::fs::remove_file(&timer_path)
+                            .await
+                            .map_err(|e| format!("remove {}: {e}", timer_path.display()))?;
+                    }
+
+                    if let Some(parent) = unit_path.parent() {
+                        tokio::fs::create_dir_all(parent)
+                            .await
+                            .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+                    }
+                    tokio::fs::write(&unit_path, content)
+                        .await
+                        .map_err(|e| format!("write {}: {e}", unit_path.display()))?;
+                    let reload = run_process("systemctl", &["--user", "daemon-reload"])?;
+                    if !reload.ok {
+                        return Err(describe_probe_error(
+                            "systemctl --user daemon-reload",
+                            &reload,
+                        ));
+                    }
+                    let enable =
+                        run_process("systemctl", &["--user", "enable", "--now", &unit_name])?;
+                    if !enable.ok {
+                        return Err(describe_probe_error(
+                            "systemctl --user enable --now",
+                            &enable,
+                        ));
+                    }
+                    let enabled =
+                        run_process("systemctl", &["--user", "is-enabled", &unit_name]).ok();
+                    let active =
+                        run_process("systemctl", &["--user", "is-active", &unit_name]).ok();
+                    Ok(AgentInstallSummary {
+                        profile: profile.to_string(),
+                        config_path: config_path.display().to_string(),
+                        service_manager: "systemd-user".to_string(),
+                        service_name: unit_name,
+                        service_path: Some(unit_path.display().to_string()),
+                        dry_run: false,
+                        installed: true,
+                        enabled: enabled.as_ref().map(|p| p.ok && p.stdout == "enabled"),
+                        running: active.as_ref().map(|p| p.ok && p.stdout == "active"),
+                        note: None,
+                        preview: None,
+                    })
+                }
+                AgentInstallMode::Scheduled => {
+                    let interval_secs = scheduled_interval_secs.ok_or_else(|| {
+                        "internal error: missing scheduled interval for scheduled install"
+                            .to_string()
+                    })?;
+                    let service_content =
+                        render_systemd_user_oneshot_unit(profile, &exe, &config_path);
+                    let timer_content = render_systemd_user_timer(profile, interval_secs);
+                    let preview = format!(
+                        "# {}\n{}\n# {}\n{}",
+                        unit_path.display(),
+                        service_content,
+                        timer_path.display(),
+                        timer_content
+                    );
+                    if dry_run {
+                        return Ok(AgentInstallSummary {
+                            profile: profile.to_string(),
+                            config_path: config_path.display().to_string(),
+                            service_manager: "systemd-user".to_string(),
+                            service_name: timer_name,
+                            service_path: Some(timer_path.display().to_string()),
+                            dry_run: true,
+                            installed: false,
+                            enabled: None,
+                            running: None,
+                            note: Some("Dry run only; no unit files were written.".to_string()),
+                            preview: Some(preview),
+                        });
+                    }
+
+                    if let Some(parent) = unit_path.parent() {
+                        tokio::fs::create_dir_all(parent)
+                            .await
+                            .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+                    }
+
+                    // Switching from daemon mode: disable the long-running service before installing the timer.
+                    let _ = run_process("systemctl", &["--user", "disable", "--now", &unit_name]);
+                    let _ = run_process("systemctl", &["--user", "disable", "--now", &timer_name]);
+
+                    tokio::fs::write(&unit_path, service_content)
+                        .await
+                        .map_err(|e| format!("write {}: {e}", unit_path.display()))?;
+                    tokio::fs::write(&timer_path, timer_content)
+                        .await
+                        .map_err(|e| format!("write {}: {e}", timer_path.display()))?;
+
+                    let reload = run_process("systemctl", &["--user", "daemon-reload"])?;
+                    if !reload.ok {
+                        return Err(describe_probe_error(
+                            "systemctl --user daemon-reload",
+                            &reload,
+                        ));
+                    }
+
+                    let enable =
+                        run_process("systemctl", &["--user", "enable", "--now", &timer_name])?;
+                    if !enable.ok {
+                        return Err(describe_probe_error(
+                            "systemctl --user enable --now",
+                            &enable,
+                        ));
+                    }
+
+                    let enabled =
+                        run_process("systemctl", &["--user", "is-enabled", &timer_name]).ok();
+                    let active =
+                        run_process("systemctl", &["--user", "is-active", &timer_name]).ok();
+                    Ok(AgentInstallSummary {
+                        profile: profile.to_string(),
+                        config_path: config_path.display().to_string(),
+                        service_manager: "systemd-user".to_string(),
+                        service_name: timer_name,
+                        service_path: Some(timer_path.display().to_string()),
+                        dry_run: false,
+                        installed: true,
+                        enabled: enabled.as_ref().map(|p| p.ok && p.stdout == "enabled"),
+                        running: active.as_ref().map(|p| p.ok && p.stdout == "active"),
+                        note: Some(format!(
+                            "Scheduled mode: systemd timer runs `agent run-once` every {interval_secs}s."
+                        )),
+                        preview: None,
+                    })
+                }
             }
-            if let Some(parent) = unit_path.parent() {
-                tokio::fs::create_dir_all(parent)
-                    .await
-                    .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
-            }
-            tokio::fs::write(&unit_path, content)
-                .await
-                .map_err(|e| format!("write {}: {e}", unit_path.display()))?;
-            let reload = run_process("systemctl", &["--user", "daemon-reload"])?;
-            if !reload.ok {
-                return Err(describe_probe_error(
-                    "systemctl --user daemon-reload",
-                    &reload,
-                ));
-            }
-            let enable = run_process("systemctl", &["--user", "enable", "--now", &unit_name])?;
-            if !enable.ok {
-                return Err(describe_probe_error(
-                    "systemctl --user enable --now",
-                    &enable,
-                ));
-            }
-            let enabled = run_process("systemctl", &["--user", "is-enabled", &unit_name]).ok();
-            let active = run_process("systemctl", &["--user", "is-active", &unit_name]).ok();
-            Ok(AgentInstallSummary {
-                profile: profile.to_string(),
-                config_path: config_path.display().to_string(),
-                service_manager: "systemd-user".to_string(),
-                service_name: unit_name,
-                service_path: Some(unit_path.display().to_string()),
-                dry_run: false,
-                installed: true,
-                enabled: enabled.as_ref().map(|p| p.ok && p.stdout == "enabled"),
-                running: active.as_ref().map(|p| p.ok && p.stdout == "active"),
-                note: None,
-                preview: None,
-            })
         }
     }
 }
@@ -1737,21 +2109,41 @@ async fn uninstall_agent_service(
         _ => {
             let unit_name = systemd_unit_name(profile);
             let unit_path = linux_systemd_user_unit_path(profile)?;
+            let timer_name = systemd_timer_name(profile);
+            let timer_path = linux_systemd_user_timer_path(profile)?;
+
+            let had_timer = timer_path.exists();
+            let had_unit = unit_path.exists();
+
+            // Disable both timer + service (if present). This keeps uninstall idempotent across modes.
+            let _ = run_process("systemctl", &["--user", "disable", "--now", &timer_name]);
             let _ = run_process("systemctl", &["--user", "disable", "--now", &unit_name]);
+
+            if had_timer {
+                tokio::fs::remove_file(&timer_path)
+                    .await
+                    .map_err(|e| format!("remove {}: {e}", timer_path.display()))?;
+                removed_service = true;
+            }
             if unit_path.exists() {
                 tokio::fs::remove_file(&unit_path)
                     .await
                     .map_err(|e| format!("remove {}: {e}", unit_path.display()))?;
                 removed_service = true;
-            } else {
+            }
+            if !had_unit {
                 note_parts.push("systemd unit not found".to_string());
             }
+            if !had_timer && !had_unit {
+                note_parts.push("systemd timer not found".to_string());
+            }
             let _ = run_process("systemctl", &["--user", "daemon-reload"]);
-            (
-                "systemd-user".to_string(),
-                unit_name,
-                Some(unit_path.display().to_string()),
-            )
+            let (service_name, service_path) = if had_timer {
+                (timer_name, Some(timer_path.display().to_string()))
+            } else {
+                (unit_name, Some(unit_path.display().to_string()))
+            };
+            ("systemd-user".to_string(), service_name, service_path)
         }
     };
 
@@ -1786,17 +2178,24 @@ fn probe_agent_service(profile: &str) -> Result<AgentServiceStatus, String> {
         "macos" => {
             let plist_path = macos_launch_agent_path(profile)?;
             let installed = plist_path.exists();
-            let mut note = None;
+            let mut note_parts: Vec<String> = Vec::new();
+            if installed {
+                if let Ok(raw) = std::fs::read_to_string(&plist_path) {
+                    if raw.contains("<key>StartInterval</key>") {
+                        note_parts.push("scheduled mode (StartInterval)".to_string());
+                    }
+                }
+            }
             let running = if installed {
                 match run_process("launchctl", &["list", launchd_label(profile).as_str()]) {
                     Ok(probe) => {
-                        if !probe.ok && !probe.stderr.is_empty() {
-                            note = Some(probe.stderr);
+                        if !probe.ok {
+                            note_parts.push(describe_probe_error("launchctl list", &probe));
                         }
                         Some(probe.ok)
                     }
                     Err(e) => {
-                        note = Some(e);
+                        note_parts.push(e);
                         None
                     }
                 }
@@ -1810,7 +2209,11 @@ fn probe_agent_service(profile: &str) -> Result<AgentServiceStatus, String> {
                 installed,
                 enabled: Some(installed),
                 running,
-                note,
+                note: if note_parts.is_empty() {
+                    None
+                } else {
+                    Some(note_parts.join("; "))
+                },
             })
         }
         "windows" => {
@@ -1837,43 +2240,106 @@ fn probe_agent_service(profile: &str) -> Result<AgentServiceStatus, String> {
         _ => {
             let unit_name = systemd_unit_name(profile);
             let unit_path = linux_systemd_user_unit_path(profile)?;
-            let installed = unit_path.exists();
-            let mut note = None;
-            let enabled = if installed {
-                match run_process("systemctl", &["--user", "is-enabled", &unit_name]) {
+            let timer_name = systemd_timer_name(profile);
+            let timer_path = linux_systemd_user_timer_path(profile)?;
+
+            let timer_installed = timer_path.exists();
+            let unit_installed = unit_path.exists();
+
+            if timer_installed {
+                let mut note_parts: Vec<String> =
+                    vec!["scheduled mode (systemd timer)".to_string()];
+                if !unit_installed {
+                    note_parts.push("service unit missing".to_string());
+                }
+
+                let enabled = match run_process("systemctl", &["--user", "is-enabled", &timer_name])
+                {
                     Ok(probe) => {
-                        if !probe.ok && note.is_none() {
-                            note =
-                                Some(describe_probe_error("systemctl --user is-enabled", &probe));
+                        if !probe.ok {
+                            note_parts
+                                .push(describe_probe_error("systemctl --user is-enabled", &probe));
                         }
                         Some(probe.ok && probe.stdout == "enabled")
                     }
                     Err(e) => {
-                        note = Some(e);
+                        note_parts.push(e);
                         None
                     }
-                }
-            } else {
-                None
-            };
-            let running = if installed {
-                match run_process("systemctl", &["--user", "is-active", &unit_name]) {
+                };
+
+                let running = match run_process("systemctl", &["--user", "is-active", &timer_name])
+                {
                     Ok(probe) => {
-                        if !probe.ok && note.is_none() && !probe.stderr.is_empty() {
-                            note = Some(probe.stderr.clone());
+                        if !probe.ok {
+                            note_parts
+                                .push(describe_probe_error("systemctl --user is-active", &probe));
                         }
                         Some(probe.ok && probe.stdout == "active")
                     }
                     Err(e) => {
-                        if note.is_none() {
-                            note = Some(e);
+                        note_parts.push(e);
+                        None
+                    }
+                };
+
+                return Ok(AgentServiceStatus {
+                    manager: "systemd-user".to_string(),
+                    name: timer_name,
+                    path: Some(timer_path.display().to_string()),
+                    installed: true,
+                    enabled,
+                    running,
+                    note: Some(note_parts.join("; ")),
+                });
+            }
+
+            let installed = unit_installed;
+            let mut note_parts: Vec<String> = Vec::new();
+            if installed {
+                if let Ok(raw) = std::fs::read_to_string(&unit_path) {
+                    if raw.contains("Type=oneshot") || raw.contains("agent run-once") {
+                        note_parts.push("oneshot unit (run-once)".to_string());
+                    }
+                }
+            }
+
+            let enabled = if installed {
+                match run_process("systemctl", &["--user", "is-enabled", &unit_name]) {
+                    Ok(probe) => {
+                        if !probe.ok {
+                            note_parts
+                                .push(describe_probe_error("systemctl --user is-enabled", &probe));
                         }
+                        Some(probe.ok && probe.stdout == "enabled")
+                    }
+                    Err(e) => {
+                        note_parts.push(e);
                         None
                     }
                 }
             } else {
                 None
             };
+
+            let running = if installed {
+                match run_process("systemctl", &["--user", "is-active", &unit_name]) {
+                    Ok(probe) => {
+                        if !probe.ok {
+                            note_parts
+                                .push(describe_probe_error("systemctl --user is-active", &probe));
+                        }
+                        Some(probe.ok && probe.stdout == "active")
+                    }
+                    Err(e) => {
+                        note_parts.push(e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
             Ok(AgentServiceStatus {
                 manager: "systemd-user".to_string(),
                 name: unit_name,
@@ -1881,7 +2347,11 @@ fn probe_agent_service(profile: &str) -> Result<AgentServiceStatus, String> {
                 installed,
                 enabled,
                 running,
-                note,
+                note: if note_parts.is_empty() {
+                    None
+                } else {
+                    Some(note_parts.join("; "))
+                },
             })
         }
     }
@@ -2422,6 +2892,9 @@ async fn main() -> Result<(), String> {
                 Some(AgentCommand::Run { config }) => {
                     run_agent_from_config_path(&config).await?;
                 }
+                Some(AgentCommand::RunOnce { config }) => {
+                    run_agent_once_from_config_path(&config).await?;
+                }
                 Some(AgentCommand::Init {
                     profile,
                     folder,
@@ -2550,8 +3023,12 @@ async fn main() -> Result<(), String> {
                         serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?
                     );
                 }
-                Some(AgentCommand::Install { profile, dry_run }) => {
-                    let summary = install_agent_service(&profile, dry_run).await?;
+                Some(AgentCommand::Install {
+                    profile,
+                    dry_run,
+                    mode,
+                }) => {
+                    let summary = install_agent_service(&profile, dry_run, mode).await?;
                     println!(
                         "{}",
                         serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?
@@ -3325,8 +3802,9 @@ fn chunk_file(data: &[u8]) -> Vec<ChunkRef> {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_config_root_from_env, render_systemd_user_unit, summarize_http_body,
-        validate_profile_name,
+        default_config_root_from_env, render_launchd_plist_scheduled,
+        render_systemd_user_oneshot_unit, render_systemd_user_timer, render_systemd_user_unit,
+        summarize_http_body, validate_profile_name,
     };
     use std::path::Path;
 
@@ -3396,5 +3874,38 @@ mod tests {
             "ExecStart=/usr/local/bin/filedock agent --config /home/nita/.config/filedock/agents/laptop.toml"
         ));
         assert!(unit.contains("WantedBy=default.target"));
+    }
+
+    #[test]
+    fn render_systemd_oneshot_unit_mentions_run_once() {
+        let unit = render_systemd_user_oneshot_unit(
+            "laptop",
+            Path::new("/usr/local/bin/filedock"),
+            Path::new("/home/nita/.config/filedock/agents/laptop.toml"),
+        );
+        assert!(unit.contains("Type=oneshot"));
+        assert!(unit.contains(
+            "ExecStart=/usr/local/bin/filedock agent run-once --config /home/nita/.config/filedock/agents/laptop.toml"
+        ));
+    }
+
+    #[test]
+    fn render_systemd_timer_mentions_interval_and_timers_target() {
+        let timer = render_systemd_user_timer("laptop", 900);
+        assert!(timer.contains("OnUnitActiveSec=900s"));
+        assert!(timer.contains("WantedBy=timers.target"));
+    }
+
+    #[test]
+    fn render_launchd_plist_scheduled_mentions_start_interval_and_run_once() {
+        let plist = render_launchd_plist_scheduled(
+            "laptop",
+            Path::new("/Applications/FileDock/filedock"),
+            Path::new("/Users/nita/.config/filedock/agents/laptop.toml"),
+            900,
+        );
+        assert!(plist.contains("<key>StartInterval</key>"));
+        assert!(plist.contains("<integer>900</integer>"));
+        assert!(plist.contains("<string>run-once</string>"));
     }
 }
