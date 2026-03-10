@@ -3196,8 +3196,9 @@ async fn main() -> Result<(), String> {
             // - `.filedockignore` in the folder root (default)
             // - optional `--ignore-file`
             // - optional `--exclude` globs
-            let mut exclude_patterns = Vec::<String>::new();
-            exclude_patterns.extend(load_ignore_patterns(&root, ignore_file)?);
+            let ignore_file_patterns = load_ignore_patterns(&root, ignore_file)?;
+            let ignore_file_patterns_len = ignore_file_patterns.len();
+            let mut exclude_patterns = ignore_file_patterns;
             exclude_patterns.extend(exclude);
             let exclude_set = build_excludes(&exclude_patterns)?;
             let gitignore = load_root_gitignore(&root, respect_gitignore)?;
@@ -3401,10 +3402,20 @@ async fn main() -> Result<(), String> {
                 }
                 let rel = Path::new(&p);
                 if is_ignored_path(&exclude_set, gitignore.as_ref(), rel, &p, false) {
+                    let reason = ignored_reason(
+                        &exclude_set,
+                        &exclude_patterns,
+                        ignore_file_patterns_len,
+                        gitignore.as_ref(),
+                        rel,
+                        &p,
+                        false,
+                    )
+                    .unwrap_or_else(|| "matched ignore rules".to_string());
                     items.push(StatusItem {
                         path: p,
                         status: "ignored".to_string(),
-                        reason: Some("matched ignore rules".to_string()),
+                        reason: Some(reason),
                         local_size: None,
                         server_size: None,
                         local_mtime_unix: None,
@@ -3442,10 +3453,20 @@ async fn main() -> Result<(), String> {
                             is_ignored_path(&exclude_set, gitignore.as_ref(), rel, &rel_str, true);
                         if ignore_dir {
                             if include_ignored {
+                                let reason = ignored_reason(
+                                    &exclude_set,
+                                    &exclude_patterns,
+                                    ignore_file_patterns_len,
+                                    gitignore.as_ref(),
+                                    rel,
+                                    &rel_str,
+                                    true,
+                                )
+                                .unwrap_or_else(|| "matched ignore rules".to_string());
                                 items.push(StatusItem {
                                     path: rel_str,
                                     status: "ignored".to_string(),
-                                    reason: Some("matched ignore rules (dir)".to_string()),
+                                    reason: Some(reason),
                                     local_size: None,
                                     server_size: None,
                                     local_mtime_unix: None,
@@ -3463,10 +3484,20 @@ async fn main() -> Result<(), String> {
 
                     if is_ignored_path(&exclude_set, gitignore.as_ref(), rel, &rel_str, false) {
                         if include_ignored {
+                            let reason = ignored_reason(
+                                &exclude_set,
+                                &exclude_patterns,
+                                ignore_file_patterns_len,
+                                gitignore.as_ref(),
+                                rel,
+                                &rel_str,
+                                false,
+                            )
+                            .unwrap_or_else(|| "matched ignore rules".to_string());
                             items.push(StatusItem {
                                 path: rel_str,
                                 status: "ignored".to_string(),
-                                reason: Some("matched ignore rules".to_string()),
+                                reason: Some(reason),
                                 local_size: None,
                                 server_size: None,
                                 local_mtime_unix: None,
@@ -3790,6 +3821,16 @@ fn load_root_gitignore(root: &Path, enabled: bool) -> Result<Option<Gitignore>, 
         .map_err(|e| format!("parse .gitignore: {e}"))
 }
 
+fn glob_match_index(exclude_set: &GlobSet, rel_str: &str, is_dir: bool) -> Option<usize> {
+    let mut idxs = exclude_set.matches(rel_str);
+    if idxs.is_empty() && is_dir {
+        // Probe a synthetic child so patterns like `**/node_modules/**` match directories too.
+        let probe = format!("{rel_str}/_");
+        idxs = exclude_set.matches(&probe);
+    }
+    idxs.into_iter().min()
+}
+
 fn is_ignored_by_globs(exclude_set: &GlobSet, rel_str: &str, is_dir: bool) -> bool {
     if exclude_set.is_match(rel_str) {
         return true;
@@ -3820,6 +3861,40 @@ fn is_ignored_path(
     };
 
     gi.matched_path_or_any_parents(rel, is_dir).is_ignore()
+}
+
+fn ignored_reason(
+    exclude_set: &GlobSet,
+    patterns: &[String],
+    ignore_file_patterns_len: usize,
+    gitignore: Option<&Gitignore>,
+    rel: &Path,
+    rel_str: &str,
+    is_dir: bool,
+) -> Option<String> {
+    if let Some(idx) = glob_match_index(exclude_set, rel_str, is_dir) {
+        let pat = patterns.get(idx).map(String::as_str).unwrap_or("<unknown>");
+        let src = if idx < ignore_file_patterns_len {
+            "ignore_file"
+        } else {
+            "exclude"
+        };
+        return Some(format!("ignored by {src}: {pat}"));
+    }
+
+    let Some(gi) = gitignore else {
+        return None;
+    };
+
+    match gi.matched_path_or_any_parents(rel, is_dir) {
+        ignore::Match::Ignore(glob) => Some(format!("ignored by .gitignore: {}", glob.original())),
+        // Whitelist isn't an ignore, but we keep this branch to make debugging easier if we ever
+        // call this helper in other contexts.
+        ignore::Match::Whitelist(glob) => {
+            Some(format!("whitelisted by .gitignore: {}", glob.original()))
+        }
+        ignore::Match::None => None,
+    }
 }
 
 fn load_ignore_patterns(root: &Path, ignore_file: Option<PathBuf>) -> Result<Vec<String>, String> {
