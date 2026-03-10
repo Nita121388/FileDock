@@ -252,6 +252,9 @@ export type AgentInitSummary = {
   server: string;
   device_name: string;
   folder: string;
+  exclude?: string[];
+  ignore_file?: string | null;
+  default_excludes_applied?: boolean;
   auth_mode: string;
   device_registered: boolean;
   device_id?: string | null;

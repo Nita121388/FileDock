@@ -216,6 +216,12 @@ struct AgentInitSummary {
     server: String,
     device_name: String,
     folder: String,
+    #[serde(default)]
+    exclude: Vec<String>,
+    #[serde(default)]
+    ignore_file: Option<String>,
+    #[serde(default)]
+    default_excludes_applied: bool,
     auth_mode: String,
     device_registered: bool,
     device_id: Option<String>,

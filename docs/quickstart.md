@@ -42,6 +42,8 @@ What this does:
 - saves `~/.config/filedock/agents/laptop.toml` on Linux (platform-default location on macOS/Windows)
 - auto-registers a device when the server allows it
 - stores device credentials in the profile so the long-running agent does not need raw env vars
+- if you do not pass any `--exclude` / `--ignore-file`, it seeds a small default exclude list to avoid uploading huge trees (e.g. `.git`, `node_modules`).
+  - To include everything, edit the generated profile TOML and remove the `exclude = [...]` line.
 
 Preview the generated service wiring, then install it:
 
@@ -107,6 +109,8 @@ cargo run -p filedock -- status \
 ```
 
 For an accurate (slower) content comparison, add `--verify`.
+
+To debug ignore rules, add `--include-ignored` (and optionally pass the same `--exclude` / `--ignore-file` inputs you use for backups).
 
 If you enabled `FILEDOCK_TOKEN` on the server:
 

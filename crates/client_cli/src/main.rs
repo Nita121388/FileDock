@@ -811,6 +811,19 @@ enum Command {
         #[arg(long)]
         folder: PathBuf,
 
+        /// Exclude glob patterns (matched against relative POSIX paths).
+        /// Example: --exclude \"**/node_modules/**\" --exclude \"**/.git/**\"
+        #[arg(long)]
+        exclude: Vec<String>,
+
+        /// Optional ignore file (one glob per line). If omitted, `.filedockignore` in the folder root is used if present.
+        #[arg(long)]
+        ignore_file: Option<PathBuf>,
+
+        /// If set, include ignored paths in the JSON output.
+        #[arg(long)]
+        include_ignored: bool,
+
         /// Optional relative path (within --folder) to check a single file.
         #[arg(long)]
         path: Option<String>,
@@ -1101,6 +1114,11 @@ fn default_heartbeat_interval() -> u64 {
 
 fn default_agent_concurrency() -> usize {
     DEFAULT_CONCURRENCY
+}
+
+fn default_agent_excludes() -> Vec<String> {
+    // Keep this small and unsurprising; users can always edit the generated TOML later.
+    vec!["**/.git/**".to_string(), "**/node_modules/**".to_string()]
 }
 
 fn apply_agent_env(cfg: &AgentConfig) {
@@ -1410,11 +1428,10 @@ async fn push_folder_impl(
     let mut all_hashes = std::collections::HashSet::<String>::new();
     let mut total_bytes = 0u64;
 
-    for entry in WalkDir::new(&root).follow_links(false) {
+    let mut it = WalkDir::new(&root).follow_links(false).into_iter();
+    while let Some(entry) = it.next() {
         let entry = entry.map_err(|e| format!("walkdir: {e}"))?;
-        if !entry.file_type().is_file() {
-            continue;
-        }
+        let ft = entry.file_type();
 
         let abs_path = entry.path().to_path_buf();
         let rel = abs_path
@@ -1425,6 +1442,26 @@ async fn push_folder_impl(
             .map(|s| s.to_string_lossy())
             .collect::<Vec<_>>()
             .join("/");
+
+        if rel_str.is_empty() {
+            continue;
+        }
+
+        if ft.is_dir() {
+            // Prune ignored directories so we don't spend time walking huge trees that won't be uploaded
+            // anyway (node_modules/.git/etc). Probe a synthetic child so patterns like
+            // `**/node_modules/**` work as expected.
+            let probe = format!("{rel_str}/_");
+            let ignore_dir = exclude_set.is_match(&rel_str) || exclude_set.is_match(&probe);
+            if ignore_dir {
+                it.skip_current_dir();
+            }
+            continue;
+        }
+
+        if !ft.is_file() {
+            continue;
+        }
 
         if exclude_set.is_match(&rel_str) {
             continue;
@@ -1599,6 +1636,9 @@ struct AgentInitSummary {
     server: String,
     device_name: String,
     folder: String,
+    exclude: Vec<String>,
+    ignore_file: Option<String>,
+    default_excludes_applied: bool,
     auth_mode: String,
     device_registered: bool,
     device_id: Option<String>,
@@ -2977,7 +3017,7 @@ async fn main() -> Result<(), String> {
                         auth.token = None;
                     }
 
-                    let cfg = AgentConfig {
+                    let mut cfg = AgentConfig {
                         server: server.clone(),
                         device_name: device_name.clone(),
                         folder: folder.clone(),
@@ -2992,6 +3032,11 @@ async fn main() -> Result<(), String> {
                         heartbeat_secs,
                         heartbeat_status,
                     };
+                    let mut default_excludes_applied = false;
+                    if cfg.exclude.is_empty() && cfg.ignore_file.is_none() {
+                        cfg.exclude = default_agent_excludes();
+                        default_excludes_applied = true;
+                    }
 
                     let config_path = agent_profile_path(&profile)?;
                     if let Some(parent) = config_path.parent() {
@@ -3013,6 +3058,9 @@ async fn main() -> Result<(), String> {
                         server,
                         device_name,
                         folder: folder.display().to_string(),
+                        exclude: cfg.exclude.clone(),
+                        ignore_file: cfg.ignore_file.as_ref().map(|p| p.display().to_string()),
+                        default_excludes_applied,
                         auth_mode: auth_mode_label(&auth).to_string(),
                         device_registered,
                         device_id: auth.device_id,
@@ -3067,6 +3115,9 @@ async fn main() -> Result<(), String> {
             latest,
             device_name,
             folder,
+            exclude,
+            ignore_file,
+            include_ignored,
             path,
             verify,
         } => {
@@ -3088,8 +3139,13 @@ async fn main() -> Result<(), String> {
                 .canonicalize()
                 .map_err(|e| format!("canonicalize folder: {e}"))?;
 
-            // Respect `.filedockignore` by default so status matches backup behavior.
-            let exclude_patterns = load_ignore_patterns(&root, None)?;
+            // Mirror the same ignore inputs as `push-folder`:
+            // - `.filedockignore` in the folder root (default)
+            // - optional `--ignore-file`
+            // - optional `--exclude` globs
+            let mut exclude_patterns = Vec::<String>::new();
+            exclude_patterns.extend(load_ignore_patterns(&root, ignore_file)?);
+            exclude_patterns.extend(exclude);
             let exclude_set = build_excludes(&exclude_patterns)?;
 
             let snapshot_id = if latest {
@@ -3293,7 +3349,7 @@ async fn main() -> Result<(), String> {
                     items.push(StatusItem {
                         path: p,
                         status: "ignored".to_string(),
-                        reason: Some("matched .filedockignore".to_string()),
+                        reason: Some("matched ignore rules".to_string()),
                         local_size: None,
                         server_size: None,
                         local_mtime_unix: None,
@@ -3305,11 +3361,10 @@ async fn main() -> Result<(), String> {
                 }
             } else {
                 // Folder mode: check every local file.
-                for entry in WalkDir::new(&root).follow_links(false) {
+                let mut it = WalkDir::new(&root).follow_links(false).into_iter();
+                while let Some(entry) = it.next() {
                     let entry = entry.map_err(|e| format!("walkdir: {e}"))?;
-                    if !entry.file_type().is_file() {
-                        continue;
-                    }
+                    let ft = entry.file_type();
 
                     let abs_path = entry.path().to_path_buf();
                     let rel = abs_path
@@ -3321,7 +3376,50 @@ async fn main() -> Result<(), String> {
                         .collect::<Vec<_>>()
                         .join("/");
 
+                    if rel_str.is_empty() {
+                        continue;
+                    }
+
+                    if ft.is_dir() {
+                        // Prune ignored directories to keep status checks fast on large trees
+                        // (node_modules/.git/etc). For directory matches, probe a synthetic child so
+                        // patterns like `**/node_modules/**` work as expected.
+                        let probe = format!("{rel_str}/_");
+                        let ignore_dir =
+                            exclude_set.is_match(&rel_str) || exclude_set.is_match(&probe);
+                        if ignore_dir {
+                            if include_ignored {
+                                items.push(StatusItem {
+                                    path: rel_str,
+                                    status: "ignored".to_string(),
+                                    reason: Some("matched ignore rules (dir)".to_string()),
+                                    local_size: None,
+                                    server_size: None,
+                                    local_mtime_unix: None,
+                                    server_mtime_unix: None,
+                                });
+                            }
+                            it.skip_current_dir();
+                        }
+                        continue;
+                    }
+
+                    if !ft.is_file() {
+                        continue;
+                    }
+
                     if exclude_set.is_match(&rel_str) {
+                        if include_ignored {
+                            items.push(StatusItem {
+                                path: rel_str,
+                                status: "ignored".to_string(),
+                                reason: Some("matched ignore rules".to_string()),
+                                local_size: None,
+                                server_size: None,
+                                local_mtime_unix: None,
+                                server_mtime_unix: None,
+                            });
+                        }
                         continue;
                     }
 

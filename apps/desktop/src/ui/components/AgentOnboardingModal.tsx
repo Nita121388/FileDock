@@ -528,7 +528,8 @@ export default function AgentOnboardingModal(props: Props) {
               <div className="agent-summary-block">
                 <div className="agent-summary-title">{t("app.agentSetup.profileResultTitle")}</div>
                 {initSummary ? (
-                  <dl className="agent-summary-list">
+                  <>
+                    <dl className="agent-summary-list">
                     <SummaryRow label={t("app.agentSetup.resultConfigPath")} value={initSummary.config_path} />
                     <SummaryRow label={t("app.agentSetup.resultStatePath")} value={initSummary.state_path} />
                     <SummaryRow label={t("app.agentSetup.resultAuthMode")} value={initSummary.auth_mode} />
@@ -537,7 +538,22 @@ export default function AgentOnboardingModal(props: Props) {
                       value={initSummary.device_registered ? t("common.yes") : t("common.no")}
                     />
                     <SummaryRow label={t("app.agentSetup.resultDeviceId")} value={initSummary.device_id || t("app.agentSetup.notAvailable")} />
+                    <SummaryRow
+                      label={t("app.agentSetup.resultIgnoreFile")}
+                      value={initSummary.ignore_file || t("app.agentSetup.notAvailable")}
+                    />
+                    <SummaryRow
+                      label={t("app.agentSetup.resultExcludeCount")}
+                      value={String((initSummary.exclude || []).length)}
+                    />
                   </dl>
+                    {(initSummary.exclude || []).length ? (
+                      <pre className="agent-preview-code">{(initSummary.exclude || []).join("\n")}</pre>
+                    ) : null}
+                    {initSummary.default_excludes_applied ? (
+                      <div className="agent-inline-note">{t("app.agentSetup.resultDefaultExcludesNote")}</div>
+                    ) : null}
+                  </>
                 ) : (
                   <div className="agent-empty-state">{t("app.agentSetup.profileResultEmpty")}</div>
                 )}
