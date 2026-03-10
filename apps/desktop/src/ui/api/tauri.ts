@@ -240,6 +240,7 @@ export type AgentInitRequest = {
   interval_secs?: number;
   heartbeat_secs?: number;
   keep_bootstrap_token?: boolean;
+  no_default_excludes?: boolean;
   token?: string;
   device_id?: string;
   device_token?: string;

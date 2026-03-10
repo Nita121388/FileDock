@@ -49,7 +49,7 @@ Notes:
 - If you bootstrap from exported server JSON, you can pass it directly with `--import-json '<json>'` or point `--import-json` at a file path.
 - By default, the bootstrap server token is dropped once device credentials exist; use `--keep-bootstrap-token` only for advanced/manual cases.
 - If you do not pass any `--exclude` / `--ignore-file`, the generated profile seeds a small default exclude list (e.g. `.git`, `node_modules`).
-  - To include everything, edit the generated profile TOML and remove the `exclude = [...]` line.
+  - To include everything, pass `--no-default-excludes` (or edit the generated profile TOML and remove the `exclude = [...]` line).
 
 Preview or install the current-platform background service for that profile:
 

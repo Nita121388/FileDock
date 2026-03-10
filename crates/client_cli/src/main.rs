@@ -960,6 +960,10 @@ enum AgentCommand {
         #[arg(long)]
         ignore_file: Option<PathBuf>,
 
+        /// If set, do not seed the default exclude list (e.g. `.git`, `node_modules`) when no ignore rules are provided.
+        #[arg(long)]
+        no_default_excludes: bool,
+
         /// Heartbeat interval (seconds, 0 disables).
         #[arg(long, default_value_t = 300)]
         heartbeat_secs: u64,
@@ -1119,6 +1123,22 @@ fn default_agent_concurrency() -> usize {
 fn default_agent_excludes() -> Vec<String> {
     // Keep this small and unsurprising; users can always edit the generated TOML later.
     vec!["**/.git/**".to_string(), "**/node_modules/**".to_string()]
+}
+
+fn apply_default_excludes_if_needed(
+    exclude: &mut Vec<String>,
+    ignore_file: &Option<PathBuf>,
+    no_default_excludes: bool,
+) -> bool {
+    if no_default_excludes {
+        return false;
+    }
+    if !exclude.is_empty() || ignore_file.is_some() {
+        return false;
+    }
+
+    *exclude = default_agent_excludes();
+    true
 }
 
 fn apply_agent_env(cfg: &AgentConfig) {
@@ -2945,6 +2965,7 @@ async fn main() -> Result<(), String> {
                     concurrency,
                     exclude,
                     ignore_file,
+                    no_default_excludes,
                     heartbeat_secs,
                     heartbeat_status,
                     import_json,
@@ -3032,11 +3053,11 @@ async fn main() -> Result<(), String> {
                         heartbeat_secs,
                         heartbeat_status,
                     };
-                    let mut default_excludes_applied = false;
-                    if cfg.exclude.is_empty() && cfg.ignore_file.is_none() {
-                        cfg.exclude = default_agent_excludes();
-                        default_excludes_applied = true;
-                    }
+                    let default_excludes_applied = apply_default_excludes_if_needed(
+                        &mut cfg.exclude,
+                        &cfg.ignore_file,
+                        no_default_excludes,
+                    );
 
                     let config_path = agent_profile_path(&profile)?;
                     if let Some(parent) = config_path.parent() {
@@ -3900,11 +3921,12 @@ fn chunk_file(data: &[u8]) -> Vec<ChunkRef> {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_config_root_from_env, render_launchd_plist_scheduled,
-        render_systemd_user_oneshot_unit, render_systemd_user_timer, render_systemd_user_unit,
-        summarize_http_body, validate_profile_name,
+        apply_default_excludes_if_needed, default_config_root_from_env,
+        render_launchd_plist_scheduled, render_systemd_user_oneshot_unit,
+        render_systemd_user_timer, render_systemd_user_unit, summarize_http_body,
+        validate_profile_name,
     };
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn summarize_http_body_compacts_whitespace() {
@@ -4005,5 +4027,41 @@ mod tests {
         assert!(plist.contains("<key>StartInterval</key>"));
         assert!(plist.contains("<integer>900</integer>"));
         assert!(plist.contains("<string>run-once</string>"));
+    }
+
+    #[test]
+    fn default_excludes_applied_when_empty_and_not_disabled() {
+        let mut exclude = Vec::<String>::new();
+        let ignore_file = None;
+        let applied = apply_default_excludes_if_needed(&mut exclude, &ignore_file, false);
+        assert!(applied);
+        assert_eq!(exclude, vec!["**/.git/**", "**/node_modules/**"]);
+    }
+
+    #[test]
+    fn default_excludes_not_applied_when_disabled() {
+        let mut exclude = Vec::<String>::new();
+        let ignore_file = None;
+        let applied = apply_default_excludes_if_needed(&mut exclude, &ignore_file, true);
+        assert!(!applied);
+        assert!(exclude.is_empty());
+    }
+
+    #[test]
+    fn default_excludes_not_applied_when_user_provides_exclude() {
+        let mut exclude = vec!["**/tmp/**".to_string()];
+        let ignore_file = None;
+        let applied = apply_default_excludes_if_needed(&mut exclude, &ignore_file, false);
+        assert!(!applied);
+        assert_eq!(exclude, vec!["**/tmp/**"]);
+    }
+
+    #[test]
+    fn default_excludes_not_applied_when_ignore_file_is_set() {
+        let mut exclude = Vec::<String>::new();
+        let ignore_file = Some(PathBuf::from(".filedockignore"));
+        let applied = apply_default_excludes_if_needed(&mut exclude, &ignore_file, false);
+        assert!(!applied);
+        assert!(exclude.is_empty());
     }
 }

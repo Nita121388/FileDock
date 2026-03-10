@@ -59,6 +59,7 @@ export default function AgentOnboardingModal(props: Props) {
   const [intervalMinutes, setIntervalMinutes] = useState(DEFAULT_INTERVAL_MINUTES);
   const [heartbeatMinutes, setHeartbeatMinutes] = useState(DEFAULT_HEARTBEAT_MINUTES);
   const [installMode, setInstallMode] = useState<AgentInstallMode>("daemon");
+  const [useDefaultExcludes, setUseDefaultExcludes] = useState(true);
   const [keepBootstrapToken, setKeepBootstrapToken] = useState(false);
   const [deleteConfigOnUninstall, setDeleteConfigOnUninstall] = useState(false);
   const [profileTouched, setProfileTouched] = useState(false);
@@ -80,6 +81,7 @@ export default function AgentOnboardingModal(props: Props) {
     setIntervalMinutes(DEFAULT_INTERVAL_MINUTES);
     setHeartbeatMinutes(DEFAULT_HEARTBEAT_MINUTES);
     setInstallMode("daemon");
+    setUseDefaultExcludes(true);
     setKeepBootstrapToken(false);
     setDeleteConfigOnUninstall(false);
     setProfileTouched(false);
@@ -198,6 +200,7 @@ export default function AgentOnboardingModal(props: Props) {
         interval_secs: minutesToSeconds(intervalMinutes, 15, 1),
         heartbeat_secs: minutesToSeconds(heartbeatMinutes, 5, 0),
         keep_bootstrap_token: keepBootstrapToken,
+        no_default_excludes: useDefaultExcludes ? undefined : true,
         token: bootstrap.token?.trim() || undefined,
         device_id: bootstrap.deviceId?.trim() || undefined,
         device_token: bootstrap.deviceToken?.trim() || undefined
@@ -457,6 +460,17 @@ export default function AgentOnboardingModal(props: Props) {
               <div className="agent-inline-note wide">
                 {installMode === "scheduled" ? t("app.agentSetup.modeScheduledDesc") : t("app.agentSetup.modeDaemonDesc")}
               </div>
+              <label className="agent-checkbox wide">
+                <input
+                  type="checkbox"
+                  checked={useDefaultExcludes}
+                  onChange={(e) => setUseDefaultExcludes(e.target.checked)}
+                />
+                <span>
+                  <strong>{t("app.agentSetup.defaultExcludesTitle")}</strong>
+                  <span>{t("app.agentSetup.defaultExcludesDesc")}</span>
+                </span>
+              </label>
               <label className="agent-checkbox wide">
                 <input
                   type="checkbox"

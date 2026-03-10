@@ -178,6 +178,8 @@ struct AgentInitRequest {
     #[serde(default)]
     keep_bootstrap_token: bool,
     #[serde(default)]
+    no_default_excludes: bool,
+    #[serde(default)]
     token: Option<String>,
     #[serde(default)]
     device_id: Option<String>,
@@ -2521,6 +2523,9 @@ async fn agent_init(req: AgentInitRequest) -> Result<AgentInitSummary, String> {
     }
     if req.keep_bootstrap_token {
         args.push("--keep-bootstrap-token".to_string());
+    }
+    if req.no_default_excludes {
+        args.push("--no-default-excludes".to_string());
     }
 
     run_filedock_json(args).await
