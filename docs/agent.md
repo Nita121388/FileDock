@@ -50,8 +50,7 @@ Notes:
 - By default, the bootstrap server token is dropped once device credentials exist; use `--keep-bootstrap-token` only for advanced/manual cases.
 - If you do not pass any `--exclude` / `--ignore-file`, the generated profile seeds a small default exclude list (e.g. `.git`, `node_modules`).
   - To include everything, pass `--no-default-excludes` (or edit the generated profile TOML and remove the `exclude = [...]` line).
-- Optional: add `--respect-gitignore` to also apply gitignore-style rules from the root `.gitignore` (in addition to `.filedockignore` / `--exclude`).
-  - Current scope: only the root `.gitignore` is read (nested `.gitignore` files are not yet supported).
+- Optional: add `--respect-gitignore` to also apply gitignore-style rules from `.gitignore` files under the folder root (in addition to `.filedockignore` / `--exclude`).
 
 Preview or install the current-platform background service for that profile:
 

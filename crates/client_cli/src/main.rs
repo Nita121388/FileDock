@@ -11,7 +11,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::{
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
@@ -592,7 +592,7 @@ enum Command {
         #[arg(long)]
         ignore_file: Option<PathBuf>,
 
-        /// If set, also respect `.gitignore` (gitignore-style) patterns in the folder root.
+        /// If set, also respect `.gitignore` (gitignore-style) patterns in this folder tree.
         #[arg(long)]
         respect_gitignore: bool,
     },
@@ -629,7 +629,7 @@ enum Command {
         #[arg(long)]
         ignore_file: Option<PathBuf>,
 
-        /// If set, also respect `.gitignore` (gitignore-style) patterns in the folder root.
+        /// If set, also respect `.gitignore` (gitignore-style) patterns in this folder tree.
         #[arg(long)]
         respect_gitignore: bool,
 
@@ -833,7 +833,7 @@ enum Command {
         #[arg(long)]
         ignore_file: Option<PathBuf>,
 
-        /// If set, also respect `.gitignore` (gitignore-style) patterns in the folder root.
+        /// If set, also respect `.gitignore` (gitignore-style) patterns in this folder tree.
         #[arg(long)]
         respect_gitignore: bool,
 
@@ -987,7 +987,7 @@ enum AgentCommand {
         #[arg(long)]
         ignore_file: Option<PathBuf>,
 
-        /// If set, also respect `.gitignore` (gitignore-style) patterns in the folder root.
+        /// If set, also respect `.gitignore` (gitignore-style) patterns in this folder tree.
         #[arg(long)]
         respect_gitignore: bool,
 
@@ -1120,7 +1120,7 @@ struct AgentConfig {
     #[serde(default)]
     ignore_file: Option<PathBuf>,
 
-    /// If true, also respect `.gitignore` (gitignore-style) patterns in the folder root.
+    /// If true, also respect `.gitignore` (gitignore-style) patterns in this folder tree.
     #[serde(default)]
     respect_gitignore: bool,
 
@@ -1444,7 +1444,7 @@ async fn push_folder_impl(
     exclude_patterns.extend(load_ignore_patterns(&root, ignore_file)?);
     exclude_patterns.extend(exclude);
     let exclude_set = build_excludes(&exclude_patterns)?;
-    let gitignore = load_root_gitignore(&root, respect_gitignore)?;
+    let mut gitignore = load_gitignore_rules(&root, respect_gitignore)?;
 
     // Create snapshot id
     let create_url = format!("{}/v1/snapshots", server.trim_end_matches('/'));
@@ -1510,7 +1510,7 @@ async fn push_folder_impl(
         if ft.is_dir() {
             // Prune ignored directories so we don't spend time walking huge trees that won't be
             // uploaded anyway (node_modules/.git/etc).
-            if is_ignored_path(&exclude_set, gitignore.as_ref(), rel, &rel_str, true) {
+            if is_ignored_path(&exclude_set, gitignore.as_mut(), rel, &rel_str, true)? {
                 it.skip_current_dir();
             }
             continue;
@@ -1520,7 +1520,7 @@ async fn push_folder_impl(
             continue;
         }
 
-        if is_ignored_path(&exclude_set, gitignore.as_ref(), rel, &rel_str, false) {
+        if is_ignored_path(&exclude_set, gitignore.as_mut(), rel, &rel_str, false)? {
             continue;
         }
 
@@ -3232,7 +3232,7 @@ async fn main() -> Result<(), String> {
             let mut exclude_patterns = ignore_file_patterns;
             exclude_patterns.extend(exclude);
             let exclude_set = build_excludes(&exclude_patterns)?;
-            let gitignore = load_root_gitignore(&root, respect_gitignore)?;
+            let mut gitignore = load_gitignore_rules(&root, respect_gitignore)?;
 
             let snapshot_id = if latest {
                 let url = format!("{}/v1/snapshots", server_base);
@@ -3432,16 +3432,16 @@ async fn main() -> Result<(), String> {
                     );
                 }
                 let rel = Path::new(&p);
-                if is_ignored_path(&exclude_set, gitignore.as_ref(), rel, &p, false) {
+                if is_ignored_path(&exclude_set, gitignore.as_mut(), rel, &p, false)? {
                     let reason = ignored_reason(
                         &exclude_set,
                         &exclude_patterns,
                         ignore_file_patterns_len,
-                        gitignore.as_ref(),
+                        gitignore.as_mut(),
                         rel,
                         &p,
                         false,
-                    )
+                    )?
                     .unwrap_or_else(|| "matched ignore rules".to_string());
                     items.push(StatusItem {
                         path: p,
@@ -3481,18 +3481,18 @@ async fn main() -> Result<(), String> {
                         // Prune ignored directories to keep status checks fast on large trees
                         // (node_modules/.git/etc).
                         let ignore_dir =
-                            is_ignored_path(&exclude_set, gitignore.as_ref(), rel, &rel_str, true);
+                            is_ignored_path(&exclude_set, gitignore.as_mut(), rel, &rel_str, true)?;
                         if ignore_dir {
                             if include_ignored {
                                 let reason = ignored_reason(
                                     &exclude_set,
                                     &exclude_patterns,
                                     ignore_file_patterns_len,
-                                    gitignore.as_ref(),
+                                    gitignore.as_mut(),
                                     rel,
                                     &rel_str,
                                     true,
-                                )
+                                )?
                                 .unwrap_or_else(|| "matched ignore rules".to_string());
                                 items.push(StatusItem {
                                     path: rel_str,
@@ -3513,17 +3513,17 @@ async fn main() -> Result<(), String> {
                         continue;
                     }
 
-                    if is_ignored_path(&exclude_set, gitignore.as_ref(), rel, &rel_str, false) {
+                    if is_ignored_path(&exclude_set, gitignore.as_mut(), rel, &rel_str, false)? {
                         if include_ignored {
                             let reason = ignored_reason(
                                 &exclude_set,
                                 &exclude_patterns,
                                 ignore_file_patterns_len,
-                                gitignore.as_ref(),
+                                gitignore.as_mut(),
                                 rel,
                                 &rel_str,
                                 false,
-                            )
+                            )?
                             .unwrap_or_else(|| "matched ignore rules".to_string());
                             items.push(StatusItem {
                                 path: rel_str,
@@ -3544,7 +3544,7 @@ async fn main() -> Result<(), String> {
                 // Also report files that exist in the snapshot but are missing locally.
                 for rel_path in by_path.keys() {
                     let rel = Path::new(rel_path);
-                    if is_ignored_path(&exclude_set, gitignore.as_ref(), rel, rel_path, false) {
+                    if is_ignored_path(&exclude_set, gitignore.as_mut(), rel, rel_path, false)? {
                         continue;
                     }
                     let abs = root.join(PathBuf::from(rel_path));
@@ -3829,27 +3829,174 @@ fn build_excludes(patterns: &[String]) -> Result<GlobSet, String> {
         .map_err(|e| format!("failed to build exclude set: {e}"))
 }
 
-fn load_root_gitignore(root: &Path, enabled: bool) -> Result<Option<Gitignore>, String> {
+fn path_to_posix_string(p: &Path) -> String {
+    p.iter()
+        .map(|s| s.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GitignoreDecisionKind {
+    Ignore,
+    Whitelist,
+}
+
+#[derive(Debug, Clone)]
+struct GitignoreDecision {
+    kind: GitignoreDecisionKind,
+    pattern: String,
+    from: Option<PathBuf>,
+}
+
+impl GitignoreDecision {
+    fn from_glob(kind: GitignoreDecisionKind, glob: &ignore::gitignore::Glob) -> GitignoreDecision {
+        GitignoreDecision {
+            kind,
+            pattern: glob.original().to_string(),
+            from: glob.from().map(|p| p.to_path_buf()),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct GitignoreRules {
+    root: PathBuf,
+    matchers: HashMap<PathBuf, Gitignore>,
+    no_matcher: HashSet<PathBuf>,
+}
+
+impl GitignoreRules {
+    fn new(root: PathBuf) -> GitignoreRules {
+        GitignoreRules {
+            root,
+            matchers: HashMap::new(),
+            no_matcher: HashSet::new(),
+        }
+    }
+
+    fn ensure_dir_loaded(&mut self, dir: &Path) -> Result<(), String> {
+        if self.matchers.contains_key(dir) || self.no_matcher.contains(dir) {
+            return Ok(());
+        }
+
+        let p = dir.join(".gitignore");
+        match std::fs::metadata(&p) {
+            Ok(m) => {
+                if !m.is_file() {
+                    self.no_matcher.insert(dir.to_path_buf());
+                    return Ok(());
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.no_matcher.insert(dir.to_path_buf());
+                return Ok(());
+            }
+            Err(e) => return Err(format!("stat gitignore {}: {e}", p.display())),
+        }
+
+        let mut b = GitignoreBuilder::new(dir);
+        b.add(&p);
+        let gi = b
+            .build()
+            .map_err(|e| format!("parse .gitignore {}: {e}", p.display()))?;
+        self.matchers.insert(dir.to_path_buf(), gi);
+        Ok(())
+    }
+
+    fn decision_from_matchers(
+        &self,
+        active_dirs: &[PathBuf],
+        abs_path: &Path,
+        is_dir: bool,
+    ) -> Option<GitignoreDecision> {
+        let mut out: Option<GitignoreDecision> = None;
+        for d in active_dirs {
+            let Some(gi) = self.matchers.get(d) else {
+                continue;
+            };
+            match gi.matched_path_or_any_parents(abs_path, is_dir) {
+                ignore::Match::Ignore(glob) => {
+                    out = Some(GitignoreDecision::from_glob(
+                        GitignoreDecisionKind::Ignore,
+                        glob,
+                    ));
+                }
+                ignore::Match::Whitelist(glob) => {
+                    out = Some(GitignoreDecision::from_glob(
+                        GitignoreDecisionKind::Whitelist,
+                        glob,
+                    ));
+                }
+                ignore::Match::None => {}
+            }
+        }
+        out
+    }
+
+    fn decision_for_rel(
+        &mut self,
+        rel: &Path,
+        is_dir: bool,
+    ) -> Result<Option<GitignoreDecision>, String> {
+        // Avoid borrowing `self.root` immutably while we mutate caches.
+        let root = self.root.clone();
+        let abs_target = root.join(rel);
+
+        let mut active_dirs: Vec<PathBuf> = Vec::new();
+
+        // Root is always "entered".
+        self.ensure_dir_loaded(&root)?;
+        if self.matchers.contains_key(&root) {
+            active_dirs.push(root.clone());
+        }
+
+        let parent_rel = rel.parent().unwrap_or_else(|| Path::new(""));
+        let mut cur = root;
+        for comp in parent_rel.components() {
+            cur.push(comp.as_os_str());
+
+            // If a directory is ignored, git will not traverse into it, so `.gitignore`
+            // files inside it cannot whitelist descendants.
+            if let Some(dec) = self.decision_from_matchers(&active_dirs, &cur, true) {
+                if dec.kind == GitignoreDecisionKind::Ignore {
+                    return Ok(Some(dec));
+                }
+            }
+
+            // Enter directory and load its `.gitignore` rules for matching descendants.
+            self.ensure_dir_loaded(&cur)?;
+            if self.matchers.contains_key(&cur) {
+                active_dirs.push(cur.clone());
+            }
+        }
+
+        Ok(self.decision_from_matchers(&active_dirs, &abs_target, is_dir))
+    }
+
+    fn format_reason(&self, dec: &GitignoreDecision) -> String {
+        let src = dec
+            .from
+            .as_deref()
+            .and_then(|p| p.strip_prefix(&self.root).ok())
+            .map(path_to_posix_string)
+            .unwrap_or_else(|| ".gitignore".to_string());
+        match dec.kind {
+            GitignoreDecisionKind::Ignore => {
+                format!("ignored by .gitignore ({src}): {}", dec.pattern)
+            }
+            GitignoreDecisionKind::Whitelist => {
+                format!("whitelisted by .gitignore ({src}): {}", dec.pattern)
+            }
+        }
+    }
+}
+
+fn load_gitignore_rules(root: &Path, enabled: bool) -> Result<Option<GitignoreRules>, String> {
     if !enabled {
         return Ok(None);
     }
-
-    let p = root.join(".gitignore");
-    match std::fs::metadata(&p) {
-        Ok(m) => {
-            if !m.is_file() {
-                return Ok(None);
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(format!("stat gitignore {}: {e}", p.display())),
-    }
-
-    let mut b = GitignoreBuilder::new(root);
-    b.add(p);
-    b.build()
-        .map(Some)
-        .map_err(|e| format!("parse .gitignore: {e}"))
+    Ok(Some(GitignoreRules::new(root.to_path_buf())))
 }
 
 fn glob_match_index(exclude_set: &GlobSet, rel_str: &str, is_dir: bool) -> Option<usize> {
@@ -3878,31 +4025,38 @@ fn is_ignored_by_globs(exclude_set: &GlobSet, rel_str: &str, is_dir: bool) -> bo
 
 fn is_ignored_path(
     exclude_set: &GlobSet,
-    gitignore: Option<&Gitignore>,
+    gitignore: Option<&mut GitignoreRules>,
     rel: &Path,
     rel_str: &str,
     is_dir: bool,
-) -> bool {
+) -> Result<bool, String> {
     if is_ignored_by_globs(exclude_set, rel_str, is_dir) {
-        return true;
+        return Ok(true);
     }
 
     let Some(gi) = gitignore else {
-        return false;
+        return Ok(false);
     };
 
-    gi.matched_path_or_any_parents(rel, is_dir).is_ignore()
+    let dec = gi.decision_for_rel(rel, is_dir)?;
+    Ok(matches!(
+        dec,
+        Some(GitignoreDecision {
+            kind: GitignoreDecisionKind::Ignore,
+            ..
+        })
+    ))
 }
 
 fn ignored_reason(
     exclude_set: &GlobSet,
     patterns: &[String],
     ignore_file_patterns_len: usize,
-    gitignore: Option<&Gitignore>,
+    gitignore: Option<&mut GitignoreRules>,
     rel: &Path,
     rel_str: &str,
     is_dir: bool,
-) -> Option<String> {
+) -> Result<Option<String>, String> {
     if let Some(idx) = glob_match_index(exclude_set, rel_str, is_dir) {
         let pat = patterns.get(idx).map(String::as_str).unwrap_or("<unknown>");
         let src = if idx < ignore_file_patterns_len {
@@ -3910,22 +4064,15 @@ fn ignored_reason(
         } else {
             "exclude"
         };
-        return Some(format!("ignored by {src}: {pat}"));
+        return Ok(Some(format!("ignored by {src}: {pat}")));
     }
 
     let Some(gi) = gitignore else {
-        return None;
+        return Ok(None);
     };
 
-    match gi.matched_path_or_any_parents(rel, is_dir) {
-        ignore::Match::Ignore(glob) => Some(format!("ignored by .gitignore: {}", glob.original())),
-        // Whitelist isn't an ignore, but we keep this branch to make debugging easier if we ever
-        // call this helper in other contexts.
-        ignore::Match::Whitelist(glob) => {
-            Some(format!("whitelisted by .gitignore: {}", glob.original()))
-        }
-        ignore::Match::None => None,
-    }
+    let dec = gi.decision_for_rel(rel, is_dir)?;
+    Ok(dec.as_ref().map(|d| gi.format_reason(d)))
 }
 
 fn load_ignore_patterns(root: &Path, ignore_file: Option<PathBuf>) -> Result<Vec<String>, String> {
@@ -4183,7 +4330,7 @@ fn chunk_file(data: &[u8]) -> Vec<ChunkRef> {
 mod tests {
     use super::{
         apply_default_excludes_if_needed, build_excludes, default_config_root_from_env,
-        is_ignored_path, load_root_gitignore, render_launchd_plist_scheduled,
+        is_ignored_path, load_gitignore_rules, render_launchd_plist_scheduled,
         render_systemd_user_oneshot_unit, render_systemd_user_timer, render_systemd_user_unit,
         resolve_restore_conflict_path, summarize_http_body, validate_profile_name,
         RestoreConflictPolicy,
@@ -4339,10 +4486,20 @@ mod tests {
     }
 
     #[test]
-    fn load_root_gitignore_is_none_when_disabled_or_missing() {
+    fn load_gitignore_rules_disabled_returns_none_and_missing_has_no_effect() {
         let root = mk_tmp_dir("gitignore_missing");
-        assert!(load_root_gitignore(&root, false).unwrap().is_none());
-        assert!(load_root_gitignore(&root, true).unwrap().is_none());
+        assert!(load_gitignore_rules(&root, false).unwrap().is_none());
+
+        let mut gi = load_gitignore_rules(&root, true).unwrap().unwrap();
+        let exclude_set = build_excludes(&Vec::<String>::new()).unwrap();
+        assert!(!is_ignored_path(
+            &exclude_set,
+            Some(&mut gi),
+            Path::new("file.txt"),
+            "file.txt",
+            false
+        )
+        .unwrap());
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -4351,38 +4508,103 @@ mod tests {
         let root = mk_tmp_dir("gitignore_rules");
         std::fs::write(root.join(".gitignore"), "target/\n*.log\n!keep.log\n").unwrap();
 
-        let gi = load_root_gitignore(&root, true).unwrap().unwrap();
+        let mut gi = load_gitignore_rules(&root, true).unwrap().unwrap();
         let exclude_set = build_excludes(&Vec::<String>::new()).unwrap();
 
         assert!(is_ignored_path(
             &exclude_set,
-            Some(&gi),
+            Some(&mut gi),
             Path::new("target"),
             "target",
             true
-        ));
+        )
+        .unwrap());
         assert!(is_ignored_path(
             &exclude_set,
-            Some(&gi),
+            Some(&mut gi),
             Path::new("target/app.bin"),
             "target/app.bin",
             false
-        ));
+        )
+        .unwrap());
 
         assert!(is_ignored_path(
             &exclude_set,
-            Some(&gi),
+            Some(&mut gi),
             Path::new("debug.log"),
             "debug.log",
             false
-        ));
+        )
+        .unwrap());
         assert!(!is_ignored_path(
             &exclude_set,
-            Some(&gi),
+            Some(&mut gi),
             Path::new("keep.log"),
             "keep.log",
             false
-        ));
+        )
+        .unwrap());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn nested_gitignore_can_whitelist_over_parent_ignore() {
+        let root = mk_tmp_dir("gitignore_nested");
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        std::fs::create_dir_all(root.join("b")).unwrap();
+        std::fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+        std::fs::write(root.join("a/.gitignore"), "!keep.log\n").unwrap();
+
+        let mut gi = load_gitignore_rules(&root, true).unwrap().unwrap();
+        let exclude_set = build_excludes(&Vec::<String>::new()).unwrap();
+
+        assert!(!is_ignored_path(
+            &exclude_set,
+            Some(&mut gi),
+            Path::new("a/keep.log"),
+            "a/keep.log",
+            false
+        )
+        .unwrap());
+        assert!(is_ignored_path(
+            &exclude_set,
+            Some(&mut gi),
+            Path::new("a/debug.log"),
+            "a/debug.log",
+            false
+        )
+        .unwrap());
+        assert!(is_ignored_path(
+            &exclude_set,
+            Some(&mut gi),
+            Path::new("b/keep.log"),
+            "b/keep.log",
+            false
+        )
+        .unwrap());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn gitignore_inside_ignored_directory_cannot_whitelist_descendants() {
+        let root = mk_tmp_dir("gitignore_ignored_dir");
+        std::fs::create_dir_all(root.join("ignored")).unwrap();
+        std::fs::write(root.join(".gitignore"), "ignored/\n").unwrap();
+        std::fs::write(root.join("ignored/.gitignore"), "!keep.txt\n").unwrap();
+
+        let mut gi = load_gitignore_rules(&root, true).unwrap().unwrap();
+        let exclude_set = build_excludes(&Vec::<String>::new()).unwrap();
+
+        assert!(is_ignored_path(
+            &exclude_set,
+            Some(&mut gi),
+            Path::new("ignored/keep.txt"),
+            "ignored/keep.txt",
+            false
+        )
+        .unwrap());
 
         std::fs::remove_dir_all(&root).unwrap();
     }

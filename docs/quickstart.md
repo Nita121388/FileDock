@@ -73,7 +73,7 @@ Optional: add a `.filedockignore` file in the root folder (one glob per line, `#
 **/node_modules/**
 ```
 
-Optional: also respect a root `.gitignore` (gitignore-style patterns) by passing `--respect-gitignore`:
+Optional: also respect `.gitignore` (gitignore-style patterns) by passing `--respect-gitignore`:
 
 ```bash
 cargo run -p filedock -- push-folder \
@@ -83,7 +83,7 @@ cargo run -p filedock -- push-folder \
   --respect-gitignore
 ```
 
-Current scope: only the root `.gitignore` is read (nested `.gitignore` files are not yet supported).
+This reads `.gitignore` files under the folder root (nested `.gitignore` files are supported).
 
 Optional: run a simple periodic backup loop (runs `push-folder`, sleeps, repeats):
 
